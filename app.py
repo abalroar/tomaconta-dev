@@ -702,3 +702,4 @@ elif menu == "scatter plot":
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 st.markdown("---")
+st.caption("desenvolvido em 2026 por matheus prates, cfa")
