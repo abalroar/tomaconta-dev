@@ -917,7 +917,7 @@ elif menu == "Scatter Plot":
                 mode='markers',
                 name=instituicao,
                 marker=dict(size=marker_size, color=cor, opacity=1.0, line=dict(width=1, color='white')),
-                hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}{format_x["ticksuffix"]}<br>{var_y}: %{{y}}{format_y["ticksuffix"]}<extra></extra>'
+                hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x:{format_x["tickformat"]}}}{format_x["ticksuffix"]}<br>{var_y}: %{{y:{format_y["tickformat"]}}}{format_y["ticksuffix"]}<extra></extra>'
             ))
 
         fig_scatter.update_layout(
