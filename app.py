@@ -2,14 +2,59 @@ import streamlit as st
 import pandas as pd
 import pickle
 import os
+import requests
+import plotly.express as px
+import plotly.graph_objects as go
+from pathlib import Path
 from datetime import datetime
 from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, carregar_cores_aliases
 
-st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
+
+# CSS customizado inspirado no StockPeers
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 3rem;
+        font-weight: 700;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 0.5rem;
+    }
+    .sub-header {
+        font-size: 1.2rem;
+        color: #666;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+    }
+    .stMetric {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 2rem;
+        font-weight: 700;
+    }
+    .reportview-container .main .block-container {
+        padding-top: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 CACHE_FILE = "data/dados_cache.pkl"
 CACHE_INFO = "data/cache_info.txt"
 ALIASES_PATH = "data/Aliases.xlsx"
+CACHE_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/dados_cache.pkl"
+CACHE_INFO_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/cache_info.txt"
 
 def salvar_cache(dados_periodos, periodo_info):
     os.makedirs("data", exist_ok=True)
@@ -37,10 +82,81 @@ def carregar_aliases():
         return pd.read_excel(ALIASES_PATH)
     return None
 
-st.markdown('<h1 style="text-align: center; color: #003366;">👁️ Fica de Olho</h1>', unsafe_allow_html=True)
-st.markdown('<p style="text-align: center; color: #666;">Dashboard de Análise de Instituições Financeiras</p>', unsafe_allow_html=True)
+def baixar_cache_inicial():
+    """Baixa cache do GitHub Releases se não existir localmente"""
+    cache_path = Path(CACHE_FILE)
+    
+    if not cache_path.exists():
+        try:
+            with st.spinner("🔄 Carregando dados do GitHub (10MB)..."):
+                r = requests.get(CACHE_URL, timeout=120)
+                if r.status_code == 200:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_bytes(r.content)
+                    
+                    r_info = requests.get(CACHE_INFO_URL, timeout=30)
+                    if r_info.status_code == 200:
+                        Path(CACHE_INFO).write_text(r_info.text)
+                    
+                    return True
+                else:
+                    st.warning(f"⚠️ Cache não encontrado (HTTP {r.status_code})")
+                    return False
+        except Exception as e:
+            st.error(f"❌ Erro ao baixar cache: {e}")
+            return False
+    return True
 
-# CARREGAR ALIASES AUTOMATICAMENTE (UMA VEZ)
+def criar_grafico_evolucao(df, top_n=5):
+    """Cria gráfico de evolução temporal das maiores instituições"""
+    top_bancos = df.groupby('Instituição')['Carteira de Crédito'].mean().nlargest(top_n).index
+    df_filtered = df[df['Instituição'].isin(top_bancos)].copy()
+    
+    fig = px.line(df_filtered, x='Período', y='Carteira de Crédito', 
+                  color='Instituição', 
+                  title=f'Evolução da Carteira de Crédito - TOP {top_n}',
+                  labels={'Carteira de Crédito': 'Carteira (R$ bilhões)', 'Período': 'Trimestre'})
+    
+    fig.update_layout(
+        height=400,
+        hovermode='x unified',
+        plot_bgcolor='#f8f9fa',
+        paper_bgcolor='white',
+        font=dict(size=12)
+    )
+    
+    fig.update_traces(line=dict(width=3))
+    fig.update_yaxis(tickformat='.1f')
+    
+    return fig
+
+def criar_grafico_roe_basileia(df, top_n=15):
+    """Cria scatter plot ROE vs Basileia"""
+    ultimo_periodo = df['Período'].max()
+    df_ultimo = df[df['Período'] == ultimo_periodo].nlargest(top_n, 'Carteira de Crédito')
+    
+    fig = px.scatter(df_ultimo, x='Índice de Basileia', y='ROE An. (%)', 
+                     size='Carteira de Crédito', color='Instituição',
+                     hover_data=['Alavancagem'],
+                     title=f'ROE vs Basileia - {ultimo_periodo}',
+                     labels={'ROE An. (%)': 'ROE Anualizado (%)', 'Índice de Basileia': 'Índice de Basileia (%)'})
+    
+    fig.update_layout(
+        height=450,
+        plot_bgcolor='#f8f9fa',
+        paper_bgcolor='white',
+        showlegend=False
+    )
+    
+    fig.update_traces(marker=dict(line=dict(width=1, color='white')))
+    
+    return fig
+
+# Header
+st.markdown('<p class="main-header">👁️ Fica de Olho</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
+
+# CARREGAR ALIASES AUTOMATICAMENTE
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
     if df_aliases is not None:
@@ -49,40 +165,42 @@ if 'df_aliases' not in st.session_state:
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
 
-# CARREGAR CACHE AUTOMATICAMENTE (UMA VEZ)
+# CARREGAR CACHE COM DOWNLOAD DO GITHUB
 if 'dados_periodos' not in st.session_state:
+    baixar_cache_inicial()
     dados_cache = carregar_cache()
     if dados_cache:
         st.session_state['dados_periodos'] = dados_cache
 
+# SIDEBAR
 with st.sidebar:
-    st.header("⚙️ Configurações")
+    st.image("https://img.icons8.com/fluency/96/000000/financial-analytics.png", width=80)
+    st.title("⚙️ Controle")
     
-    # Mostrar status dos aliases
+    # Status
     if 'df_aliases' in st.session_state:
-        st.success(f"✅ {len(st.session_state['df_aliases'])} aliases carregados")
+        st.success(f"✅ {len(st.session_state['df_aliases'])} aliases")
     else:
-        st.warning("⚠️ Aliases não encontrados")
+        st.error("❌ Aliases não encontrados")
     
-    # Mostrar status do cache
+    # Cache info
     info_cache = ler_info_cache()
     if info_cache:
-        with st.expander("💾 Dados em Cache"):
+        with st.expander("💾 Cache"):
             st.text(info_cache)
-            if st.button("🗑️ Limpar Cache", type="secondary", use_container_width=True):
+            if st.button("🗑️ Limpar", use_container_width=True):
                 if os.path.exists(CACHE_FILE):
                     os.remove(CACHE_FILE)
                 if os.path.exists(CACHE_INFO):
                     os.remove(CACHE_INFO)
                 if 'dados_periodos' in st.session_state:
                     del st.session_state['dados_periodos']
-                st.success("Cache limpo!")
                 st.rerun()
     
     st.divider()
     
-    # Upload manual opcional
-    uploaded_file = st.file_uploader("📤 Substituir Aliases (opcional)", type=['xlsx'])
+    # Upload opcional
+    uploaded_file = st.file_uploader("📤 Upload Aliases", type=['xlsx'], label_visibility="collapsed")
     
     if uploaded_file:
         df_aliases = pd.read_excel(uploaded_file)
@@ -90,23 +208,23 @@ with st.sidebar:
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
-        st.success(f"✅ {len(df_aliases)} aliases carregados do upload")
+        st.success("✅ Aliases atualizados")
     
     st.divider()
     
-    # Seção de extração
+    # Extração
     st.subheader("📅 Atualizar Dados")
     
     col1, col2 = st.columns(2)
     with col1:
-        ano_i = st.selectbox("Ano Inicial", range(2015,2027), index=8)
-        mes_i = st.selectbox("Trim. Inicial", ['03','06','09','12'])
+        ano_i = st.selectbox("Ano", range(2015,2027), index=8, key="ano_i")
+        mes_i = st.selectbox("Trim", ['03','06','09','12'], key="mes_i")
     with col2:
-        ano_f = st.selectbox("Ano Final", range(2015,2027), index=10)
-        mes_f = st.selectbox("Trim. Final", ['03','06','09','12'], index=2)
+        ano_f = st.selectbox("Ano", range(2015,2027), index=10, key="ano_f")
+        mes_f = st.selectbox("Trim", ['03','06','09','12'], index=2, key="mes_f")
     
     if 'dict_aliases' in st.session_state:
-        if st.button("🚀 Extrair Novos Dados", type="primary", use_container_width=True):
+        if st.button("🚀 Extrair", type="primary", use_container_width=True):
             periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
             progress_bar = st.progress(0)
             status = st.empty()
@@ -123,99 +241,159 @@ with st.sidebar:
             
             progress_bar.empty()
             status.empty()
-            st.success(f"✅ {len(dados)} períodos extraídos e salvos!")
+            st.success(f"✅ {len(dados)} períodos!")
             st.rerun()
     else:
-        st.warning("⚠️ Carregue os aliases primeiro")
+        st.warning("⚠️ Carregue aliases")
+    
+    st.divider()
+    st.caption("💡 Use o menu acima para acessar dashboards")
 
+# CONTEÚDO PRINCIPAL
 if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
     df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
-    st.success("✅ Dados carregados! Use o menu lateral ← para acessar os dashboards")
     
-    st.subheader("📊 Visão Geral")
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Instituições", df['Instituição'].nunique())
-    c2.metric("Carteira Total", f"R$ {df['Carteira de Crédito'].sum()/1e9:.1f}B")
-    c3.metric("ROE Médio", f"{df['ROE An. (%)'].mean()*100:.1f}%")
-    c4.metric("Basileia Média", f"{df['Índice de Basileia'].mean():.1f}%")
+    # Calcular variações
+    periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+    ultimo = periodos[-1]
+    penultimo = periodos[-2] if len(periodos) > 1 else ultimo
     
-    st.subheader("📋 TOP 10 Bancos")
-    ultimo = max(st.session_state['dados_periodos'].keys())
-    top = st.session_state['dados_periodos'][ultimo].nlargest(10, 'Carteira de Crédito')[['Instituição','Carteira de Crédito','ROE An. (%)','Alavancagem']].copy()
-    top['Carteira de Crédito'] = top['Carteira de Crédito'].apply(lambda x: f"R$ {x/1e9:.2f}B")
-    top['ROE An. (%)'] = top['ROE An. (%)'].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
-    top['Alavancagem'] = top['Alavancagem'].apply(lambda x: f"{x:.2f}x" if pd.notna(x) else "-")
-    st.dataframe(top, use_container_width=True, hide_index=True)
+    df_ultimo = df[df['Período'] == ultimo]
+    df_penultimo = df[df['Período'] == penultimo]
     
-    periodos_disponiveis = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
-    st.info(f"📅 Períodos disponíveis: {periodos_disponiveis[0]} até {periodos_disponiveis[-1]} ({len(periodos_disponiveis)} trimestres)")
-else:
+    carteira_atual = df_ultimo['Carteira de Crédito'].sum()
+    carteira_anterior = df_penultimo['Carteira de Crédito'].sum()
+    delta_carteira = ((carteira_atual / carteira_anterior) - 1) * 100 if carteira_anterior > 0 else 0
+    
+    roe_atual = df_ultimo['ROE An. (%)'].mean()
+    roe_anterior = df_penultimo['ROE An. (%)'].mean()
+    delta_roe = (roe_atual - roe_anterior) * 100 if pd.notna(roe_anterior) else 0
+    
+    # KPIs com delta
+    st.markdown("### 📊 Indicadores Principais")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "🏦 Instituições", 
+            f"{df_ultimo['Instituição'].nunique()}", 
+            f"{df_ultimo['Instituição'].nunique() - df_penultimo['Instituição'].nunique()}"
+        )
+    
+    with col2:
+        st.metric(
+            "💰 Carteira Total", 
+            f"R$ {carteira_atual/1e9:.1f}B",
+            f"{delta_carteira:+.1f}%"
+        )
+    
+    with col3:
+        st.metric(
+            "📈 ROE Médio", 
+            f"{roe_atual*100:.1f}%",
+            f"{delta_roe:+.1f} p.p."
+        )
+    
+    with col4:
+        st.metric(
+            "🛡️ Basileia Média", 
+            f"{df_ultimo['Índice de Basileia'].mean():.1f}%",
+            f"{df_ultimo['Índice de Basileia'].mean() - df_penultimo['Índice de Basileia'].mean():+.1f} p.p."
+        )
+    
     st.markdown("---")
     
-    col1, col2 = st.columns([2,1])
+    # Tabs para organizar conteúdo
+    tab1, tab2, tab3 = st.tabs(["📋 Rankings", "📈 Evolução Temporal", "🎯 Análise Risco-Retorno"])
+    
+    with tab1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🏆 TOP 10 por Carteira de Crédito")
+            top10 = df_ultimo.nlargest(10, 'Carteira de Crédito')[['Instituição','Carteira de Crédito']].copy()
+            top10['Carteira de Crédito'] = top10['Carteira de Crédito'].apply(lambda x: f"R$ {x/1e9:.2f}B")
+            st.dataframe(top10, use_container_width=True, hide_index=True)
+        
+        with col2:
+            st.subheader("💎 TOP 10 por ROE")
+            top_roe = df_ultimo.nlargest(10, 'ROE An. (%)')[['Instituição','ROE An. (%)']].copy()
+            top_roe['ROE An. (%)'] = top_roe['ROE An. (%)'].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
+            st.dataframe(top_roe, use_container_width=True, hide_index=True)
+    
+    with tab2:
+        st.plotly_chart(criar_grafico_evolucao(df, top_n=5), use_container_width=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("📅 Períodos Disponíveis", f"{len(periodos)}")
+        with col2:
+            st.metric("📆 Cobertura", f"{periodos[0]} → {periodos[-1]}")
+    
+    with tab3:
+        st.plotly_chart(criar_grafico_roe_basileia(df, top_n=15), use_container_width=True)
+        
+        st.info("💡 **Interpretação:** Bancos no quadrante superior direito possuem alto ROE e alta capitalização (baixo risco)")
+
+else:
+    # HOMEPAGE quando não há dados
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.info("🔄 **Carregando dados automaticamente do GitHub...**")
+        st.markdown("#### Por favor, aguarde alguns segundos e recarregue a página")
+        
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
-        ### 📊 Sobre o Fica de Olho
+        ### 🎯 O que é o Fica de Olho?
         
-        O **Fica de Olho** é uma ferramenta de análise financeira que extrai, processa e visualiza dados 
-        de instituições financeiras brasileiras de forma automatizada e interativa.
+        Plataforma de **análise financeira automatizada** que integra dados do Banco Central do Brasil 
+        para análise de instituições financeiras.
         
-        #### 🎯 Funcionalidades
+        #### Recursos Principais
         
-        - **Extração Automatizada**: Integração direta com a API IF.data do Banco Central do Brasil
-        - **Análise Temporal**: Acompanhamento de métricas financeiras ao longo de múltiplos trimestres
-        - **Visualização Interativa**: Gráficos de dispersão customizáveis com filtros dinâmicos
-        - **Classificação Personalizada**: Sistema de aliases para renomear e categorizar instituições
-        - **Métricas Calculadas**: ROE anualizado, alavancagem, funding gap, market share e índices de risco/retorno
-        
-        #### 📈 Dados Utilizados
-        
-        Todos os dados são extraídos da **API IF.data** do Banco Central do Brasil, incluindo:
-        
-        - Carteira de Crédito Classificada
-        - Patrimônio Líquido e Lucro Líquido
-        - Índice de Basileia
-        - Captações e Ativo Total
-        - Cadastro de Instituições Financeiras
-        
-        #### 🚀 Como Começar
-        
-        1. Configure o período de análise na barra lateral
-        2. Clique em **"Extrair Novos Dados"** para buscar informações do BCB
-        3. Acesse os dashboards no menu lateral após a extração
-        4. Personalize visualizações e exporte análises
+        - 📊 **Dashboards interativos** com métricas financeiras
+        - 📈 **Análise temporal** de carteiras e indicadores
+        - 🎯 **Comparação entre pares** com scatter plots
+        - 💾 **Cache inteligente** para carregamento rápido
+        - 🏷️ **Sistema de aliases** customizável
         """)
     
     with col2:
-        st.info("""
-        ### 💡 Primeira Vez?
-        
-        **Passo 1:** Configure as datas na barra lateral ←
-        
-        **Passo 2:** Clique em "🚀 Extrair Novos Dados"
-        
-        **Passo 3:** Aguarde o processamento (30-60 segundos)
-        
-        **Passo 4:** Explore os dashboards!
-        """)
-        
-        st.markdown("---")
-        
         st.markdown("""
-        ### 📚 Recursos Técnicos
+        ### 📈 Dados Disponíveis
         
-        - **Python 3.10+**
-        - **Streamlit** (interface)
-        - **Pandas** (processamento)
-        - **Plotly** (visualizações)
-        - **API BCB Olinda**
+        **Fonte:** API IF.data (Banco Central)
+        
+        - Carteira de Crédito Classificada
+        - Patrimônio Líquido
+        - Lucro Líquido
+        - Índice de Basileia
+        - Captações e Ativo Total
+        - ROE Anualizado
+        - Alavancagem
+        - Funding Gap
+        - Market Share
         """)
     
     st.markdown("---")
     st.markdown("""
-    <div style='text-align: center; padding: 20px; color: #666; font-size: 14px;'>
-        Desenvolvido em 2026 por <strong>Matheus Prates, CFA</strong><br>
-        Ferramenta de código aberto para análise do sistema financeiro brasileiro
+    <div style='text-align: center; padding: 20px;'>
+        <p style='font-size: 1.1rem; color: #666;'>
+            Desenvolvido em <strong>2026</strong> por <strong style='color: #1f77b4;'>Matheus Prates, CFA</strong>
+        </p>
+        <p style='color: #999; font-size: 0.9rem;'>
+            Ferramenta open-source para análise do sistema financeiro brasileiro 🇧🇷
+        </p>
     </div>
     """, unsafe_allow_html=True)
+
+# Footer
+st.markdown("---")
+st.caption("💡 **Dica:** Use os dashboards no menu lateral para análises detalhadas")
