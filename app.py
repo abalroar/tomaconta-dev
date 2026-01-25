@@ -680,8 +680,7 @@ if menu == "Sobre":
     st.markdown("""
     ## sobre a plataforma
 
-    o **fica de olho** é uma plataforma de análise financeira que automatiza a extração, processamento e visualização 
-    de dados de instituições financeiras brasileiras, oferecendo insights comparativos e históricos em tempo real.
+    o fica de olho é uma plataforma de análise financeira que automatiza a extração, processamento e visualização de dados de instituições financeiras brasileiras, oferecendo insights comparativos e históricos em tempo real.
     """)
 
     col1, col2 = st.columns(2)
