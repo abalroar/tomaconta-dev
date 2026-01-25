@@ -210,11 +210,26 @@ if 'dados_periodos' not in st.session_state:
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/000000/financial-analytics.png", width=80)
     
-    # Menu de navegação - SELECTBOX ao invés de RADIO
-    menu = st.selectbox(
-        "📍 Navegação",
-        ["🎯 Scatter Plot", "🏦 Análise Individual", "ℹ️ Sobre"]
-    )
+    st.title("📍 Navegação")
+    
+    # Inicializar menu padrão como "Sobre"
+    if 'menu_atual' not in st.session_state:
+        st.session_state['menu_atual'] = "ℹ️ Sobre"
+    
+    # Botões de navegação
+    if st.button("ℹ️ Sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "ℹ️ Sobre" else "secondary"):
+        st.session_state['menu_atual'] = "ℹ️ Sobre"
+        st.rerun()
+    
+    if st.button("🏦 Análise Individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "🏦 Análise Individual" else "secondary"):
+        st.session_state['menu_atual'] = "🏦 Análise Individual"
+        st.rerun()
+    
+    if st.button("🎯 Scatter Plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "🎯 Scatter Plot" else "secondary"):
+        st.session_state['menu_atual'] = "🎯 Scatter Plot"
+        st.rerun()
+    
+    menu = st.session_state['menu_atual']
     
     st.divider()
     st.title("⚙️ Controle")
@@ -323,7 +338,7 @@ if menu == "ℹ️ Sobre":
         #### 🚀 Como Começar
         
         1. Os dados já estão carregados automaticamente do GitHub
-        2. Acesse o **Scatter Plot** no menu lateral
+        2. Acesse **Análise Individual** ou **Scatter Plot** no menu lateral
         3. Para atualizar dados, configure período e clique em "Extrair Novos Dados"
         4. Personalize visualizações usando os filtros disponíveis
         """)
@@ -334,7 +349,7 @@ if menu == "ℹ️ Sobre":
         
         **Aguarde:** Os dados estão sendo baixados automaticamente...
         
-        **Depois:** Clique em "Scatter Plot" no menu lateral
+        **Depois:** Explore as análises no menu lateral
         
         **Atualizar:** Configure período e clique em "Extrair Novos Dados"
         
