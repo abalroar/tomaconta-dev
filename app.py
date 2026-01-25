@@ -33,10 +33,21 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
     /* ============================================================
-       ESCONDE HEADER MAS PRESERVA FUNCIONALIDADES ESSENCIAIS
+       ESCONDE HEADER MAS PRESERVA BOTÃO DE TOGGLE
        ============================================================ */
     .stApp > header {
         background-color: transparent !important;
+        height: auto !important;
+        min-height: 2.5rem !important;
+        overflow: visible !important;
+    }
+
+    /* Container pai do header - manter visível */
+    .stApp > header > div {
+        display: block !important;
+        visibility: visible !important;
+        height: auto !important;
+        overflow: visible !important;
     }
 
     [data-testid="stDecoration"] {
@@ -52,8 +63,15 @@ st.markdown("""
     /* ============================================================
        BOTÃO TOGGLE SIDEBAR - SEMPRE VISÍVEL E ACESSÍVEL
        Resolve: Problema 3 (sem forma de reabrir sidebar)
+
+       IMPORTANTE: Quando a sidebar fecha, o Streamlit move o botão
+       para dentro do header. Precisamos garantir que ele apareça
+       em AMBOS os estados (sidebar aberta e fechada).
        ============================================================ */
-    [data-testid="collapsedControl"] {
+
+    /* Estado: Sidebar FECHADA - botão aparece no header */
+    .stApp > header [data-testid="collapsedControl"],
+    .stApp [data-testid="collapsedControl"] {
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
@@ -61,7 +79,7 @@ st.markdown("""
         position: fixed !important;
         top: 0.75rem !important;
         left: 0.75rem !important;
-        z-index: 1000000 !important;
+        z-index: 1000001 !important;
         background-color: white !important;
         border-radius: 0.5rem !important;
         padding: 0.35rem !important;
@@ -70,10 +88,17 @@ st.markdown("""
         transition: box-shadow 0.2s ease !important;
     }
 
+    /* Estado: Sidebar ABERTA - botão dentro da sidebar (opcional, esconder) */
+    [data-testid="stSidebar"][aria-expanded="true"] [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+
+    /* Hover no botão */
     [data-testid="collapsedControl"]:hover {
         box-shadow: 0 4px 16px rgba(0,0,0,0.2) !important;
     }
 
+    /* Botão interno */
     [data-testid="collapsedControl"] button {
         background: transparent !important;
         border: none !important;
@@ -81,6 +106,13 @@ st.markdown("""
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
+        cursor: pointer !important;
+    }
+
+    /* Garantir que o botão tenha tamanho clicável */
+    [data-testid="collapsedControl"] button {
+        min-width: 2rem !important;
+        min-height: 2rem !important;
     }
 
     /* ============================================================
