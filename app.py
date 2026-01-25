@@ -11,22 +11,35 @@ from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, car
 
 st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado
+# CSS customizado com fonte Inter
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    h1, h2, h3, h4, h5, h6, p, div, span, label {
+        font-family: 'Inter', sans-serif;
+    }
+    
     .main-header {
         font-size: 6rem;
-        font-weight: 700;
+        font-weight: 800;
         color: #1f77b4;
         text-align: center;
         margin-bottom: 0.5rem;
         line-height: 1.2;
+        font-family: 'Inter', sans-serif;
     }
     .sub-header {
         font-size: 2rem;
         color: #666;
         text-align: center;
         margin-bottom: 0.5rem;
+        font-family: 'Inter', sans-serif;
+        font-weight: 400;
     }
     .by-line {
         font-size: 1.2rem;
@@ -34,6 +47,8 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
         font-style: italic;
+        font-family: 'Inter', sans-serif;
+        font-weight: 300;
     }
     .stMetric {
         background-color: #f8f9fa;
@@ -44,6 +59,7 @@ st.markdown("""
     div[data-testid="stMetricValue"] {
         font-size: 2rem;
         font-weight: 700;
+        font-family: 'Inter', sans-serif;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -179,7 +195,7 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     # Configurar layout
     fig.update_layout(
-        title=dict(text=titulo, font=dict(size=12, color='#333')),
+        title=dict(text=titulo, font=dict(size=12, color='#333', family='Inter')),
         height=180,
         margin=dict(l=10, r=10, t=35, b=30),
         plot_bgcolor='#f8f9fa',
@@ -191,7 +207,8 @@ def criar_mini_grafico(df_banco, variavel, titulo):
             tickformat=tickformat,
             ticksuffix=suffix
         ),
-        hovermode='x'
+        hovermode='x',
+        font=dict(family='Inter')
     )
     
     return fig
@@ -561,7 +578,8 @@ elif menu == "🎯 Scatter Plot":
                 yaxis=dict(
                     tickformat=format_y['tickformat'],
                     ticksuffix=format_y['ticksuffix']
-                )
+                ),
+                font=dict(family='Inter')
             )
         else:
             fig_scatter = px.scatter(
@@ -590,7 +608,8 @@ elif menu == "🎯 Scatter Plot":
                     tickformat=format_y['tickformat'],
                     ticksuffix=format_y['ticksuffix'],
                     title=var_y
-                )
+                ),
+                font=dict(family='Inter')
             )
             
             fig_scatter.update_traces(marker=dict(line=dict(width=1, color='white')))
