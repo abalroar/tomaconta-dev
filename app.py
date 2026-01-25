@@ -11,7 +11,7 @@ from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, car
 
 st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado com fonte Source Sans 3
+# CSS customizado com fonte Source Sans 3 + FIX para labels bugados
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap');
@@ -23,6 +23,21 @@ st.markdown("""
     
     html, body, [class*="css"], div, span, p, label, input, select, textarea, button {
         font-family: 'Source Sans 3', sans-serif !important;
+    }
+    
+    /* FIX CRÍTICO: Ocultar labels de widgets que aparecem como texto solto */
+    [data-testid="stSidebar"] label[data-testid="stWidgetLabel"] {
+        display: none !important;
+    }
+    
+    /* FIX: Ocultar elementos de file uploader que aparecem fora de contexto */
+    [data-testid="stSidebar"] [data-testid="stFileUploader"] label {
+        display: none !important;
+    }
+    
+    /* FIX: Ocultar spans com classes internas do Streamlit que vazam texto */
+    [data-testid="stSidebar"] span[class*="st-"] {
+        line-height: normal !important;
     }
     
     /* Headers e títulos */
@@ -51,8 +66,8 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
     }
     
-    /* Selectbox, inputs */
-    .stSelectbox, .stTextInput, .stNumberInput, .stSlider {
+    /* Selectbox, inputs - OCULTAR LABELS FLUTUANTES */
+    .stSelectbox label, .stTextInput label, .stNumberInput label {
         font-family: 'Source Sans 3', sans-serif !important;
     }
     
@@ -226,17 +241,14 @@ def get_axis_format(variavel):
 
 def criar_mini_grafico(df_banco, variavel, titulo):
     """Cria mini gráfico para uma variável específica"""
-    # Ordenar cronologicamente por ano e trimestre
     df_sorted = df_banco.copy()
     df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
     df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
     df_sorted = df_sorted.sort_values(['ano', 'trimestre'])
     
-    # Determinar tipo de formatação
     vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
     
-    # Criar valores formatados para hover
     if variavel in vars_percentual:
         hover_values = df_sorted[variavel] * 100
         tickformat = '.2f'
@@ -250,10 +262,8 @@ def criar_mini_grafico(df_banco, variavel, titulo):
         tickformat = '.2f'
         suffix = ''
     
-    # Criar figura
     fig = go.Figure()
     
-    # Adicionar linha
     fig.add_trace(go.Scatter(
         x=df_sorted['Período'],
         y=hover_values,
@@ -264,7 +274,6 @@ def criar_mini_grafico(df_banco, variavel, titulo):
         hovertemplate='%{x}<br>%{y:' + tickformat + '}' + suffix + '<extra></extra>'
     ))
     
-    # Configurar layout
     fig.update_layout(
         title=dict(text=titulo, font=dict(size=12, color='#333', family='Source Sans 3')),
         height=180,
@@ -284,7 +293,7 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     return fig
 
-# Header com Logo ACIMA do título
+# Header com Logo
 st.markdown('<div class="logo-container">', unsafe_allow_html=True)
 if os.path.exists(LOGO_PATH):
     col1, col2, col3 = st.columns([1, 1, 1])
@@ -294,12 +303,12 @@ else:
     st.markdown('<p style="font-size: 150px; text-align: center;">👁️</p>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Títulos centralizados
+# Títulos
 st.markdown('<p class="main-header">Fica de Olho</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
 st.markdown('<p class="by-line">by Matheus Prates, CFA</p>', unsafe_allow_html=True)
 
-# CARREGAR ALIASES AUTOMATICAMENTE
+# CARREGAR ALIASES
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
     if df_aliases is not None:
@@ -308,7 +317,7 @@ if 'df_aliases' not in st.session_state:
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
 
-# CARREGAR CACHE COM DOWNLOAD DO GITHUB
+# CARREGAR CACHE
 if 'dados_periodos' not in st.session_state:
     baixar_cache_inicial()
     dados_cache = carregar_cache()
@@ -317,42 +326,55 @@ if 'dados_periodos' not in st.session_state:
 
 # SIDEBAR
 with st.sidebar:
-    st.title("Navegação")
+    st.markdown("### Navegação")
     
-    # Inicializar menu padrão como "Sobre"
     if 'menu_atual' not in st.session_state:
         st.session_state['menu_atual'] = "Sobre"
     
-    # Botões de navegação
-    if st.button("Sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Sobre" else "secondary"):
-        st.session_state['menu_atual'] = "Sobre"
-        st.rerun()
+    # Botões com label_visibility="collapsed" para evitar duplicação
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
     
-    if st.button("Análise Individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Análise Individual" else "secondary"):
-        st.session_state['menu_atual'] = "Análise Individual"
-        st.rerun()
+    with col_btn1:
+        if st.button("📘", key="btn_sobre", help="Sobre", use_container_width=True):
+            st.session_state['menu_atual'] = "Sobre"
+            st.rerun()
     
-    if st.button("Scatter Plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Scatter Plot" else "secondary"):
-        st.session_state['menu_atual'] = "Scatter Plot"
-        st.rerun()
+    with col_btn2:
+        if st.button("🏦", key="btn_analise", help="Análise Individual", use_container_width=True):
+            st.session_state['menu_atual'] = "Análise Individual"
+            st.rerun()
+    
+    with col_btn3:
+        if st.button("📊", key="btn_scatter", help="Scatter Plot", use_container_width=True):
+            st.session_state['menu_atual'] = "Scatter Plot"
+            st.rerun()
+    
+    # Labels abaixo dos botões
+    col_lbl1, col_lbl2, col_lbl3 = st.columns(3)
+    with col_lbl1:
+        st.caption("Sobre")
+    with col_lbl2:
+        st.caption("Análise")
+    with col_lbl3:
+        st.caption("Scatter")
     
     menu = st.session_state['menu_atual']
     
     st.divider()
-    st.title("Controle")
+    st.markdown("### Controle")
     
     # Status
     if 'df_aliases' in st.session_state:
-        st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
+        st.success(f"✓ {len(st.session_state['df_aliases'])} aliases")
     else:
-        st.error("Aliases não encontrados")
+        st.error("✗ Aliases não encontrados")
     
     # Cache info
     info_cache = ler_info_cache()
     if info_cache:
-        with st.expander("Informações do Cache"):
+        with st.expander("Cache"):
             st.text(info_cache)
-            if st.button("Limpar Cache", use_container_width=True):
+            if st.button("Limpar", key="limpar_cache", use_container_width=True):
                 if os.path.exists(CACHE_FILE):
                     os.remove(CACHE_FILE)
                 if os.path.exists(CACHE_INFO):
@@ -363,24 +385,19 @@ with st.sidebar:
     
     st.divider()
     
-    # REMOVIDO COMPLETAMENTE O FILE_UPLOADER
-    # Para fazer upload de aliases, atualize o arquivo data/Aliases.xlsx no repositório GitHub
-    
-    st.divider()
-    
     # Extração
-    st.subheader("Atualizar Dados")
+    st.markdown("### Atualizar Dados")
     
     col1, col2 = st.columns(2)
     with col1:
-        ano_i = st.selectbox("Ano Inicial", range(2015,2027), index=8, key="ano_i")
-        mes_i = st.selectbox("Trimestre Inicial", ['03','06','09','12'], key="mes_i")
+        ano_i = st.selectbox("Ano Inicial", range(2015,2027), index=8, key="ano_i", label_visibility="visible")
+        mes_i = st.selectbox("Trim. Inicial", ['03','06','09','12'], key="mes_i", label_visibility="visible")
     with col2:
-        ano_f = st.selectbox("Ano Final", range(2015,2027), index=10, key="ano_f")
-        mes_f = st.selectbox("Trimestre Final", ['03','06','09','12'], index=2, key="mes_f")
+        ano_f = st.selectbox("Ano Final", range(2015,2027), index=10, key="ano_f", label_visibility="visible")
+        mes_f = st.selectbox("Trim. Final", ['03','06','09','12'], index=2, key="mes_f", label_visibility="visible")
     
     if 'dict_aliases' in st.session_state:
-        if st.button("Extrair Dados", type="primary", use_container_width=True):
+        if st.button("Extrair", type="primary", use_container_width=True, key="btn_extrair"):
             periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
             progress_bar = st.progress(0)
             status = st.empty()
@@ -397,15 +414,14 @@ with st.sidebar:
             
             progress_bar.empty()
             status.empty()
-            st.success(f"{len(dados)} períodos extraídos com sucesso")
+            st.success(f"✓ {len(dados)} períodos")
             st.rerun()
     else:
-        st.warning("Carregue os aliases primeiro")
+        st.warning("Carregue aliases primeiro")
 
-# CONTEÚDO PRINCIPAL
+# CONTEÚDO
 if menu == "Sobre":
     st.markdown("---")
-    
     st.markdown("""
     ### Sobre o Fica de Olho
     
@@ -449,7 +465,7 @@ if menu == "Sobre":
     """)
     
     st.markdown("---")
-    st.markdown("**Desenvolvido em 2026 por Matheus Prates, CFA** | *Ferramenta de código aberto para análise do sistema financeiro brasileiro*")
+    st.markdown("**Desenvolvido em 2026 por Matheus Prates, CFA**")
 
 elif menu == "Análise Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
@@ -515,12 +531,11 @@ elif menu == "Análise Individual":
                                     fig = criar_mini_grafico(df_banco, var, var)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
-                st.warning("Nenhuma instituição encontrada nos dados")
+                st.warning("Nenhuma instituição encontrada")
         else:
-            st.warning("Dados incompletos ou vazios")
+            st.warning("Dados incompletos")
     else:
-        st.info("Carregando dados automaticamente do GitHub...")
-        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
+        st.info("Carregando dados...")
 
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
@@ -614,9 +629,7 @@ elif menu == "Scatter Plot":
         
         st.plotly_chart(fig_scatter, use_container_width=True)
     else:
-        st.info("Carregando dados automaticamente do GitHub...")
-        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
+        st.info("Carregando dados...")
 
-# Footer
 st.markdown("---")
 st.caption("Desenvolvido em 2026 por Matheus Prates, CFA")
