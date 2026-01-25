@@ -111,7 +111,8 @@ def formatar_valor(valor, variavel):
     elif variavel in vars_razao:
         return f"{valor:.2f}x"
     elif variavel in vars_monetarias:
-        return f"R$ {valor/1e6:.0f}M"
+        valor_mm = valor / 1e6
+        return f"R$ {valor_mm:,.0f}MM".replace(",", ".")
     else:
         return f"{valor:.2f}"
 
@@ -208,9 +209,6 @@ if 'dados_periodos' not in st.session_state:
 
 # SIDEBAR
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/000000/financial-analytics.png", width=80)
-    
-    st.title("📍 Navegação")
     
     # Inicializar menu padrão como "Sobre"
     if 'menu_atual' not in st.session_state:
