@@ -16,6 +16,15 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100;200;300;400;500;600;700&display=swap');
     
+    /* Esconder ícone de rerun chato */
+    button[kind="header"] {
+        display: none !important;
+    }
+    
+    [data-testid="stStatusWidget"] {
+        display: none !important;
+    }
+    
     /* Aplicar IBM Plex Sans em TODOS os elementos */
     * {
         font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
