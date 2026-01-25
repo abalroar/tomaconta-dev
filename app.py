@@ -8,29 +8,15 @@ import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
 from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, carregar_cores_aliases
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-import io
-from PIL import Image as PILImage
 
 st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado - REMOVIDO SELECTBOX PADRÃO
+# CSS customizado com fonte IBM Plex Sans (clean e thin como StockPeers)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100;200;300;400;500;600;700&display=swap');
     
-    /* Esconder selectbox e inputs padrão */
-    [data-testid="stSelectbox"],
-    .stSelectbox {
-        display: none !important;
-    }
-    
-    /* Esconder ícone de rerun */
+    /* Esconder ícone de rerun chato - VERSÃO AGRESSIVA */
     button[kind="header"],
     [data-testid="stStatusWidget"],
     [data-testid="stAppViewBlockContainer"] button[kind="header"],
@@ -46,13 +32,13 @@ st.markdown("""
         left: -9999px !important;
     }
     
-    /* Remover padding do topo */
+    /* Remover padding do topo da área principal */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 0rem !important;
     }
     
-    /* Fonte IBM Plex Sans globalmente */
+    /* Aplicar IBM Plex Sans em TODOS os elementos */
     * {
         font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     }
@@ -62,6 +48,7 @@ st.markdown("""
         font-weight: 300 !important;
     }
     
+    /* Headers e títulos */
     h1, h2, h3, h4, h5, h6 {
         font-family: 'IBM Plex Sans', sans-serif !important;
         font-weight: 500 !important;
@@ -116,88 +103,60 @@ st.markdown("""
         margin: 0 0 1.5rem 0;
     }
     
-    /* BOTÕES DE NAVEGAÇÃO CUSTOMIZADOS */
-    .nav-button {
-        width: 100%;
-        padding: 12px 16px;
-        margin: 6px 0;
-        border: none;
+    /* Botões */
+    button[kind="primary"], button[kind="secondary"], .stButton button {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 400 !important;
+    }
+    
+    /* Selectbox, inputs */
+    .stSelectbox, .stTextInput, .stNumberInput, .stSlider {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 300 !important;
+    }
+    
+    /* Métricas */
+    [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+    }
+    
+    [data-testid="stMetricLabel"] {
+        font-weight: 300 !important;
+    }
+    
+    [data-testid="stMetricValue"] {
+        font-weight: 400 !important;
+    }
+    
+    /* Markdown */
+    .stMarkdown, .stMarkdown * {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 300 !important;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 400 !important;
+    }
+    
+    /* Captions */
+    .stCaption {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 300 !important;
+    }
+    
+    .stMetric {
+        background-color: #f8f9fa;
+        padding: 15px;
         border-radius: 8px;
-        background-color: #f0f2f6;
-        color: #333;
-        font-size: 14px;
-        font-weight: 400;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-family: 'IBM Plex Sans', sans-serif;
-        text-align: left;
-        display: block;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    .nav-button:hover {
-        background-color: #e0e4ea;
-        transform: translateX(4px);
-    }
-    
-    .nav-button.active {
-        background-color: #1f77b4;
-        color: white;
-        font-weight: 500;
-    }
-    
-    /* BOTÕES DE PERÍODO */
-    .period-button {
-        padding: 8px 12px;
-        margin: 4px 2px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        background-color: #f8f9fa;
-        color: #333;
-        font-size: 12px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-family: 'IBM Plex Sans', sans-serif;
-    }
-    
-    .period-button:hover {
-        border-color: #1f77b4;
-        background-color: #e3f2fd;
-    }
-    
-    .period-button.active {
-        background-color: #1f77b4;
-        color: white;
-        border-color: #1f77b4;
-        font-weight: 500;
-    }
-    
-    /* BOTÕES DE BANCO */
-    .bank-button {
-        padding: 10px 14px;
-        margin: 4px 0;
-        border: none;
-        border-radius: 6px;
-        background-color: #f8f9fa;
-        color: #333;
-        font-size: 13px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-family: 'IBM Plex Sans', sans-serif;
-        width: 100%;
-        text-align: left;
-    }
-    
-    .bank-button:hover {
-        background-color: #e3f2fd;
-        border-left: 3px solid #1f77b4;
-        padding-left: 11px;
-    }
-    
-    .bank-button.active {
-        background-color: #1f77b4;
-        color: white;
-        font-weight: 500;
-        border-left: 3px solid #0d4a8f;
+    div[data-testid="stMetricValue"] {
+        font-size: 2rem;
+        font-weight: 400 !important;
+        font-family: 'IBM Plex Sans', sans-serif !important;
     }
     
     /* Cards de feature */
@@ -213,36 +172,7 @@ st.markdown("""
         color: #1f77b4;
         margin-bottom: 0.5rem;
     }
-    
-    /* Métrica */
-    .stMetric {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    div[data-testid="stMetricValue"] {
-        font-size: 2rem;
-        font-weight: 400 !important;
-        font-family: 'IBM Plex Sans', sans-serif !important;
-    }
 </style>
-
-<script>
-// Função para criar botões de navegação
-function setupNavButtons() {
-    const navButtons = document.querySelectorAll('.nav-button');
-    navButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            const menuValue = this.getAttribute('data-menu');
-            window.location.hash = '#' + menuValue;
-        });
-    });
-}
-
-document.addEventListener('DOMContentLoaded', setupNavButtons);
-</script>
 """, unsafe_allow_html=True)
 
 CACHE_FILE = "data/dados_cache.pkl"
@@ -279,6 +209,7 @@ def carregar_aliases():
     return None
 
 def baixar_cache_inicial():
+    """Baixa cache do GitHub Releases se não existir localmente"""
     cache_path = Path(CACHE_FILE)
     
     if not cache_path.exists():
@@ -303,6 +234,7 @@ def baixar_cache_inicial():
     return True
 
 def formatar_valor(valor, variavel):
+    """Formata valor de acordo com o tipo de variável"""
     if pd.isna(valor):
         return "N/A"
     
@@ -321,6 +253,7 @@ def formatar_valor(valor, variavel):
         return f"{valor:.2f}"
 
 def get_axis_format(variavel):
+    """Retorna formato e multiplicador para eixos do gráfico"""
     vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
     
@@ -332,6 +265,7 @@ def get_axis_format(variavel):
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
 def criar_mini_grafico(df_banco, variavel, titulo):
+    """Cria mini gráfico para uma variável específica"""
     df_sorted = df_banco.copy()
     df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
     df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
@@ -384,142 +318,6 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     return fig
 
-def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_final):
-    """Gera PDF com scorecard da análise individual"""
-    
-    # Criar buffer
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
-    
-    styles = getSampleStyleSheet()
-    
-    # Estilos customizados
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        textColor=colors.HexColor('#1f77b4'),
-        spaceAfter=6,
-        alignment=TA_CENTER,
-        fontName='Helvetica-Bold'
-    )
-    
-    heading_style = ParagraphStyle(
-        'CustomHeading',
-        parent=styles['Heading2'],
-        fontSize=14,
-        textColor=colors.HexColor('#1f77b4'),
-        spaceAfter=12,
-        spaceBefore=12,
-        fontName='Helvetica-Bold'
-    )
-    
-    body_style = ParagraphStyle(
-        'CustomBody',
-        parent=styles['BodyText'],
-        fontSize=10,
-        alignment=TA_LEFT,
-        spaceAfter=6
-    )
-    
-    # Conteúdo do PDF
-    story = []
-    
-    # Título
-    story.append(Paragraph(f"Scorecard: {banco_selecionado}", title_style))
-    story.append(Paragraph(f"Análise de {periodo_inicial} até {periodo_final}", styles['Normal']))
-    story.append(Spacer(1, 0.3*inch))
-    
-    # Métricas principais
-    ultimo_periodo = df_banco['Período'].iloc[-1]
-    dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
-    
-    metricas_principais = [
-        ('Carteira de Crédito', 'Carteira de Crédito'),
-        ('ROE Anualizado', 'ROE An. (%)'),
-        ('Índice de Basileia', 'Índice de Basileia'),
-        ('Alavancagem', 'Alavancagem'),
-    ]
-    
-    story.append(Paragraph("Métricas Principais (Período Atual)", heading_style))
-    
-    # Tabela de métricas
-    metricas_data = [['Métrica', 'Valor']]
-    for label, col in metricas_principais:
-        valor = formatar_valor(dados_ultimo.get(col), col)
-        metricas_data.append([label, valor])
-    
-    metricas_table = Table(metricas_data, colWidths=[3*inch, 2*inch])
-    metricas_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f77b4')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 11),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
-    ]))
-    
-    story.append(metricas_table)
-    story.append(Spacer(1, 0.3*inch))
-    
-    # Análise de tendências
-    story.append(Paragraph("Análise de Tendências", heading_style))
-    
-    variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
-    variaveis_top = variaveis[:6]  # Primeiras 6 variáveis
-    
-    tendencias_data = [['Variável', 'Primeiro', 'Último', 'Variação']]
-    
-    for var in variaveis_top:
-        try:
-            primeiro = df_banco[df_banco[var].notna()].iloc[0][var]
-            ultimo = df_banco[df_banco[var].notna()].iloc[-1][var]
-            
-            if pd.notna(primeiro) and pd.notna(ultimo) and primeiro != 0:
-                variacao = ((ultimo - primeiro) / abs(primeiro)) * 100
-                variacao_str = f"{variacao:+.1f}%"
-            else:
-                variacao_str = "N/A"
-            
-            primeiro_fmt = formatar_valor(primeiro, var)
-            ultimo_fmt = formatar_valor(ultimo, var)
-            
-            tendencias_data.append([var, primeiro_fmt, ultimo_fmt, variacao_str])
-        except:
-            pass
-    
-    tendencias_table = Table(tendencias_data, colWidths=[2*inch, 1.2*inch, 1.2*inch, 1*inch])
-    tendencias_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f77b4')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
-    ]))
-    
-    story.append(tendencias_table)
-    story.append(Spacer(1, 0.3*inch))
-    
-    # Rodapé
-    story.append(Paragraph(
-        f"<i>Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Fonte: API IF.DATA - BCB</i>",
-        styles['Normal']
-    ))
-    
-    # Build PDF
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-# Inicializar session_state
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
     if df_aliases is not None:
@@ -534,14 +332,8 @@ if 'dados_periodos' not in st.session_state:
     if dados_cache:
         st.session_state['dados_periodos'] = dados_cache
 
-if 'menu_atual' not in st.session_state:
-    st.session_state['menu_atual'] = "sobre"
-
-if 'cores_scatter' not in st.session_state:
-    st.session_state['cores_scatter'] = {}
-
-# SIDEBAR COM NAVEGAÇÃO POR BOTÕES
 with st.sidebar:
+    # Logo e título no topo do sidebar
     if os.path.exists(LOGO_PATH):
         st.markdown('<div class="sidebar-logo">', unsafe_allow_html=True)
         st.image(LOGO_PATH, width=100)
@@ -555,23 +347,22 @@ with st.sidebar:
     
     st.title("navegação")
     
-    # Botões de navegação customizados
-    col1, col2, col3 = st.columns(3)
+    if 'menu_atual' not in st.session_state:
+        st.session_state['menu_atual'] = "sobre"
     
-    with col1:
-        if st.button("📊\nSobre", use_container_width=True, key="nav_sobre"):
-            st.session_state['menu_atual'] = "sobre"
-            st.rerun()
+    if st.button("sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "sobre" else "secondary"):
+        st.session_state['menu_atual'] = "sobre"
+        st.rerun()
     
-    with col2:
-        if st.button("👤\nAnálise\nIndiv.", use_container_width=True, key="nav_individual"):
-            st.session_state['menu_atual'] = "análise individual"
-            st.rerun()
+    if st.button("análise individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "análise individual" else "secondary"):
+        st.session_state['menu_atual'] = "análise individual"
+        st.rerun()
     
-    with col3:
-        if st.button("📈\nScatter\nPlot", use_container_width=True, key="nav_scatter"):
-            st.session_state['menu_atual'] = "scatter plot"
-            st.rerun()
+    if st.button("scatter plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "scatter plot" else "secondary"):
+        st.session_state['menu_atual'] = "scatter plot"
+        st.rerun()
+    
+    menu = st.session_state['menu_atual']
     
     st.divider()
     st.title("controle")
@@ -641,9 +432,6 @@ with st.sidebar:
             st.rerun()
     else:
         st.warning("carregue os aliases primeiro")
-
-# PÁGINAS
-menu = st.session_state['menu_atual']
 
 if menu == "sobre":
     st.markdown("""
@@ -752,12 +540,6 @@ elif menu == "análise individual":
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
         
         if len(df) > 0 and 'Instituição' in df.columns:
-            # Obter lista de períodos disponíveis ordenados
-            periodos_disponiveis = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
-            
-            # ===== SELEÇÃO DE BANCO =====
-            st.markdown("### selecione uma instituição")
-            
             bancos_todos = df['Instituição'].dropna().unique().tolist()
             
             if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
@@ -777,120 +559,47 @@ elif menu == "análise individual":
             else:
                 bancos_disponiveis = sorted(bancos_todos)
             
-            # Grid de botões de banco
-            cols_bancos = st.columns(4)
-            banco_selecionado = None
-            
-            for idx, banco in enumerate(bancos_disponiveis):
-                col_idx = idx % 4
-                with cols_bancos[col_idx]:
-                    if st.button(banco, use_container_width=True, key=f"banco_{banco}"):
-                        st.session_state['banco_selecionado'] = banco
-            
-            if 'banco_selecionado' in st.session_state:
-                banco_selecionado = st.session_state['banco_selecionado']
-            
-            if banco_selecionado:
-                st.markdown("---")
+            if len(bancos_disponiveis) > 0:
+                banco_selecionado = st.selectbox("selecione uma instituição", bancos_disponiveis, key="banco_individual")
                 
-                # ===== SELEÇÃO DE PERÍODOS =====
-                st.markdown("### selecione o período da análise")
-                
-                col_pi, col_pf = st.columns(2)
-                
-                with col_pi:
-                    st.markdown("**período inicial**")
-                    cols_pi = st.columns(6)
-                    periodo_inicial = None
-                    for idx, periodo in enumerate(periodos_disponiveis[:12]):  # Últimos 12 trimestres
-                        col_idx = idx % 6
-                        with cols_pi[col_idx]:
-                            if st.button(periodo, use_container_width=True, key=f"pi_{periodo}"):
-                                st.session_state['periodo_inicial'] = periodo
-                    
-                    if 'periodo_inicial' in st.session_state:
-                        periodo_inicial = st.session_state['periodo_inicial']
-                        st.caption(f"✓ {periodo_inicial}")
-                
-                with col_pf:
-                    st.markdown("**período final**")
-                    cols_pf = st.columns(6)
-                    periodo_final = None
-                    for idx, periodo in enumerate(periodos_disponiveis[-12:]):  # Últimos 12 trimestres
-                        col_idx = idx % 6
-                        with cols_pf[col_idx]:
-                            if st.button(periodo, use_container_width=True, key=f"pf_{periodo}"):
-                                st.session_state['periodo_final'] = periodo
-                    
-                    if 'periodo_final' in st.session_state:
-                        periodo_final = st.session_state['periodo_final']
-                        st.caption(f"✓ {periodo_final}")
-                
-                # Se períodos foram selecionados, exibir análise
-                if periodo_inicial and periodo_final:
-                    st.markdown("---")
-                    
+                if banco_selecionado:
                     df_banco = df[df['Instituição'] == banco_selecionado].copy()
                     
                     df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
                     df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
                     df_banco = df_banco.sort_values(['ano', 'trimestre'])
                     
-                    ano_inicial, tri_inicial = periodo_inicial.split('/')
-                    ano_final, tri_final = periodo_final.split('/')
+                    st.markdown(f"## {banco_selecionado}")
                     
-                    df_banco = df_banco[
-                        ((df_banco['ano'] == int(ano_inicial)) & (df_banco['trimestre'] >= int(tri_inicial))) |
-                        ((df_banco['ano'] > int(ano_inicial)) & (df_banco['ano'] < int(ano_final))) |
-                        ((df_banco['ano'] == int(ano_final)) & (df_banco['trimestre'] <= int(tri_final)))
-                    ]
+                    ultimo_periodo = df_banco['Período'].iloc[-1]
+                    dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
                     
-                    if len(df_banco) > 0:
-                        st.markdown(f"## {banco_selecionado}")
-                        
-                        # Botão de download PDF
-                        col_titulo, col_pdf = st.columns([0.7, 0.3])
-                        
-                        with col_pdf:
-                            pdf_buffer = gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_final)
-                            st.download_button(
-                                label="📥 baixar scorecard (pdf)",
-                                data=pdf_buffer.getvalue(),
-                                file_name=f"scorecard_{banco_selecionado.replace(' ', '_')}_{periodo_inicial.replace('/', '_')}_a_{periodo_final.replace('/', '_')}.pdf",
-                                mime="application/pdf",
-                                use_container_width=True
-                            )
-                        
-                        st.caption(f"análise de {periodo_inicial} até {periodo_final}")
-                        
-                        # Métricas principais
-                        ultimo_periodo = df_banco['Período'].iloc[-1]
-                        dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
-                        
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.metric("carteira de crédito", formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
-                        with col2:
-                            st.metric("roe anualizado", formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
-                        with col3:
-                            st.metric("índice de basileia", formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
-                        with col4:
-                            st.metric("alavancagem", formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
-                        
-                        st.markdown("---")
-                        st.markdown("### evolução histórica das variáveis")
-                        
-                        variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
-                        
-                        for i in range(0, len(variaveis), 3):
-                            cols = st.columns(3)
-                            for j, col_obj in enumerate(cols):
-                                if i + j < len(variaveis):
-                                    var = variaveis[i + j]
-                                    with col_obj:
-                                        fig = criar_mini_grafico(df_banco, var, var)
-                                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("carteira de crédito", formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
+                    with col2:
+                        st.metric("roe anualizado", formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
+                    with col3:
+                        st.metric("índice de basileia", formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
+                    with col4:
+                        st.metric("alavancagem", formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
+                    
+                    st.markdown("---")
+                    st.markdown("### evolução histórica das variáveis")
+                    
+                    variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
+                    
+                    for i in range(0, len(variaveis), 3):
+                        cols = st.columns(3)
+                        for j, col_obj in enumerate(cols):
+                            if i + j < len(variaveis):
+                                var = variaveis[i + j]
+                                with col_obj:
+                                    fig = criar_mini_grafico(df_banco, var, var)
+                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            else:
+                st.warning("nenhuma instituição encontrada nos dados")
         else:
             st.warning("dados incompletos ou vazios")
     else:
@@ -919,30 +628,6 @@ elif menu == "scatter plot":
         
         df_scatter = df[df['Período'] == periodo_scatter].nlargest(top_n_scatter, 'Carteira de Crédito')
         
-        # Editor de cores
-        with st.expander("🎨 editar cores das instituições"):
-            st.caption("selecione cores personalizadas para cada instituição no gráfico")
-            
-            cols_cores = st.columns(3)
-            instituicoes_scatter = sorted(df_scatter['Instituição'].unique())
-            
-            for idx, instituicao in enumerate(instituicoes_scatter):
-                with cols_cores[idx % 3]:
-                    if 'dict_cores_personalizadas' in st.session_state and instituicao in st.session_state['dict_cores_personalizadas']:
-                        cor_padrao = st.session_state['dict_cores_personalizadas'][instituicao]
-                    else:
-                        cor_padrao = '#1f77b4'
-                    
-                    if instituicao in st.session_state['cores_scatter']:
-                        cor_padrao = st.session_state['cores_scatter'][instituicao]
-                    
-                    cor_selecionada = st.color_picker(
-                        instituicao, 
-                        value=cor_padrao, 
-                        key=f"cor_{instituicao}_{periodo_scatter}"
-                    )
-                    st.session_state['cores_scatter'][instituicao] = cor_selecionada
-        
         format_x = get_axis_format(var_x)
         format_y = get_axis_format(var_y)
         format_size = get_axis_format(var_size)
@@ -952,41 +637,69 @@ elif menu == "scatter plot":
         df_scatter_plot['y_display'] = df_scatter_plot[var_y] * format_y['multiplicador']
         df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
         
-        fig_scatter = go.Figure()
-        
-        for instituicao in df_scatter_plot['Instituição'].unique():
-            df_inst = df_scatter_plot[df_scatter_plot['Instituição'] == instituicao]
+        if 'dict_cores_personalizadas' in st.session_state and st.session_state['dict_cores_personalizadas']:
+            color_map = st.session_state['dict_cores_personalizadas']
+            fig_scatter = go.Figure()
             
-            if instituicao in st.session_state['cores_scatter']:
-                cor = st.session_state['cores_scatter'][instituicao]
-            elif 'dict_cores_personalizadas' in st.session_state and instituicao in st.session_state['dict_cores_personalizadas']:
-                cor = st.session_state['dict_cores_personalizadas'][instituicao]
-            else:
-                cor = '#1f77b4'
+            for instituicao in df_scatter_plot['Instituição'].unique():
+                df_inst = df_scatter_plot[df_scatter_plot['Instituição'] == instituicao]
+                cor = color_map.get(instituicao, '#1f77b4')
+                
+                fig_scatter.add_trace(go.Scatter(
+                    x=df_inst['x_display'],
+                    y=df_inst['y_display'],
+                    mode='markers',
+                    name=instituicao,
+                    marker=dict(
+                        size=df_inst['size_display'] / df_scatter_plot['size_display'].max() * 100,
+                        color=cor,
+                        line=dict(width=1, color='white')
+                    ),
+                    hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}{format_x["ticksuffix"]}<br>{var_y}: %{{y}}{format_y["ticksuffix"]}<extra></extra>'
+                ))
             
-            fig_scatter.add_trace(go.Scatter(
-                x=df_inst['x_display'],
-                y=df_inst['y_display'],
-                mode='markers',
-                name=instituicao,
-                marker=dict(
-                    size=df_inst['size_display'] / df_scatter_plot['size_display'].max() * 100,
-                    color=cor,
-                    line=dict(width=1, color='white')
-                ),
-                hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}{format_x["ticksuffix"]}<br>{var_y}: %{{y}}{format_y["ticksuffix"]}<extra></extra>'
-            ))
-        
-        fig_scatter.update_layout(
-            title=f'{var_y} vs {var_x} - {periodo_scatter}',
-            xaxis_title=f'{var_x} {format_x["ticksuffix"]}',
-            yaxis_title=f'{var_y} {format_y["ticksuffix"]}',
-            hovermode='closest',
-            height=600,
-            font=dict(family='IBM Plex Sans'),
-            plot_bgcolor='#f8f9fa',
-            xaxis=dict(tickformat=format_x['tickformat'], ticksuffix=format_x['ticksuffix']),
-            yaxis=dict(tickformat=format_y['tickformat'], ticksuffix=format_y['ticksuffix'])
-        )
+            fig_scatter.update_layout(
+                title=f'{var_y} vs {var_x} - {periodo_scatter} (top {top_n_scatter})',
+                xaxis_title=var_x,
+                yaxis_title=var_y,
+                height=650,
+                plot_bgcolor='#f8f9fa',
+                paper_bgcolor='white',
+                showlegend=True,
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                xaxis=dict(tickformat=format_x['tickformat'], ticksuffix=format_x['ticksuffix']),
+                yaxis=dict(tickformat=format_y['tickformat'], ticksuffix=format_y['ticksuffix']),
+                font=dict(family='IBM Plex Sans')
+            )
+        else:
+            fig_scatter = px.scatter(
+                df_scatter_plot, 
+                x='x_display', 
+                y='y_display', 
+                size='size_display', 
+                color='Instituição',
+                hover_data=['Alavancagem', 'Índice de Basileia', 'ROE An. (%)'],
+                title=f'{var_y} vs {var_x} - {periodo_scatter} (top {top_n_scatter})',
+                labels={'x_display': var_x, 'y_display': var_y}
+            )
+            
+            fig_scatter.update_layout(
+                height=650,
+                plot_bgcolor='#f8f9fa',
+                paper_bgcolor='white',
+                showlegend=True,
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                xaxis=dict(tickformat=format_x['tickformat'], ticksuffix=format_x['ticksuffix'], title=var_x),
+                yaxis=dict(tickformat=format_y['tickformat'], ticksuffix=format_y['ticksuffix'], title=var_y),
+                font=dict(family='IBM Plex Sans')
+            )
+            
+            fig_scatter.update_traces(marker=dict(line=dict(width=1, color='white')))
         
         st.plotly_chart(fig_scatter, use_container_width=True)
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+st.markdown("---")
+st.caption("desenvolvido em 2026 por matheus prates, cfa")
