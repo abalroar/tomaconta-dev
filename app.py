@@ -27,6 +27,9 @@ st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide"
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100;200;300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
     /* ESCONDE HEADER MAS PRESERVA BOTÃO DA SIDEBAR */
     .stApp > header {
@@ -70,7 +73,22 @@ st.markdown("""
         height: 1.5rem !important;
     }
 
-    [data-testid="collapsedControl"] button span {
+    
+    /* GARANTE FONTES DE ÍCONES (evita aparecer "keyboard_double_arrow_left" / "arrow_drop_down") */
+    .material-icons { font-family: 'Material Icons' !important; font-weight: normal !important; font-style: normal !important; }
+    .material-symbols-outlined { font-family: 'Material Symbols Outlined' !important; font-weight: normal !important; font-style: normal !important; }
+    .material-symbols-rounded { font-family: 'Material Symbols Rounded' !important; font-weight: normal !important; font-style: normal !important; }
+
+    /* Alguns ícones do Streamlit vêm como spans sem classe explícita */
+    [data-testid="collapsedControl"] button span,
+    [data-testid="stExpander"] summary span[data-testid="stExpanderToggleIcon"],
+    [data-testid="stExpander"] summary span[aria-hidden="true"] {
+        font-family: 'Material Icons' !important;
+        font-weight: normal !important;
+        font-style: normal !important;
+        line-height: 1 !important;
+    }
+[data-testid="collapsedControl"] button span {
         font-family: 'Material Icons' !important;
         font-size: 1.5rem !important;
         line-height: 1 !important;
@@ -92,7 +110,7 @@ st.markdown("""
         font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     }
 
-    html, body, [class*="css"], div, span, p, label, input, select, textarea, button {
+    html, body, [class*="css"], div, p, label, input, select, textarea, button {
         font-family: 'IBM Plex Sans', sans-serif !important;
         font-weight: 300 !important;
     }
@@ -359,6 +377,10 @@ def carregar_cores_aliases_local(df_aliases):
 
         if pd.notna(instituicao):
             dict_cores[normalizar_nome_instituicao(instituicao)] = cor_str
+            # Também aceita busca pelo 'Alias Banco' (útil quando a coluna Instituição já vem renomeada)
+            alias_banco = row.get('Alias Banco')
+            if pd.notna(alias_banco):
+                dict_cores[normalizar_nome_instituicao(alias_banco)] = cor_str
 
         # Também mapeia pelo alias (é o que aparece na UI)
         if pd.notna(alias):
