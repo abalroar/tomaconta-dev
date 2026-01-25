@@ -369,8 +369,22 @@ elif menu == "🏦 Análise Individual":
         
         # Verificar se há dados
         if len(df) > 0 and 'Instituição' in df.columns:
-            # Seletor de banco
-            bancos_disponiveis = sorted(df['Instituição'].dropna().unique().tolist())
+            # Obter bancos com alias e sem alias
+            bancos_todos = df['Instituição'].dropna().unique().tolist()
+            
+            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+                bancos_com_alias = [b for b in bancos_todos if b in st.session_state['dict_aliases']]
+                bancos_sem_alias = [b for b in bancos_todos if b not in st.session_state['dict_aliases']]
+                
+                # Ordenar cada grupo alfabeticamente
+                bancos_com_alias_sorted = sorted(bancos_com_alias)
+                bancos_sem_alias_sorted = sorted(bancos_sem_alias)
+                
+                # Concatenar: aliases primeiro, depois demais
+                bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
+            else:
+                # Se não houver aliases, ordenar tudo alfabeticamente
+                bancos_disponiveis = sorted(bancos_todos)
             
             if len(bancos_disponiveis) > 0:
                 banco_selecionado = st.selectbox("🏦 Selecione uma Instituição", bancos_disponiveis, key="banco_individual")
