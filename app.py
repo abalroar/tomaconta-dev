@@ -344,7 +344,7 @@ def baixar_cache_inicial():
     return True
 
 def formatar_valor(valor, variavel):
-    if pd.isna(valor):
+    if pd.isna(valor) or valor == 0:
         return "N/A"
 
     vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
@@ -380,10 +380,11 @@ def obter_cor_banco(instituicao):
             return st.session_state['dict_cores_personalizadas'][instituicao_norm]
     return None
 
-def criar_mini_grafico(df_banco, variavel, titulo):
+def criar_mini_grafico(df_banco, variavel, titulo, tipo='linha'):
     df_sorted = df_banco.copy()
-    df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
-    df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
+    if 'ano' not in df_sorted.columns:
+        df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
+        df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
     df_sorted = df_sorted.sort_values(['ano', 'trimestre'])
 
     instituicao = df_sorted['Instituição'].iloc[0]
@@ -409,15 +410,23 @@ def criar_mini_grafico(df_banco, variavel, titulo):
 
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(
-        x=df_sorted['Período'],
-        y=hover_values,
-        mode='lines',
-        line=dict(color=cor_banco, width=2),
-        fill='tozeroy',
-        fillcolor=f'rgba({int(cor_banco[1:3], 16)}, {int(cor_banco[3:5], 16)}, {int(cor_banco[5:7], 16)}, 0.2)',
-        hovertemplate='%{x}<br>%{y:' + tickformat + '}' + suffix + '<extra></extra>'
-    ))
+    if tipo == 'barra':
+        fig.add_trace(go.Bar(
+            x=df_sorted['Período'],
+            y=hover_values,
+            marker=dict(color=cor_banco, opacity=0.8),
+            hovertemplate='%{x}<br>%{y:' + tickformat + '}' + suffix + '<extra></extra>'
+        ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=df_sorted['Período'],
+            y=hover_values,
+            mode='lines',
+            line=dict(color=cor_banco, width=2),
+            fill='tozeroy',
+            fillcolor=f'rgba({int(cor_banco[1:3], 16)}, {int(cor_banco[3:5], 16)}, {int(cor_banco[5:7], 16)}, 0.2)',
+            hovertemplate='%{x}<br>%{y:' + tickformat + '}' + suffix + '<extra></extra>'
+        ))
 
     fig.update_layout(
         title=dict(text=titulo, font=dict(size=12, color='#333', family='IBM Plex Sans')),
@@ -823,34 +832,64 @@ elif menu == "Análise Individual":
                     st.markdown(f"## {banco_selecionado}")
 
                     periodos_disponiveis = sorted(df_banco['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
-                    if len(periodos_disponiveis) >= 2:
-                        pdf_buffer = gerar_scorecard_pdf(banco_selecionado, df_banco, periodos_disponiveis[0], periodos_disponiveis[-1])
-                        if pdf_buffer:
-                            st.download_button(
-                                label="baixar scorecard",
-                                data=pdf_buffer.getvalue(),
-                                file_name=f"scorecard_{banco_selecionado.replace(' ', '_')}.pdf",
-                                mime="application/pdf"
-                            )
 
-                    ultimo_periodo = df_banco['Período'].iloc[-1]
-                    dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
+                    # Seletores de período
+                    col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
+                    with col_p1:
+                        periodo_inicial = st.selectbox("período inicial", periodos_disponiveis, index=0, key="periodo_ini_individual")
+                    with col_p2:
+                        idx_final = len(periodos_disponiveis) - 1
+                        periodo_final = st.selectbox("período final", periodos_disponiveis, index=idx_final, key="periodo_fin_individual")
+                    with col_p3:
+                        if len(periodos_disponiveis) >= 2:
+                            pdf_buffer = gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_final)
+                            if pdf_buffer:
+                                st.markdown("")  # Espaçamento
+                                st.download_button(
+                                    label="baixar scorecard",
+                                    data=pdf_buffer.getvalue(),
+                                    file_name=f"scorecard_{banco_selecionado.replace(' ', '_')}.pdf",
+                                    mime="application/pdf"
+                                )
 
-                    col1, col2, col3, col4 = st.columns(4)
+                    # Filtra dados pelo período selecionado
+                    idx_ini = periodos_disponiveis.index(periodo_inicial)
+                    idx_fin = periodos_disponiveis.index(periodo_final)
+                    if idx_ini > idx_fin:
+                        idx_ini, idx_fin = idx_fin, idx_ini
+                    periodos_filtrados = periodos_disponiveis[idx_ini:idx_fin + 1]
+                    df_banco_filtrado = df_banco[df_banco['Período'].isin(periodos_filtrados)]
+
+                    # Dados do período final para as métricas
+                    dados_periodo_final = df_banco[df_banco['Período'] == periodo_final].iloc[0]
+
+                    # Métricas com colunas flexíveis
+                    st.markdown(
+                        """
+                        <style>
+                        div[data-testid="stMetric"] {
+                            min-width: fit-content !important;
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    col1, col2, col3, col4 = st.columns([1.3, 1, 1, 1])
 
                     with col1:
-                        st.metric("carteira de crédito", formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
+                        st.metric("carteira de crédito", formatar_valor(dados_periodo_final.get('Carteira de Crédito'), 'Carteira de Crédito'))
                     with col2:
-                        st.metric("roe anualizado", formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
+                        st.metric("roe anualizado", formatar_valor(dados_periodo_final.get('ROE An. (%)'), 'ROE An. (%)'))
                     with col3:
-                        st.metric("índice de basileia", formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
+                        st.metric("índice de basileia", formatar_valor(dados_periodo_final.get('Índice de Basileia'), 'Índice de Basileia'))
                     with col4:
-                        st.metric("alavancagem", formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
+                        st.metric("alavancagem", formatar_valor(dados_periodo_final.get('Alavancagem'), 'Alavancagem'))
 
                     st.markdown("---")
                     st.markdown("### evolução histórica das variáveis")
 
-                    variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
+                    variaveis = [col for col in df_banco_filtrado.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco_filtrado[col].notna().any()]
 
                     for i in range(0, len(variaveis), 3):
                         cols = st.columns(3)
@@ -858,7 +897,9 @@ elif menu == "Análise Individual":
                             if i + j < len(variaveis):
                                 var = variaveis[i + j]
                                 with col_obj:
-                                    fig = criar_mini_grafico(df_banco, var, var)
+                                    # Usa gráfico de barras para Lucro Líquido
+                                    tipo_grafico = 'barra' if var == 'Lucro Líquido' else 'linha'
+                                    fig = criar_mini_grafico(df_banco_filtrado, var, var, tipo=tipo_grafico)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
                 st.warning("nenhuma instituição encontrada nos dados")
