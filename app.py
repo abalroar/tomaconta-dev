@@ -209,6 +209,7 @@ if 'dados_periodos' not in st.session_state:
 
 # SIDEBAR
 with st.sidebar:
+    st.title("📍 Navegação")
     
     # Inicializar menu padrão como "Sobre"
     if 'menu_atual' not in st.session_state:
@@ -306,65 +307,47 @@ if menu == "ℹ️ Sobre":
     # PÁGINA SOBRE
     st.markdown("---")
     
-    col1, col2 = st.columns([2,1])
+    st.markdown("""
+    ### 📊 Sobre o Fica de Olho
     
-    with col1:
-        st.markdown("""
-        ### 📊 Sobre o Fica de Olho
-        
-        O **Fica de Olho** é uma ferramenta de análise financeira que extrai, processa e visualiza dados 
-        de instituições financeiras brasileiras de forma automatizada e interativa.
-        
-        #### 🎯 Funcionalidades
-        
-        - **Extração Automatizada**: Integração direta com a API IF.data do Banco Central do Brasil
-        - **Análise Temporal**: Acompanhamento de métricas financeiras ao longo de múltiplos trimestres
-        - **Visualização Interativa**: Gráficos de dispersão customizáveis com filtros dinâmicos
-        - **Classificação Personalizada**: Sistema de aliases para renomear e categorizar instituições
-        - **Métricas Calculadas**: ROE anualizado, alavancagem, funding gap, market share e índices de risco/retorno
-        
-        #### 📈 Dados Utilizados
-        
-        Todos os dados são extraídos da **API IF.data** do Banco Central do Brasil, incluindo:
-        
-        - Carteira de Crédito Classificada
-        - Patrimônio Líquido e Lucro Líquido
-        - Índice de Basileia
-        - Captações e Ativo Total
-        - Cadastro de Instituições Financeiras
-        
-        #### 🚀 Como Começar
-        
-        1. Os dados já estão carregados automaticamente do GitHub
-        2. Acesse **Análise Individual** ou **Scatter Plot** no menu lateral
-        3. Para atualizar dados, configure período e clique em "Extrair Novos Dados"
-        4. Personalize visualizações usando os filtros disponíveis
-        """)
+    O **Fica de Olho** é uma ferramenta de análise financeira que extrai, processa e visualiza dados 
+    de instituições financeiras brasileiras de forma automatizada e interativa.
     
-    with col2:
-        st.info("""
-        ### 💡 Primeira Vez?
-        
-        **Aguarde:** Os dados estão sendo baixados automaticamente...
-        
-        **Depois:** Explore as análises no menu lateral
-        
-        **Atualizar:** Configure período e clique em "Extrair Novos Dados"
-        
-        **Explorar:** Use os filtros para análises customizadas!
-        """)
-        
-        st.markdown("---")
-        
-        st.markdown("""
-        ### 📚 Recursos Técnicos
-        
-        - **Python 3.10+**
-        - **Streamlit** (interface)
-        - **Pandas** (processamento)
-        - **Plotly** (visualizações)
-        - **API BCB Olinda**
-        """)
+    #### 🎯 Funcionalidades
+    
+    - **Extração Automatizada**: Integração direta com a API IF.data do Banco Central do Brasil
+    - **Análise Temporal**: Acompanhamento de métricas financeiras ao longo de múltiplos trimestres
+    - **Visualização Interativa**: Gráficos de dispersão customizáveis com filtros dinâmicos
+    - **Classificação Personalizada**: Sistema de aliases para renomear e categorizar instituições
+    - **Métricas Calculadas**: ROE anualizado, alavancagem, funding gap, market share e índices de risco/retorno
+    
+    #### 📈 Dados Utilizados
+    
+    Todos os dados são extraídos da **API IF.data** do Banco Central do Brasil, incluindo:
+    
+    - Carteira de Crédito Classificada
+    - Patrimônio Líquido e Lucro Líquido
+    - Índice de Basileia
+    - Captações e Ativo Total
+    - Cadastro de Instituições Financeiras
+    
+    #### 🚀 Como Começar
+    
+    1. Os dados já estão carregados automaticamente do GitHub
+    2. Acesse **Análise Individual** ou **Scatter Plot** no menu lateral
+    3. Para atualizar dados, configure período e clique em "Extrair Novos Dados"
+    4. Personalize visualizações usando os filtros disponíveis
+    
+    ---
+    
+    ### 📚 Recursos Técnicos
+    
+    - **Python 3.10+**
+    - **Streamlit** (interface)
+    - **Pandas** (processamento)
+    - **Plotly** (visualizações)
+    - **API BCB Olinda**
+    """)
     
     st.markdown("---")
     st.markdown("""
@@ -385,14 +368,25 @@ elif menu == "🏦 Análise Individual":
             bancos_todos = df['Instituição'].dropna().unique().tolist()
             
             if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                bancos_com_alias = [b for b in bancos_todos if b in st.session_state['dict_aliases']]
-                bancos_sem_alias = [b for b in bancos_todos if b not in st.session_state['dict_aliases']]
+                # Separar bancos com e sem alias
+                bancos_com_alias = []
+                bancos_sem_alias = []
                 
-                # Ordenar cada grupo alfabeticamente
-                bancos_com_alias_sorted = sorted(bancos_com_alias)
+                for banco in bancos_todos:
+                    if banco in st.session_state['dict_aliases']:
+                        # Usar o ALIAS para ordenação
+                        alias = st.session_state['dict_aliases'][banco]
+                        bancos_com_alias.append((alias, banco))
+                    else:
+                        bancos_sem_alias.append(banco)
+                
+                # Ordenar bancos com alias pelo ALIAS (A-Z)
+                bancos_com_alias_sorted = [banco for alias, banco in sorted(bancos_com_alias)]
+                
+                # Ordenar bancos sem alias pelo nome original (A-Z)
                 bancos_sem_alias_sorted = sorted(bancos_sem_alias)
                 
-                # Concatenar: aliases primeiro, depois demais
+                # Concatenar: aliases primeiro (ordenados por alias), depois demais (ordenados por nome)
                 bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
             else:
                 # Se não houver aliases, ordenar tudo alfabeticamente
