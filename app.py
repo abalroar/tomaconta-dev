@@ -443,10 +443,24 @@ def criar_mini_grafico(df_banco, variavel, titulo, tipo='linha'):
     return fig
 
 def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_final):
+    from reportlab.lib.pagesizes import landscape, A4
+
     df_sorted = df_banco.copy()
     df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
     df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
     df_sorted = df_sorted.sort_values(['ano', 'trimestre'])
+
+    # Filtra pelo período selecionado
+    periodos_disponiveis = sorted(df_sorted['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+    try:
+        idx_ini = periodos_disponiveis.index(periodo_inicial)
+        idx_fin = periodos_disponiveis.index(periodo_final)
+        if idx_ini > idx_fin:
+            idx_ini, idx_fin = idx_fin, idx_ini
+        periodos_filtrados = periodos_disponiveis[idx_ini:idx_fin + 1]
+        df_sorted = df_sorted[df_sorted['Período'].isin(periodos_filtrados)]
+    except ValueError:
+        pass
 
     instituicao = df_sorted['Instituição'].iloc[0]
     cor_banco = obter_cor_banco(instituicao)
@@ -454,18 +468,20 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         cor_banco = '#1f77b4'
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.4*inch, bottomMargin=0.4*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
+    # Formato paisagem (landscape)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), topMargin=0.4*inch, bottomMargin=0.4*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
 
     styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=28, textColor=colors.HexColor('#1f77b4'), spaceAfter=4, alignment=TA_LEFT, fontName='Helvetica-Bold')
-    subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'], fontSize=11, textColor=colors.HexColor('#666666'), spaceAfter=16, alignment=TA_LEFT)
-    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=13, textColor=colors.HexColor('#1f77b4'), spaceAfter=12, spaceBefore=12, fontName='Helvetica-Bold')
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=32, textColor=colors.HexColor(cor_banco), spaceAfter=4, alignment=TA_LEFT, fontName='Helvetica-Bold')
+    subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor('#666666'), spaceAfter=20, alignment=TA_LEFT)
+    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor(cor_banco), spaceAfter=12, spaceBefore=16, fontName='Helvetica-Bold')
 
     story = []
     story.append(Paragraph(banco_selecionado, title_style))
     story.append(Paragraph(f"Análise de {periodo_inicial} até {periodo_final}", subtitle_style))
 
+    # Dados do período final para métricas
     ultimo_periodo = df_sorted['Período'].iloc[-1]
     dados_ultimo = df_sorted[df_sorted['Período'] == ultimo_periodo].iloc[0]
 
@@ -481,32 +497,27 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         valor = formatar_valor(dados_ultimo.get(col), col)
         metricas_data.append([label, valor])
 
-    metrics_table_data = [
-        [
-            Paragraph(f'<font size="9"><b>{metricas_data[0][0]}</b></font><br/><font size="14"><b>{metricas_data[0][1]}</b></font>', styles['Normal']),
-            Paragraph(f'<font size="9"><b>{metricas_data[1][0]}</b></font><br/><font size="14"><b>{metricas_data[1][1]}</b></font>', styles['Normal'])
-        ],
-        [
-            Paragraph(f'<font size="9"><b>{metricas_data[2][0]}</b></font><br/><font size="14"><b>{metricas_data[2][1]}</b></font>', styles['Normal']),
-            Paragraph(f'<font size="9"><b>{metricas_data[3][0]}</b></font><br/><font size="14"><b>{metricas_data[3][1]}</b></font>', styles['Normal'])
-        ]
-    ]
+    # Métricas em linha única (4 colunas) para paisagem
+    metrics_table_data = [[
+        Paragraph(f'<font size="10"><b>{m[0]}</b></font><br/><font size="18"><b>{m[1]}</b></font>', styles['Normal'])
+        for m in metricas_data
+    ]]
 
-    metrics_table = Table(metrics_table_data, colWidths=[3.25*inch, 3.25*inch])
+    metrics_table = Table(metrics_table_data, colWidths=[2.5*inch, 2.5*inch, 2.5*inch, 2.5*inch])
     metrics_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8f9fa')),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 12),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-        ('TOPPADDING', (0, 0), (-1, -1), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('LEFTPADDING', (0, 0), (-1, -1), 15),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+        ('TOPPADDING', (0, 0), (-1, -1), 15),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e0e0e0')),
     ]))
 
     story.append(metrics_table)
-    story.append(Spacer(1, 0.25*inch))
+    story.append(Spacer(1, 0.3*inch))
     story.append(Paragraph("Evolução Histórica das Variáveis", section_style))
 
     variaveis = [col for col in df_sorted.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_sorted[col].notna().sum() > 0]
@@ -514,8 +525,9 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
     cor_rgb = tuple(int(cor_banco[i:i+2], 16) for i in (1, 3, 5))
     cor_rgb_norm = tuple(c/255 for c in cor_rgb)
 
-    def criar_figura_grafico(df_plot, variavel, titulo):
-        fig, ax = plt.subplots(figsize=(2.4, 1.8), dpi=100)
+    def criar_figura_grafico(df_plot, variavel, titulo, use_bar=False):
+        # Gráficos maiores e maior DPI para melhor qualidade
+        fig, ax = plt.subplots(figsize=(3.5, 2.2), dpi=150)
 
         vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
         vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
@@ -534,22 +546,26 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
             y_display = y_values
             suffix = ''
 
-        ax.fill_between(x_pos, y_display, alpha=0.3, color=cor_rgb_norm)
-        ax.plot(x_pos, y_display, color=cor_rgb_norm, linewidth=2, marker='o', markersize=3)
-        ax.set_title(titulo, fontsize=11, fontweight='bold', color='#333333', pad=8)
+        if use_bar:
+            ax.bar(x_pos, y_display, color=cor_rgb_norm, alpha=0.8, width=0.7)
+        else:
+            ax.fill_between(x_pos, y_display, alpha=0.3, color=cor_rgb_norm)
+            ax.plot(x_pos, y_display, color=cor_rgb_norm, linewidth=2.5, marker='o', markersize=4)
+
+        ax.set_title(titulo, fontsize=12, fontweight='bold', color='#333333', pad=10)
         ax.set_facecolor('#f8f9fa')
         fig.patch.set_facecolor('white')
 
-        if len(x_labels) > 4:
-            step = max(1, len(x_labels) // 4)
+        if len(x_labels) > 6:
+            step = max(1, len(x_labels) // 5)
             ax.set_xticks(x_pos[::step])
-            ax.set_xticklabels(x_labels[::step], fontsize=7, rotation=45)
+            ax.set_xticklabels(x_labels[::step], fontsize=8, rotation=45, ha='right')
         else:
             ax.set_xticks(x_pos)
-            ax.set_xticklabels(x_labels, fontsize=7, rotation=45)
+            ax.set_xticklabels(x_labels, fontsize=8, rotation=45, ha='right')
 
         ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f'{y:.1f}{suffix}'))
-        ax.tick_params(axis='y', labelsize=7)
+        ax.tick_params(axis='y', labelsize=8)
         ax.grid(True, alpha=0.3, linestyle='--', color='#e0e0e0')
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
@@ -562,31 +578,32 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         row_images = []
         for var in graficos_linha:
             try:
-                fig = criar_figura_grafico(df_sorted, var, var)
+                use_bar = (var == 'Lucro Líquido')
+                fig = criar_figura_grafico(df_sorted, var, var, use_bar=use_bar)
                 img_buffer = io.BytesIO()
-                fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=100)
+                fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
                 img_buffer.seek(0)
-                img = Image(img_buffer, width=2.2*inch, height=1.6*inch)
+                img = Image(img_buffer, width=3.3*inch, height=2.0*inch)
                 row_images.append(img)
                 plt.close(fig)
             except:
                 row_images.append(Paragraph(f"[Erro: {var}]", styles['Normal']))
         while len(row_images) < figs_por_linha:
             row_images.append(Spacer(1, 0))
-        img_table = Table([row_images], colWidths=[2.3*inch, 2.3*inch, 2.3*inch])
+        img_table = Table([row_images], colWidths=[3.5*inch, 3.5*inch, 3.5*inch])
         img_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ]))
         story.append(img_table)
-        story.append(Spacer(1, 0.15*inch))
+        story.append(Spacer(1, 0.1*inch))
 
-    story.append(Spacer(1, 0.1*inch))
-    rodape = Paragraph(f"<font size='8'><i>Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Fonte: API IF.DATA - BCB</i></font>", styles['Normal'])
+    story.append(Spacer(1, 0.15*inch))
+    rodape = Paragraph(f"<font size='9'><i>Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Fonte: API IF.DATA - BCB | fica de olho</i></font>", styles['Normal'])
     story.append(rodape)
 
     try:
