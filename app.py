@@ -11,84 +11,60 @@ from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, car
 
 st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado com fonte Source Sans 3 + FIX para labels bugados
+# CSS customizado com fonte Inter GLOBAL
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
     
-    /* Aplicar Source Sans 3 em TODOS os elementos */
+    /* Aplicar Inter em TODOS os elementos */
     * {
-        font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     }
     
     html, body, [class*="css"], div, span, p, label, input, select, textarea, button {
-        font-family: 'Source Sans 3', sans-serif !important;
-    }
-    
-    /* FIX CRÍTICO: Ocultar labels de widgets que aparecem como texto solto */
-    [data-testid="stSidebar"] label[data-testid="stWidgetLabel"] {
-        display: none !important;
-    }
-    
-    /* FIX: Ocultar elementos de file uploader que aparecem fora de contexto */
-    [data-testid="stSidebar"] [data-testid="stFileUploader"] label {
-        display: none !important;
-    }
-    
-    /* FIX: Ocultar spans com classes internas do Streamlit que vazam texto */
-    [data-testid="stSidebar"] span[class*="st-"] {
-        line-height: normal !important;
+        font-family: 'Inter', sans-serif !important;
     }
     
     /* Headers e títulos */
     h1, h2, h3, h4, h5, h6 {
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
         font-weight: 700 !important;
-        letter-spacing: -0.02em;
     }
     
     /* Sidebar */
     [data-testid="stSidebar"] * {
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
     }
     
     /* Botões */
     button[kind="primary"], button[kind="secondary"], .stButton button {
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
         font-weight: 600 !important;
-        letter-spacing: 0.01em;
-        border-radius: 8px !important;
-        transition: all 0.2s ease !important;
     }
     
-    .stButton button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
-    }
-    
-    /* Selectbox, inputs - OCULTAR LABELS FLUTUANTES */
-    .stSelectbox label, .stTextInput label, .stNumberInput label {
-        font-family: 'Source Sans 3', sans-serif !important;
+    /* Selectbox, inputs */
+    .stSelectbox, .stTextInput, .stNumberInput, .stSlider {
+        font-family: 'Inter', sans-serif !important;
     }
     
     /* Métricas */
     [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
     }
     
     /* Markdown */
     .stMarkdown, .stMarkdown * {
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
     }
     
     /* Expander */
     .streamlit-expanderHeader {
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
     }
     
     /* Captions */
     .stCaption {
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
     }
     
     /* Container do logo */
@@ -110,9 +86,8 @@ st.markdown("""
         color: #1f77b4;
         text-align: center;
         margin-bottom: 0.5rem;
-        line-height: 1.1;
-        font-family: 'Source Sans 3', sans-serif !important;
-        letter-spacing: -0.03em;
+        line-height: 1.2;
+        font-family: 'Inter', sans-serif !important;
     }
     
     .sub-header {
@@ -120,9 +95,8 @@ st.markdown("""
         color: #666;
         text-align: center;
         margin-bottom: 0.5rem;
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
         font-weight: 400;
-        letter-spacing: -0.01em;
     }
     
     .by-line {
@@ -131,7 +105,7 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
         font-style: italic;
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
         font-weight: 300;
     }
     
@@ -145,7 +119,7 @@ st.markdown("""
     div[data-testid="stMetricValue"] {
         font-size: 2rem;
         font-weight: 700;
-        font-family: 'Source Sans 3', sans-serif !important;
+        font-family: 'Inter', sans-serif !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -241,14 +215,17 @@ def get_axis_format(variavel):
 
 def criar_mini_grafico(df_banco, variavel, titulo):
     """Cria mini gráfico para uma variável específica"""
+    # Ordenar cronologicamente por ano e trimestre
     df_sorted = df_banco.copy()
     df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
     df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
     df_sorted = df_sorted.sort_values(['ano', 'trimestre'])
     
+    # Determinar tipo de formatação
     vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
     
+    # Criar valores formatados para hover
     if variavel in vars_percentual:
         hover_values = df_sorted[variavel] * 100
         tickformat = '.2f'
@@ -262,8 +239,10 @@ def criar_mini_grafico(df_banco, variavel, titulo):
         tickformat = '.2f'
         suffix = ''
     
+    # Criar figura
     fig = go.Figure()
     
+    # Adicionar linha
     fig.add_trace(go.Scatter(
         x=df_sorted['Período'],
         y=hover_values,
@@ -274,8 +253,9 @@ def criar_mini_grafico(df_banco, variavel, titulo):
         hovertemplate='%{x}<br>%{y:' + tickformat + '}' + suffix + '<extra></extra>'
     ))
     
+    # Configurar layout
     fig.update_layout(
-        title=dict(text=titulo, font=dict(size=12, color='#333', family='Source Sans 3')),
+        title=dict(text=titulo, font=dict(size=12, color='#333', family='Inter')),
         height=180,
         margin=dict(l=10, r=10, t=35, b=30),
         plot_bgcolor='#f8f9fa',
@@ -288,14 +268,15 @@ def criar_mini_grafico(df_banco, variavel, titulo):
             ticksuffix=suffix
         ),
         hovermode='x',
-        font=dict(family='Source Sans 3')
+        font=dict(family='Inter')
     )
     
     return fig
 
-# Header com Logo
+# Header com Logo ACIMA do título (centralizado e com melhor qualidade)
 st.markdown('<div class="logo-container">', unsafe_allow_html=True)
 if os.path.exists(LOGO_PATH):
+    # Usando colunas para centralizar melhor
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         st.image(LOGO_PATH, use_column_width=True)
@@ -303,12 +284,12 @@ else:
     st.markdown('<p style="font-size: 150px; text-align: center;">👁️</p>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Títulos
+# Títulos centralizados
 st.markdown('<p class="main-header">Fica de Olho</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
 st.markdown('<p class="by-line">by Matheus Prates, CFA</p>', unsafe_allow_html=True)
 
-# CARREGAR ALIASES
+# CARREGAR ALIASES AUTOMATICAMENTE
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
     if df_aliases is not None:
@@ -317,7 +298,7 @@ if 'df_aliases' not in st.session_state:
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
 
-# CARREGAR CACHE
+# CARREGAR CACHE COM DOWNLOAD DO GITHUB
 if 'dados_periodos' not in st.session_state:
     baixar_cache_inicial()
     dados_cache = carregar_cache()
@@ -326,55 +307,42 @@ if 'dados_periodos' not in st.session_state:
 
 # SIDEBAR
 with st.sidebar:
-    st.markdown("### Navegação")
+    st.title("Navegação")
     
+    # Inicializar menu padrão como "Sobre"
     if 'menu_atual' not in st.session_state:
         st.session_state['menu_atual'] = "Sobre"
     
-    # Botões com label_visibility="collapsed" para evitar duplicação
-    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    # Botões de navegação
+    if st.button("Sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Sobre" else "secondary"):
+        st.session_state['menu_atual'] = "Sobre"
+        st.rerun()
     
-    with col_btn1:
-        if st.button("📘", key="btn_sobre", help="Sobre", use_container_width=True):
-            st.session_state['menu_atual'] = "Sobre"
-            st.rerun()
+    if st.button("Análise Individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Análise Individual" else "secondary"):
+        st.session_state['menu_atual'] = "Análise Individual"
+        st.rerun()
     
-    with col_btn2:
-        if st.button("🏦", key="btn_analise", help="Análise Individual", use_container_width=True):
-            st.session_state['menu_atual'] = "Análise Individual"
-            st.rerun()
-    
-    with col_btn3:
-        if st.button("📊", key="btn_scatter", help="Scatter Plot", use_container_width=True):
-            st.session_state['menu_atual'] = "Scatter Plot"
-            st.rerun()
-    
-    # Labels abaixo dos botões
-    col_lbl1, col_lbl2, col_lbl3 = st.columns(3)
-    with col_lbl1:
-        st.caption("Sobre")
-    with col_lbl2:
-        st.caption("Análise")
-    with col_lbl3:
-        st.caption("Scatter")
+    if st.button("Scatter Plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Scatter Plot" else "secondary"):
+        st.session_state['menu_atual'] = "Scatter Plot"
+        st.rerun()
     
     menu = st.session_state['menu_atual']
     
     st.divider()
-    st.markdown("### Controle")
+    st.title("Controle")
     
     # Status
     if 'df_aliases' in st.session_state:
-        st.success(f"✓ {len(st.session_state['df_aliases'])} aliases")
+        st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
     else:
-        st.error("✗ Aliases não encontrados")
+        st.error("Aliases não encontrados")
     
     # Cache info
     info_cache = ler_info_cache()
     if info_cache:
-        with st.expander("Cache"):
+        with st.expander("Informações do Cache"):
             st.text(info_cache)
-            if st.button("Limpar", key="limpar_cache", use_container_width=True):
+            if st.button("Limpar Cache", use_container_width=True):
                 if os.path.exists(CACHE_FILE):
                     os.remove(CACHE_FILE)
                 if os.path.exists(CACHE_INFO):
@@ -385,19 +353,33 @@ with st.sidebar:
     
     st.divider()
     
+    # Upload opcional
+    with st.expander("Upload de Aliases"):
+        uploaded_file = st.file_uploader("Selecione arquivo Excel", type=['xlsx'], key="upload_aliases")
+        
+        if uploaded_file:
+            df_aliases = pd.read_excel(uploaded_file)
+            st.session_state['df_aliases'] = df_aliases
+            st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
+            st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
+            st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
+            st.success("Aliases atualizados com sucesso")
+    
+    st.divider()
+    
     # Extração
-    st.markdown("### Atualizar Dados")
+    st.subheader("Atualizar Dados")
     
     col1, col2 = st.columns(2)
     with col1:
-        ano_i = st.selectbox("Ano Inicial", range(2015,2027), index=8, key="ano_i", label_visibility="visible")
-        mes_i = st.selectbox("Trim. Inicial", ['03','06','09','12'], key="mes_i", label_visibility="visible")
+        ano_i = st.selectbox("Ano Inicial", range(2015,2027), index=8, key="ano_i")
+        mes_i = st.selectbox("Trimestre Inicial", ['03','06','09','12'], key="mes_i")
     with col2:
-        ano_f = st.selectbox("Ano Final", range(2015,2027), index=10, key="ano_f", label_visibility="visible")
-        mes_f = st.selectbox("Trim. Final", ['03','06','09','12'], index=2, key="mes_f", label_visibility="visible")
+        ano_f = st.selectbox("Ano Final", range(2015,2027), index=10, key="ano_f")
+        mes_f = st.selectbox("Trimestre Final", ['03','06','09','12'], index=2, key="mes_f")
     
     if 'dict_aliases' in st.session_state:
-        if st.button("Extrair", type="primary", use_container_width=True, key="btn_extrair"):
+        if st.button("Extrair Dados", type="primary", use_container_width=True):
             periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
             progress_bar = st.progress(0)
             status = st.empty()
@@ -414,14 +396,16 @@ with st.sidebar:
             
             progress_bar.empty()
             status.empty()
-            st.success(f"✓ {len(dados)} períodos")
+            st.success(f"{len(dados)} períodos extraídos com sucesso")
             st.rerun()
     else:
-        st.warning("Carregue aliases primeiro")
+        st.warning("Carregue os aliases primeiro")
 
-# CONTEÚDO
+# CONTEÚDO PRINCIPAL
 if menu == "Sobre":
+    # PÁGINA SOBRE
     st.markdown("---")
+    
     st.markdown("""
     ### Sobre o Fica de Olho
     
@@ -465,30 +449,41 @@ if menu == "Sobre":
     """)
     
     st.markdown("---")
-    st.markdown("**Desenvolvido em 2026 por Matheus Prates, CFA**")
+    st.markdown("**Desenvolvido em 2026 por Matheus Prates, CFA** | *Ferramenta de código aberto para análise do sistema financeiro brasileiro*")
 
 elif menu == "Análise Individual":
+    # ANÁLISE INDIVIDUAL DE BANCO
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
         
+        # Verificar se há dados
         if len(df) > 0 and 'Instituição' in df.columns:
+            # Obter bancos com alias e sem alias
             bancos_todos = df['Instituição'].dropna().unique().tolist()
             
             if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+                # Separar bancos com e sem alias
                 bancos_com_alias = []
                 bancos_sem_alias = []
                 
                 for banco in bancos_todos:
                     if banco in st.session_state['dict_aliases']:
+                        # Usar o ALIAS para ordenação
                         alias = st.session_state['dict_aliases'][banco]
                         bancos_com_alias.append((alias, banco))
                     else:
                         bancos_sem_alias.append(banco)
                 
+                # Ordenar bancos com alias pelo ALIAS (A-Z)
                 bancos_com_alias_sorted = [banco for alias, banco in sorted(bancos_com_alias)]
+                
+                # Ordenar bancos sem alias pelo nome original (A-Z)
                 bancos_sem_alias_sorted = sorted(bancos_sem_alias)
+                
+                # Concatenar: aliases primeiro (ordenados por alias), depois demais (ordenados por nome)
                 bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
             else:
+                # Se não houver aliases, ordenar tudo alfabeticamente
                 bancos_disponiveis = sorted(bancos_todos)
             
             if len(bancos_disponiveis) > 0:
@@ -497,31 +492,51 @@ elif menu == "Análise Individual":
                 if banco_selecionado:
                     df_banco = df[df['Instituição'] == banco_selecionado].copy()
                     
+                    # Ordenar cronologicamente
                     df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
                     df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
                     df_banco = df_banco.sort_values(['ano', 'trimestre'])
                     
+                    # Header do banco
                     st.markdown(f"## {banco_selecionado}")
                     
+                    # Métricas do último período
                     ultimo_periodo = df_banco['Período'].iloc[-1]
                     dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
                     
                     col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
-                        st.metric("Carteira de Crédito", formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
+                        st.metric(
+                            "Carteira de Crédito",
+                            formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito')
+                        )
+                    
                     with col2:
-                        st.metric("ROE Anualizado", formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
+                        st.metric(
+                            "ROE Anualizado",
+                            formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)')
+                        )
+                    
                     with col3:
-                        st.metric("Índice de Basileia", formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
+                        st.metric(
+                            "Índice de Basileia",
+                            formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia')
+                        )
+                    
                     with col4:
-                        st.metric("Alavancagem", formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
+                        st.metric(
+                            "Alavancagem",
+                            formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem')
+                        )
                     
                     st.markdown("---")
                     st.markdown("### Evolução Histórica das Variáveis")
                     
+                    # Variáveis disponíveis (excluindo Instituição e Período)
                     variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
                     
+                    # Criar grid de mini gráficos (3 por linha)
                     for i in range(0, len(variaveis), 3):
                         cols = st.columns(3)
                         for j, col_obj in enumerate(cols):
@@ -531,45 +546,60 @@ elif menu == "Análise Individual":
                                     fig = criar_mini_grafico(df_banco, var, var)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
-                st.warning("Nenhuma instituição encontrada")
+                st.warning("Nenhuma instituição encontrada nos dados")
         else:
-            st.warning("Dados incompletos")
+            st.warning("Dados incompletos ou vazios")
+    
     else:
-        st.info("Carregando dados...")
+        st.info("Carregando dados automaticamente do GitHub...")
+        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Scatter Plot":
+    # SCATTER PLOT
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
         
+        # Variáveis numéricas disponíveis
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
+        
+        # Períodos disponíveis
         periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
         
         col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             var_x = st.selectbox("Eixo X", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
+        
         with col2:
             var_y = st.selectbox("Eixo Y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
+        
         with col3:
             var_size = st.selectbox("Tamanho", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
+        
         with col4:
             periodo_scatter = st.selectbox("Período", periodos, index=len(periodos)-1)
+        
         with col5:
             top_n_scatter = st.slider("TOP N", 5, 50, 15)
         
+        # Criar scatter plot
         df_scatter = df[df['Período'] == periodo_scatter].nlargest(top_n_scatter, 'Carteira de Crédito')
         
+        # Obter formatação dos eixos
         format_x = get_axis_format(var_x)
         format_y = get_axis_format(var_y)
         format_size = get_axis_format(var_size)
         
+        # Preparar dados com multiplicadores
         df_scatter_plot = df_scatter.copy()
         df_scatter_plot['x_display'] = df_scatter_plot[var_x] * format_x['multiplicador']
         df_scatter_plot['y_display'] = df_scatter_plot[var_y] * format_y['multiplicador']
         df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
         
+        # Aplicar cores personalizadas se disponível
         if 'dict_cores_personalizadas' in st.session_state and st.session_state['dict_cores_personalizadas']:
             color_map = st.session_state['dict_cores_personalizadas']
+            
             fig_scatter = go.Figure()
             
             for instituicao in df_scatter_plot['Instituição'].unique():
@@ -598,9 +628,15 @@ elif menu == "Scatter Plot":
                 paper_bgcolor='white',
                 showlegend=True,
                 legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
-                xaxis=dict(tickformat=format_x['tickformat'], ticksuffix=format_x['ticksuffix']),
-                yaxis=dict(tickformat=format_y['tickformat'], ticksuffix=format_y['ticksuffix']),
-                font=dict(family='Source Sans 3')
+                xaxis=dict(
+                    tickformat=format_x['tickformat'],
+                    ticksuffix=format_x['ticksuffix']
+                ),
+                yaxis=dict(
+                    tickformat=format_y['tickformat'],
+                    ticksuffix=format_y['ticksuffix']
+                ),
+                font=dict(family='Inter')
             )
         else:
             fig_scatter = px.scatter(
@@ -620,16 +656,27 @@ elif menu == "Scatter Plot":
                 paper_bgcolor='white',
                 showlegend=True,
                 legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
-                xaxis=dict(tickformat=format_x['tickformat'], ticksuffix=format_x['ticksuffix'], title=var_x),
-                yaxis=dict(tickformat=format_y['tickformat'], ticksuffix=format_y['ticksuffix'], title=var_y),
-                font=dict(family='Source Sans 3')
+                xaxis=dict(
+                    tickformat=format_x['tickformat'],
+                    ticksuffix=format_x['ticksuffix'],
+                    title=var_x
+                ),
+                yaxis=dict(
+                    tickformat=format_y['tickformat'],
+                    ticksuffix=format_y['ticksuffix'],
+                    title=var_y
+                ),
+                font=dict(family='Inter')
             )
             
             fig_scatter.update_traces(marker=dict(line=dict(width=1, color='white')))
         
         st.plotly_chart(fig_scatter, use_container_width=True)
+    
     else:
-        st.info("Carregando dados...")
+        st.info("Carregando dados automaticamente do GitHub...")
+        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
 
+# Footer
 st.markdown("---")
 st.caption("Desenvolvido em 2026 por Matheus Prates, CFA")
