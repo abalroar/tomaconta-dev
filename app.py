@@ -27,8 +27,15 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100;200;300;400;500;600;700&display=swap');
 
+    /* ESCONDE HEADER MAS PRESERVA BOTÃO DA SIDEBAR */
     .stApp > header {
-        display: none !important;
+        background-color: transparent !important;
+    }
+    
+    .stApp > header > div {
+        visibility: hidden !important;
+        height: 0 !important;
+        overflow: hidden !important;
     }
     
     [data-testid="stDecoration"] {
@@ -36,20 +43,30 @@ st.markdown("""
     }
     
     [data-testid="stToolbar"] {
-        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
     }
     
-    [data-testid="stStatusWidget"] > div > div > div > button {
-        display: none !important;
-    }
-    
+    /* FORÇA O BOTÃO DE TOGGLE DA SIDEBAR A SEMPRE APARECER */
     [data-testid="collapsedControl"] {
-        display: block !important;
+        display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
         pointer-events: auto !important;
-        position: relative !important;
-        left: auto !important;
+        position: fixed !important;
+        top: 0.5rem !important;
+        left: 0.5rem !important;
+        z-index: 999999 !important;
+        background-color: white !important;
+        border-radius: 0.5rem !important;
+        padding: 0.25rem !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+    }
+    
+    button[kind="header"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
     }
 
     .block-container {
