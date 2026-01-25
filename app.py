@@ -32,6 +32,12 @@ st.markdown("""
         left: -9999px !important;
     }
     
+    /* Remover padding do topo da área principal */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 0rem !important;
+    }
+    
     /* Aplicar IBM Plex Sans em TODOS os elementos */
     * {
         font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
@@ -54,16 +60,21 @@ st.markdown("""
         font-weight: 300 !important;
     }
     
-    /* Logo no sidebar */
+    /* Logo no sidebar - CENTRALIZADO */
     .sidebar-logo {
         text-align: center;
         padding: 1rem 0 0.5rem 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
     }
     
     .sidebar-logo img {
         border-radius: 50%;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         max-width: 100px;
+        margin: 0 auto;
+        display: block;
     }
     
     /* Título no sidebar */
@@ -423,8 +434,6 @@ with st.sidebar:
         st.warning("carregue os aliases primeiro")
 
 if menu == "sobre":
-    st.markdown("---")
-    
     st.markdown("""
     ## sobre a plataforma
     
