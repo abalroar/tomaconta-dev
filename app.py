@@ -933,7 +933,8 @@ elif menu == "Scatter Plot":
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # Primeira linha: variáveis dos eixos e tamanho
+        col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             var_x = st.selectbox("eixo x", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
@@ -945,10 +946,52 @@ elif menu == "Scatter Plot":
             var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
         with col4:
             periodo_scatter = st.selectbox("período", periodos, index=len(periodos)-1)
-        with col5:
-            top_n_scatter = st.slider("top n", 5, 50, 15)
 
-        df_scatter = df[df['Período'] == periodo_scatter].nlargest(top_n_scatter, 'Carteira de Crédito')
+        # Segunda linha: filtros de seleção de bancos
+        col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+
+        with col_f1:
+            top_n_scatter = st.slider("top n (por carteira)", 5, 50, 15)
+
+        # Opções de Peers disponíveis
+        peers_disponiveis = []
+        if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+            peers_disponiveis = st.session_state['colunas_classificacao']
+
+        with col_f2:
+            opcoes_peer = ['Nenhum'] + peers_disponiveis
+            peer_selecionado = st.selectbox("filtrar por peer", opcoes_peer, index=0)
+
+        # Se um peer foi selecionado, mostrar multiselect com os valores desse peer
+        bancos_peer_selecionados = []
+        if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
+            df_aliases = st.session_state['df_aliases']
+            # Pega valores únicos dessa coluna de peer
+            valores_peer = df_aliases[peer_selecionado].dropna().unique().tolist()
+            valores_peer = [v for v in valores_peer if str(v).strip() != '']
+
+            with col_f3:
+                valores_selecionados = st.multiselect(
+                    f"valores de {peer_selecionado}",
+                    sorted(valores_peer),
+                    default=sorted(valores_peer)[:1] if valores_peer else []
+                )
+
+            # Filtra bancos que pertencem aos valores selecionados
+            if valores_selecionados:
+                # Pega os aliases dos bancos que têm os valores selecionados
+                bancos_filtrados = df_aliases[df_aliases[peer_selecionado].isin(valores_selecionados)]['Alias Banco'].tolist()
+                bancos_peer_selecionados = bancos_filtrados
+
+        # Aplica filtros ao dataframe
+        df_periodo = df[df['Período'] == periodo_scatter]
+
+        if bancos_peer_selecionados:
+            # Filtra pelos bancos do peer selecionado
+            df_scatter = df_periodo[df_periodo['Instituição'].isin(bancos_peer_selecionados)]
+        else:
+            # Usa top N por carteira
+            df_scatter = df_periodo.nlargest(top_n_scatter, 'Carteira de Crédito')
 
         format_x = get_axis_format(var_x)
         format_y = get_axis_format(var_y)
