@@ -347,7 +347,7 @@ def formatar_valor(valor, variavel):
     if pd.isna(valor):
         return "N/A"
 
-    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
+    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
     vars_razao = ['Alavancagem', 'Risco/Retorno']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
 
@@ -362,7 +362,7 @@ def formatar_valor(valor, variavel):
         return f"{valor:.2f}"
 
 def get_axis_format(variavel):
-    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
+    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
 
     if variavel in vars_percentual:
@@ -391,7 +391,7 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     if not cor_banco:
         cor_banco = '#1f77b4'
 
-    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
+    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
 
     if variavel in vars_percentual:
@@ -508,7 +508,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
     def criar_figura_grafico(df_plot, variavel, titulo):
         fig, ax = plt.subplots(figsize=(2.4, 1.8), dpi=100)
 
-        vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
+        vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
         vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
 
         y_values = df_plot[variavel].values
