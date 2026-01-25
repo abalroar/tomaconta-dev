@@ -11,60 +11,63 @@ from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, car
 
 st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado com fonte Inter GLOBAL
+# CSS customizado com fonte estilo StockPeers
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
     
-    /* Aplicar Inter em TODOS os elementos */
+    /* Aplicar Source Sans 3 em TODOS os elementos de texto */
     * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     }
     
     html, body, [class*="css"], div, span, p, label, input, select, textarea, button {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
     }
     
     /* Headers e títulos */
     h1, h2, h3, h4, h5, h6 {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
         font-weight: 700 !important;
+        letter-spacing: -0.02em;
     }
     
     /* Sidebar */
     [data-testid="stSidebar"] * {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
     }
     
     /* Botões */
     button[kind="primary"], button[kind="secondary"], .stButton button {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
         font-weight: 600 !important;
+        letter-spacing: 0.01em;
     }
     
     /* Selectbox, inputs */
     .stSelectbox, .stTextInput, .stNumberInput, .stSlider {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
     }
     
     /* Métricas */
     [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
     }
     
     /* Markdown */
     .stMarkdown, .stMarkdown * {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
     }
     
     /* Expander */
     .streamlit-expanderHeader {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
     }
     
     /* Captions */
     .stCaption {
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
     }
     
     /* Container do logo */
@@ -86,8 +89,9 @@ st.markdown("""
         color: #1f77b4;
         text-align: center;
         margin-bottom: 0.5rem;
-        line-height: 1.2;
-        font-family: 'Inter', sans-serif !important;
+        line-height: 1.1;
+        font-family: 'Source Sans 3', sans-serif !important;
+        letter-spacing: -0.03em;
     }
     
     .sub-header {
@@ -95,8 +99,9 @@ st.markdown("""
         color: #666;
         text-align: center;
         margin-bottom: 0.5rem;
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
         font-weight: 400;
+        letter-spacing: -0.01em;
     }
     
     .by-line {
@@ -105,7 +110,7 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
         font-style: italic;
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
         font-weight: 300;
     }
     
@@ -119,7 +124,18 @@ st.markdown("""
     div[data-testid="stMetricValue"] {
         font-size: 2rem;
         font-weight: 700;
-        font-family: 'Inter', sans-serif !important;
+        font-family: 'Source Sans 3', sans-serif !important;
+    }
+    
+    /* Melhorar aparência dos botões */
+    .stButton button {
+        border-radius: 6px;
+        transition: all 0.2s ease;
+    }
+    
+    .stButton button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -255,7 +271,7 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     # Configurar layout
     fig.update_layout(
-        title=dict(text=titulo, font=dict(size=12, color='#333', family='Inter')),
+        title=dict(text=titulo, font=dict(size=12, color='#333', family='Source Sans 3')),
         height=180,
         margin=dict(l=10, r=10, t=35, b=30),
         plot_bgcolor='#f8f9fa',
@@ -268,7 +284,7 @@ def criar_mini_grafico(df_banco, variavel, titulo):
             ticksuffix=suffix
         ),
         hovermode='x',
-        font=dict(family='Inter')
+        font=dict(family='Source Sans 3')
     )
     
     return fig
@@ -636,7 +652,7 @@ elif menu == "Scatter Plot":
                     tickformat=format_y['tickformat'],
                     ticksuffix=format_y['ticksuffix']
                 ),
-                font=dict(family='Inter')
+                font=dict(family='Source Sans 3')
             )
         else:
             fig_scatter = px.scatter(
@@ -666,7 +682,7 @@ elif menu == "Scatter Plot":
                     ticksuffix=format_y['ticksuffix'],
                     title=var_y
                 ),
-                font=dict(family='Inter')
+                font=dict(family='Source Sans 3')
             )
             
             fig_scatter.update_traces(marker=dict(line=dict(width=1, color='white')))
