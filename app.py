@@ -50,13 +50,39 @@ st.markdown("""
     /* Logo no sidebar */
     .sidebar-logo {
         text-align: center;
-        padding: 1rem 0 1.5rem 0;
+        padding: 1rem 0 0.5rem 0;
     }
     
     .sidebar-logo img {
         border-radius: 50%;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        max-width: 80px;
+        max-width: 100px;
+    }
+    
+    /* Título no sidebar */
+    .sidebar-title {
+        text-align: center;
+        font-size: 1.8rem;
+        font-weight: 300;
+        color: #1f77b4;
+        margin: 0.5rem 0 0.2rem 0;
+        line-height: 1.2;
+    }
+    
+    .sidebar-subtitle {
+        text-align: center;
+        font-size: 0.85rem;
+        color: #666;
+        margin: 0 0 0.2rem 0;
+        line-height: 1.3;
+    }
+    
+    .sidebar-author {
+        text-align: center;
+        font-size: 0.75rem;
+        color: #888;
+        font-style: italic;
+        margin: 0 0 1.5rem 0;
     }
     
     /* Botões */
@@ -100,36 +126,6 @@ st.markdown("""
     .stCaption {
         font-family: 'IBM Plex Sans', sans-serif !important;
         font-weight: 300 !important;
-    }
-    
-    /* Header principal customizado */
-    .main-header {
-        font-size: 4.5rem;
-        font-weight: 300 !important;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 0.5rem;
-        line-height: 1.2;
-        font-family: 'IBM Plex Sans', sans-serif !important;
-    }
-    
-    .sub-header {
-        font-size: 1.5rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 0.5rem;
-        font-family: 'IBM Plex Sans', sans-serif !important;
-        font-weight: 300 !important;
-    }
-    
-    .by-line {
-        font-size: 1rem;
-        color: #888;
-        text-align: center;
-        margin-bottom: 2rem;
-        font-style: italic;
-        font-family: 'IBM Plex Sans', sans-serif !important;
-        font-weight: 200 !important;
     }
     
     .stMetric {
@@ -304,11 +300,6 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     return fig
 
-# Títulos centralizados
-st.markdown('<p class="main-header">fica de olho</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
-st.markdown('<p class="by-line">por matheus prates, cfa</p>', unsafe_allow_html=True)
-
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
     if df_aliases is not None:
@@ -324,11 +315,17 @@ if 'dados_periodos' not in st.session_state:
         st.session_state['dados_periodos'] = dados_cache
 
 with st.sidebar:
-    # Logo no topo do sidebar
+    # Logo e título no topo do sidebar
     if os.path.exists(LOGO_PATH):
         st.markdown('<div class="sidebar-logo">', unsafe_allow_html=True)
-        st.image(LOGO_PATH, width=80)
+        st.image(LOGO_PATH, width=100)
         st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<p class="sidebar-title">fica de olho</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-subtitle">análise de instituições<br>financeiras brasileiras</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-author">por matheus prates, cfa</p>', unsafe_allow_html=True)
+    
+    st.divider()
     
     st.title("navegação")
     
