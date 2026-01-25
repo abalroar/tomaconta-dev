@@ -115,9 +115,25 @@ def formatar_valor(valor, variavel):
     else:
         return f"{valor:.2f}"
 
+def get_axis_format(variavel):
+    """Retorna formato e multiplicador para eixos do gráfico"""
+    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
+    vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
+    
+    if variavel in vars_percentual:
+        return {'tickformat': '.2f', 'ticksuffix': '%', 'multiplicador': 100}
+    elif variavel in vars_monetarias:
+        return {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+    else:
+        return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
+
 def criar_mini_grafico(df_banco, variavel, titulo):
     """Cria mini gráfico para uma variável específica"""
-    df_sorted = df_banco.sort_values('Período')
+    # Ordenar cronologicamente por ano e trimestre
+    df_sorted = df_banco.copy()
+    df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
+    df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
+    df_sorted = df_sorted.sort_values(['ano', 'trimestre'])
     
     # Determinar tipo de formatação
     vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
@@ -361,13 +377,17 @@ elif menu == "🏦 Análise Individual":
                 
                 if banco_selecionado:
                     df_banco = df[df['Instituição'] == banco_selecionado].copy()
-                    df_banco = df_banco.sort_values('Período')
+                    
+                    # Ordenar cronologicamente
+                    df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
+                    df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
+                    df_banco = df_banco.sort_values(['ano', 'trimestre'])
                     
                     # Header do banco
                     st.markdown(f"## {banco_selecionado}")
                     
                     # Métricas do último período
-                    ultimo_periodo = df_banco['Período'].max()
+                    ultimo_periodo = df_banco['Período'].iloc[-1]
                     dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
                     
                     col1, col2, col3, col4 = st.columns(4)
@@ -400,7 +420,7 @@ elif menu == "🏦 Análise Individual":
                     st.markdown("### 📊 Evolução Histórica das Variáveis")
                     
                     # Variáveis disponíveis (excluindo Instituição e Período)
-                    variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período'] and df_banco[col].notna().any()]
+                    variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
                     
                     # Criar grid de mini gráficos (3 por linha)
                     for i in range(0, len(variaveis), 3):
@@ -451,27 +471,38 @@ elif menu == "🎯 Scatter Plot":
         # Criar scatter plot
         df_scatter = df[df['Período'] == periodo_scatter].nlargest(top_n_scatter, 'Carteira de Crédito')
         
+        # Obter formatação dos eixos
+        format_x = get_axis_format(var_x)
+        format_y = get_axis_format(var_y)
+        format_size = get_axis_format(var_size)
+        
+        # Preparar dados com multiplicadores
+        df_scatter_plot = df_scatter.copy()
+        df_scatter_plot['x_display'] = df_scatter_plot[var_x] * format_x['multiplicador']
+        df_scatter_plot['y_display'] = df_scatter_plot[var_y] * format_y['multiplicador']
+        df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
+        
         # Aplicar cores personalizadas se disponível
         if 'dict_cores_personalizadas' in st.session_state and st.session_state['dict_cores_personalizadas']:
             color_map = st.session_state['dict_cores_personalizadas']
             
             fig_scatter = go.Figure()
             
-            for instituicao in df_scatter['Instituição'].unique():
-                df_inst = df_scatter[df_scatter['Instituição'] == instituicao]
+            for instituicao in df_scatter_plot['Instituição'].unique():
+                df_inst = df_scatter_plot[df_scatter_plot['Instituição'] == instituicao]
                 cor = color_map.get(instituicao, '#1f77b4')
                 
                 fig_scatter.add_trace(go.Scatter(
-                    x=df_inst[var_x],
-                    y=df_inst[var_y],
+                    x=df_inst['x_display'],
+                    y=df_inst['y_display'],
                     mode='markers',
                     name=instituicao,
                     marker=dict(
-                        size=df_inst[var_size] / df_scatter[var_size].max() * 100,
+                        size=df_inst['size_display'] / df_scatter_plot['size_display'].max() * 100,
                         color=cor,
                         line=dict(width=1, color='white')
                     ),
-                    hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}<br>{var_y}: %{{y}}<extra></extra>'
+                    hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}{format_x["ticksuffix"]}<br>{var_y}: %{{y}}{format_y["ticksuffix"]}<extra></extra>'
                 ))
             
             fig_scatter.update_layout(
@@ -482,18 +513,26 @@ elif menu == "🎯 Scatter Plot":
                 plot_bgcolor='#f8f9fa',
                 paper_bgcolor='white',
                 showlegend=True,
-                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                xaxis=dict(
+                    tickformat=format_x['tickformat'],
+                    ticksuffix=format_x['ticksuffix']
+                ),
+                yaxis=dict(
+                    tickformat=format_y['tickformat'],
+                    ticksuffix=format_y['ticksuffix']
+                )
             )
         else:
             fig_scatter = px.scatter(
-                df_scatter, 
-                x=var_x, 
-                y=var_y, 
-                size=var_size, 
+                df_scatter_plot, 
+                x='x_display', 
+                y='y_display', 
+                size='size_display', 
                 color='Instituição',
                 hover_data=['Alavancagem', 'Índice de Basileia', 'ROE An. (%)'],
                 title=f'{var_y} vs {var_x} - {periodo_scatter} (TOP {top_n_scatter})',
-                labels={var_x: var_x, var_y: var_y}
+                labels={'x_display': var_x, 'y_display': var_y}
             )
             
             fig_scatter.update_layout(
@@ -501,7 +540,17 @@ elif menu == "🎯 Scatter Plot":
                 plot_bgcolor='#f8f9fa',
                 paper_bgcolor='white',
                 showlegend=True,
-                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                xaxis=dict(
+                    tickformat=format_x['tickformat'],
+                    ticksuffix=format_x['ticksuffix'],
+                    title=var_x
+                ),
+                yaxis=dict(
+                    tickformat=format_y['tickformat'],
+                    ticksuffix=format_y['ticksuffix'],
+                    title=var_y
+                )
             )
             
             fig_scatter.update_traces(marker=dict(line=dict(width=1, color='white')))
