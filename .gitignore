@@ -5,4 +5,4 @@ __pycache__/
 data/dados_cache.pkl
 data/cache_info.txt
 *.xlsx
-!data/Alias.xlsx
+!data/Aliases.xlsx
