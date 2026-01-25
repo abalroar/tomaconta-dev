@@ -872,7 +872,7 @@ elif menu == "Scatter Plot":
         with col2:
             var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
         with col3:
-            opcoes_tamanho = ['Tamanho fixo'] + colunas_numericas
+            opcoes_tamanho = ['Tamanho Fixo'] + colunas_numericas
             default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
             var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
         with col4:
@@ -889,8 +889,8 @@ elif menu == "Scatter Plot":
         df_scatter_plot['x_display'] = df_scatter_plot[var_x] * format_x['multiplicador']
         df_scatter_plot['y_display'] = df_scatter_plot[var_y] * format_y['multiplicador']
 
-        if var_size == 'Tamanho fixo':
-            tamanho_constante = 50
+        if var_size == 'Tamanho Fixo':
+            tamanho_constante = 25
         else:
             format_size = get_axis_format(var_size)
             df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
@@ -906,7 +906,7 @@ elif menu == "Scatter Plot":
                 cor = cores_plotly[idx_cor % len(cores_plotly)]
                 idx_cor += 1
 
-            if var_size == 'Tamanho fixo':
+            if var_size == 'Tamanho Fixo':
                 marker_size = tamanho_constante
             else:
                 marker_size = df_inst['size_display'] / df_scatter_plot['size_display'].max() * 100
