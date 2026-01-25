@@ -47,7 +47,7 @@ st.markdown("""
         height: 0 !important;
     }
     
-    /* FORÇA O BOTÃO DE TOGGLE DA SIDEBAR A SEMPRE APARECER */
+    /* FIX PROBLEMA 2: BOTÃO TOGGLE SIDEBAR SEMPRE VISÍVEL */
     [data-testid="collapsedControl"] {
         display: flex !important;
         visibility: visible !important;
@@ -61,6 +61,12 @@ st.markdown("""
         border-radius: 0.5rem !important;
         padding: 0.25rem !important;
         box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+    }
+    
+    /* Remove texto "keyboard_double" do botão */
+    [data-testid="collapsedControl"] svg {
+        width: 1.5rem !important;
+        height: 1.5rem !important;
     }
     
     button[kind="header"] {
@@ -93,45 +99,50 @@ st.markdown("""
         font-weight: 300 !important;
     }
 
-    .sidebar-logo {
-        text-align: center;
-        padding: 1rem 0 0.5rem 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
+    /* FIX PROBLEMA 1: LOGO CENTRALIZADO */
+    .sidebar-logo-container {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        padding: 1rem 0 0.5rem 0 !important;
+        margin: 0 !important;
     }
-
-    .sidebar-logo img {
-        border-radius: 50%;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        max-width: 100px;
-        margin: 0 auto;
-        display: block;
+    
+    .sidebar-logo-container img {
+        border-radius: 50% !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+        max-width: 100px !important;
+        display: block !important;
+        margin: 0 auto !important;
     }
 
     .sidebar-title {
-        text-align: center;
-        font-size: 1.8rem;
-        font-weight: 300;
-        color: #1f77b4;
-        margin: 0.5rem 0 0.2rem 0;
-        line-height: 1.2;
+        text-align: center !important;
+        font-size: 1.8rem !important;
+        font-weight: 300 !important;
+        color: #1f77b4 !important;
+        margin: 0.5rem 0 0.2rem 0 !important;
+        line-height: 1.2 !important;
+        width: 100% !important;
     }
 
     .sidebar-subtitle {
-        text-align: center;
-        font-size: 0.85rem;
-        color: #666;
-        margin: 0 0 0.2rem 0;
-        line-height: 1.3;
+        text-align: center !important;
+        font-size: 0.85rem !important;
+        color: #666 !important;
+        margin: 0 0 0.2rem 0 !important;
+        line-height: 1.3 !important;
+        width: 100% !important;
     }
 
     .sidebar-author {
-        text-align: center;
-        font-size: 0.75rem;
-        color: #888;
-        font-style: italic;
-        margin: 0 0 1rem 0;
+        text-align: center !important;
+        font-size: 0.75rem !important;
+        color: #888 !important;
+        font-style: italic !important;
+        margin: 0 0 1rem 0 !important;
+        width: 100% !important;
     }
 
     button[kind="primary"], button[kind="secondary"], .stButton button {
@@ -210,9 +221,12 @@ st.markdown("""
         margin-top: 0.5rem !important;
     }
     
+    /* FIX PROBLEMA 2: Remove sobreposição do expander */
     [data-testid="stExpander"] {
         margin-top: 1rem !important;
         clear: both !important;
+        z-index: 1 !important;
+        position: relative !important;
     }
     
     [data-testid="stSidebar"] .row-widget {
@@ -254,6 +268,14 @@ def carregar_aliases():
         return pd.read_excel(ALIASES_PATH)
     return None
 
+# FIX PROBLEMA 3: Normalização de nomes de instituições
+def normalizar_nome_instituicao(nome):
+    """Normaliza nome removendo espaços extras e convertendo para uppercase"""
+    if pd.isna(nome):
+        return ""
+    return str(nome).strip().upper()
+
+# FIX PROBLEMA 3: Carregamento correto de cores com normalização
 def carregar_cores_aliases_local(df_aliases):
     dict_cores = {}
     if df_aliases is None or df_aliases.empty:
@@ -275,11 +297,15 @@ def carregar_cores_aliases_local(df_aliases):
         cor_valor = row.get(coluna_cor)
 
         if pd.notna(instituicao) and pd.notna(cor_valor):
+            # Normaliza o nome da instituição
+            instituicao_norm = normalizar_nome_instituicao(instituicao)
+            
+            # Processa o código da cor
             cor_str = str(cor_valor).strip().upper()
             if not cor_str.startswith('#'):
                 cor_str = '#' + cor_str
             if len(cor_str) == 7 and all(c in '0123456789ABCDEF' for c in cor_str[1:]):
-                dict_cores[instituicao] = cor_str
+                dict_cores[instituicao_norm] = cor_str
 
     return dict_cores
 
@@ -333,9 +359,12 @@ def get_axis_format(variavel):
     else:
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
+# FIX PROBLEMA 3: Busca de cor com normalização
 def obter_cor_banco(instituicao):
-    if 'dict_cores_personalizadas' in st.session_state and instituicao in st.session_state['dict_cores_personalizadas']:
-        return st.session_state['dict_cores_personalizadas'][instituicao]
+    if 'dict_cores_personalizadas' in st.session_state:
+        instituicao_norm = normalizar_nome_instituicao(instituicao)
+        if instituicao_norm in st.session_state['dict_cores_personalizadas']:
+            return st.session_state['dict_cores_personalizadas'][instituicao_norm]
     return None
 
 def criar_mini_grafico(df_banco, variavel, titulo):
@@ -561,10 +590,13 @@ if 'dados_periodos' not in st.session_state:
         st.session_state['dados_periodos'] = dados_cache
 
 with st.sidebar:
+    # FIX PROBLEMA 1: Logo centralizado com HTML inline
     if os.path.exists(LOGO_PATH):
-        st.markdown('<div class="sidebar-logo">', unsafe_allow_html=True)
-        st.image(LOGO_PATH, width=100)
-        st.markdown('</div>', unsafe_allow_html=True)
+        col_logo = st.columns([1])[0]
+        with col_logo:
+            st.markdown('<div class="sidebar-logo-container">', unsafe_allow_html=True)
+            st.image(LOGO_PATH, width=100)
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<p class="sidebar-title">fica de olho</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-subtitle">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
