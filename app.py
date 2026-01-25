@@ -511,7 +511,7 @@ if 'dados_periodos' not in st.session_state:
     if dados_cache:
         st.session_state['dados_periodos'] = dados_cache
 
-# SIDEBAR COM ALTERNATIVA 1 (SEGMENTED CONTROL) - MINIMALISTA
+# SIDEBAR - CORRIGIDO
 with st.sidebar:
     if os.path.exists(LOGO_PATH):
         st.markdown('<div class="sidebar-logo">', unsafe_allow_html=True)
@@ -524,7 +524,7 @@ with st.sidebar:
 
     st.divider()
 
-    # NAVEGAÇÃO COM SEGMENTED CONTROL (compacto e profissional)
+    # NAVEGAÇÃO - SOLUÇÃO 1 APLICADA
     if 'menu_atual' not in st.session_state:
         st.session_state['menu_atual'] = "Sobre"
 
@@ -532,14 +532,14 @@ with st.sidebar:
         "navegação",
         ["Sobre", "Análise Individual", "Scatter Plot"],
         default=st.session_state['menu_atual'],
-        label_visibility="visible"
+        label_visibility="collapsed"  # ✅ MUDANÇA APLICADA AQUI
     )
 
     if menu != st.session_state['menu_atual']:
         st.session_state['menu_atual'] = menu
         st.rerun()
 
-    # CONTROLE AVANÇADO (colapsado por padrão - UX limpa)
+    # CONTROLE AVANÇADO
     with st.expander("controle avançado"):
         if 'df_aliases' in st.session_state:
             st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
