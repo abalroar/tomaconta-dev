@@ -24,32 +24,96 @@ import numpy as np
 
 st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# CSS simples - tipografia e layout apenas
+# CSS - sidebar fixa, tipografia e ícones corrigidos
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100;200;300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+
+    /* ===========================================
+       SIDEBAR SEMPRE VISÍVEL (sem toggle)
+       =========================================== */
+    [data-testid="stSidebar"] {
+        transform: none !important;
+        margin-left: 0 !important;
+        position: relative !important;
+    }
+
+    /* Esconde botão de toggle da sidebar */
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
 
     /* Esconde decoração do header */
     [data-testid="stDecoration"] { display: none !important; }
     [data-testid="stToolbar"] { display: none !important; }
 
-    /* Tipografia IBM Plex Sans */
-    html, body, .stApp, div, p, span, label, input, select, textarea, button {
+    /* ===========================================
+       TIPOGRAFIA - IBM Plex Sans
+       IMPORTANTE: Não aplicar em spans de ícones
+       =========================================== */
+    html, body, .stApp {
         font-family: 'IBM Plex Sans', sans-serif !important;
     }
 
-    p, label, span, div { font-weight: 300 !important; }
+    /* Elementos de texto (exclui spans que podem ser ícones) */
+    div, p, label, input, select, textarea, button, h1, h2, h3, h4, h5, h6 {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+    }
+
+    p, label, div { font-weight: 300 !important; }
     h1, h2, h3, h4, h5, h6 { font-weight: 500 !important; }
     button { font-weight: 400 !important; }
 
+    /* ===========================================
+       ÍCONES - Material Symbols (corrige texto)
+       =========================================== */
+    /* Ícone do expander */
+    [data-testid="stExpander"] summary span[data-testid="stExpanderToggleIcon"],
+    [data-testid="stExpander"] summary > span:first-child,
+    [data-testid="stExpanderToggleIcon"] {
+        font-family: 'Material Symbols Rounded' !important;
+        font-weight: normal !important;
+        font-style: normal !important;
+        font-size: 24px !important;
+        line-height: 1 !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        white-space: nowrap !important;
+        direction: ltr !important;
+        -webkit-font-feature-settings: 'liga' !important;
+        font-feature-settings: 'liga' !important;
+        -webkit-font-smoothing: antialiased !important;
+    }
+
+    /* ===========================================
+       LAYOUT - Sidebar e Expander
+       =========================================== */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 0rem !important;
     }
 
-    /* Sidebar */
-    [data-testid="stSidebar"] > div:first-child { padding-top: 0.5rem !important; }
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 0.5rem !important;
+    }
 
+    /* Expander - corrige sobreposição */
+    [data-testid="stExpander"] {
+        margin-top: 1rem !important;
+        overflow: visible !important;
+    }
+
+    [data-testid="stExpander"] summary {
+        display: flex !important;
+        align-items: center !important;
+        gap: 0.5rem !important;
+        padding: 0.5rem 0 !important;
+    }
+
+    /* ===========================================
+       ESTILOS CUSTOMIZADOS
+       =========================================== */
     .sidebar-logo-container {
         width: 100%; display: flex; justify-content: center;
         padding: 1rem 0 0.5rem 0;
@@ -71,14 +135,12 @@ st.markdown("""
         font-style: italic; margin: 0 0 1rem 0;
     }
 
-    /* Cards */
     .feature-card {
         background-color: #f8f9fa; padding: 1.5rem; border-radius: 8px;
         margin-bottom: 1rem; border-left: 4px solid #1f77b4;
     }
     .feature-card h4 { color: #1f77b4; margin-bottom: 0.5rem; }
 
-    /* Métricas */
     .stMetric {
         background-color: #f8f9fa; padding: 15px;
         border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
