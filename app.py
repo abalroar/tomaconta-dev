@@ -795,8 +795,17 @@ elif menu == "Análise Individual":
                     else:
                         bancos_sem_alias.append(banco)
 
-                bancos_com_alias_sorted = [banco for alias, banco in sorted(bancos_com_alias)]
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias)
+                # Ordenação: letras antes de números, case-insensitive
+                def sort_key(item):
+                    alias = item[0].lower()
+                    primeiro_char = alias[0] if alias else 'z'
+                    # Se começa com número, coloca depois das letras
+                    if primeiro_char.isdigit():
+                        return (1, alias)
+                    return (0, alias)
+
+                bancos_com_alias_sorted = [banco for alias, banco in sorted(bancos_com_alias, key=sort_key)]
+                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=lambda x: (1 if x[0].isdigit() else 0, x.lower()))
                 bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
             else:
                 bancos_disponiveis = sorted(bancos_todos)
