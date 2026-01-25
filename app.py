@@ -9,6 +9,15 @@ from pathlib import Path
 from datetime import datetime
 from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, carregar_cores_aliases
 
+# novos imports para PDF
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
 st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
 # CSS customizado com fonte IBM Plex Sans (clean e thin como StockPeers)
@@ -318,13 +327,139 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     return fig
 
+def gerar_scorecard_pdf(banco_selecionado, df_banco):
+    """Gera PDF simples com scorecard da análise individual"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        textColor=colors.HexColor('#1f77b4'),
+        spaceAfter=6,
+        alignment=TA_CENTER
+    )
+
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=13,
+        textColor=colors.HexColor('#1f77b4'),
+        spaceAfter=10,
+        spaceBefore=10
+    )
+
+    body_style = ParagraphStyle(
+        'CustomBody',
+        parent=styles['BodyText'],
+        fontSize=9,
+        alignment=TA_LEFT,
+        spaceAfter=4
+    )
+
+    story = []
+
+    # título
+    story.append(Paragraph(f"Scorecard - {banco_selecionado}", title_style))
+    story.append(Paragraph(
+        f"Período disponível: {df_banco['Período'].iloc[0]} a {df_banco['Período'].iloc[-1]}",
+        styles["Normal"]
+    ))
+    story.append(Spacer(1, 0.3*inch))
+
+    # métricas principais (último período)
+    ultimo_periodo = df_banco['Período'].iloc[-1]
+    dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
+
+    metricas_principais = [
+        ('Carteira de Crédito', 'Carteira de Crédito'),
+        ('ROE Anualizado', 'ROE An. (%)'),
+        ('Índice de Basileia', 'Índice de Basileia'),
+        ('Alavancagem', 'Alavancagem'),
+    ]
+
+    story.append(Paragraph("Métricas principais (último período)", heading_style))
+
+    metricas_data = [['Métrica', 'Valor']]
+    for label, col in metricas_principais:
+        valor = formatar_valor(dados_ultimo.get(col), col)
+        metricas_data.append([label, valor])
+
+    metricas_table = Table(metricas_data, colWidths=[3*inch, 2*inch])
+    metricas_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f77b4')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+
+    story.append(metricas_table)
+    story.append(Spacer(1, 0.25*inch))
+
+    # tabela de tendências simples (primeiro x último)
+    story.append(Paragraph("Tendência das principais variáveis", heading_style))
+
+    variaveis = [col for col in df_banco.columns
+                 if col not in ['Instituição', 'Período', 'ano', 'trimestre']
+                 and df_banco[col].notna().any()]
+
+    variaveis_top = variaveis[:6]  # até 6 linhas
+
+    tendencias_data = [['Variável', 'Primeiro', 'Último']]
+    for var in variaveis_top:
+        try:
+            primeiro = df_banco[df_banco[var].notna()].iloc[0][var]
+            ultimo = df_banco[df_banco[var].notna()].iloc[-1][var]
+            primeiro_fmt = formatar_valor(primeiro, var)
+            ultimo_fmt = formatar_valor(ultimo, var)
+            tendencias_data.append([var, primeiro_fmt, ultimo_fmt])
+        except Exception:
+            pass
+
+    tendencias_table = Table(tendencias_data, colWidths=[2.5*inch, 1.7*inch, 1.7*inch])
+    tendencias_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f77b4')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+
+    story.append(tendencias_table)
+    story.append(Spacer(1, 0.25*inch))
+
+    # rodapé
+    story.append(Paragraph(
+        f"<i>Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')} | Fonte: API IF.DATA - BCB</i>",
+        body_style
+    ))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+# ---------- estado inicial ----------
+
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
     if df_aliases is not None:
         st.session_state['df_aliases'] = df_aliases
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
+        # cores por banco vindas do Aliases
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
-        st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
+        st.session_state['colunas_classificacao'] = [
+            c for c in df_aliases.columns if c not in ['Instituição', 'Alias Banco', 'Cor', 'Código Cor']
+        ]
 
 if 'dados_periodos' not in st.session_state:
     baixar_cache_inicial()
@@ -350,15 +485,18 @@ with st.sidebar:
     if 'menu_atual' not in st.session_state:
         st.session_state['menu_atual'] = "sobre"
     
-    if st.button("sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "sobre" else "secondary"):
+    if st.button("sobre", use_container_width=True,
+                 type="primary" if st.session_state['menu_atual'] == "sobre" else "secondary"):
         st.session_state['menu_atual'] = "sobre"
         st.rerun()
     
-    if st.button("análise individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "análise individual" else "secondary"):
+    if st.button("análise individual", use_container_width=True,
+                 type="primary" if st.session_state['menu_atual'] == "análise individual" else "secondary"):
         st.session_state['menu_atual'] = "análise individual"
         st.rerun()
     
-    if st.button("scatter plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "scatter plot" else "secondary"):
+    if st.button("scatter plot", use_container_width=True,
+                 type="primary" if st.session_state['menu_atual'] == "scatter plot" else "secondary"):
         st.session_state['menu_atual'] = "scatter plot"
         st.rerun()
     
@@ -395,7 +533,9 @@ with st.sidebar:
             st.session_state['df_aliases'] = df_aliases
             st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
             st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
-            st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
+            st.session_state['colunas_classificacao'] = [
+                c for c in df_aliases.columns if c not in ['Instituição', 'Alias Banco', 'Cor', 'Código Cor']
+            ]
             st.success("aliases atualizados com sucesso")
     
     st.divider()
@@ -404,11 +544,11 @@ with st.sidebar:
     
     col1, col2 = st.columns(2)
     with col1:
-        ano_i = st.selectbox("ano inicial", range(2015,2027), index=8, key="ano_i")
-        mes_i = st.selectbox("trimestre inicial", ['03','06','09','12'], key="mes_i")
+        ano_i = st.selectbox("ano inicial", range(2015, 2027), index=8, key="ano_i")
+        mes_i = st.selectbox("trimestre inicial", ['03', '06', '09', '12'], key="mes_i")
     with col2:
-        ano_f = st.selectbox("ano final", range(2015,2027), index=10, key="ano_f")
-        mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
+        ano_f = st.selectbox("ano final", range(2015, 2027), index=10, key="ano_f")
+        mes_f = st.selectbox("trimestre final", ['03', '06', '09', '12'], index=2, key="mes_f")
     
     if 'dict_aliases' in st.session_state:
         if st.button("extrair dados", type="primary", use_container_width=True):
@@ -432,6 +572,8 @@ with st.sidebar:
             st.rerun()
     else:
         st.warning("carregue os aliases primeiro")
+
+# ---------- páginas ----------
 
 if menu == "sobre":
     st.markdown("""
@@ -560,7 +702,9 @@ elif menu == "análise individual":
                 bancos_disponiveis = sorted(bancos_todos)
             
             if len(bancos_disponiveis) > 0:
-                banco_selecionado = st.selectbox("selecione uma instituição", bancos_disponiveis, key="banco_individual")
+                banco_selecionado = st.selectbox(
+                    "selecione uma instituição", bancos_disponiveis, key="banco_individual"
+                )
                 
                 if banco_selecionado:
                     df_banco = df[df['Instituição'] == banco_selecionado].copy()
@@ -570,6 +714,16 @@ elif menu == "análise individual":
                     df_banco = df_banco.sort_values(['ano', 'trimestre'])
                     
                     st.markdown(f"## {banco_selecionado}")
+
+                    # botão de exportar PDF
+                    pdf_buffer = gerar_scorecard_pdf(banco_selecionado, df_banco)
+                    st.download_button(
+                        label="📥 baixar scorecard (pdf)",
+                        data=pdf_buffer.getvalue(),
+                        file_name=f"scorecard_{banco_selecionado.replace(' ', '_')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
                     
                     ultimo_periodo = df_banco['Período'].iloc[-1]
                     dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
@@ -577,18 +731,26 @@ elif menu == "análise individual":
                     col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
-                        st.metric("carteira de crédito", formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
+                        st.metric("carteira de crédito",
+                                  formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
                     with col2:
-                        st.metric("roe anualizado", formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
+                        st.metric("roe anualizado",
+                                  formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
                     with col3:
-                        st.metric("índice de basileia", formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
+                        st.metric("índice de basileia",
+                                  formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
                     with col4:
-                        st.metric("alavancagem", formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
+                        st.metric("alavancagem",
+                                  formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
                     
                     st.markdown("---")
                     st.markdown("### evolução histórica das variáveis")
                     
-                    variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
+                    variaveis = [
+                        col for col in df_banco.columns
+                        if col not in ['Instituição', 'Período', 'ano', 'trimestre']
+                        and df_banco[col].notna().any()
+                    ]
                     
                     for i in range(0, len(variaveis), 3):
                         cols = st.columns(3)
@@ -610,17 +772,29 @@ elif menu == "scatter plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
         
-        colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
+        colunas_numericas = [
+            col for col in df.columns
+            if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']
+        ]
         periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
         
         col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
-            var_x = st.selectbox("eixo x", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
+            var_x = st.selectbox(
+                "eixo x", colunas_numericas,
+                index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0
+            )
         with col2:
-            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
+            var_y = st.selectbox(
+                "eixo y", colunas_numericas,
+                index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1
+            )
         with col3:
-            var_size = st.selectbox("tamanho", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
+            var_size = st.selectbox(
+                "tamanho", colunas_numericas,
+                index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0
+            )
         with col4:
             periodo_scatter = st.selectbox("período", periodos, index=len(periodos)-1)
         with col5:
@@ -655,7 +829,11 @@ elif menu == "scatter plot":
                         color=cor,
                         line=dict(width=1, color='white')
                     ),
-                    hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}{format_x["ticksuffix"]}<br>{var_y}: %{{y}}{format_y["ticksuffix"]}<extra></extra>'
+                    hovertemplate=(
+                        f'<b>{instituicao}</b><br>'
+                        f'{var_x}: %{{x}}{format_x["ticksuffix"]}<br>'
+                        f'{var_y}: %{{y}}{format_y["ticksuffix"]}<extra></extra>'
+                    )
                 ))
             
             fig_scatter.update_layout(
