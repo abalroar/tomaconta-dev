@@ -58,7 +58,19 @@ with st.sidebar:
     
     st.divider()
     
-    uploaded_file = st.file_uploader("📤 Upload Aliases.xlsx", type=['xlsx'])
+    # Tentar carregar Aliases.xlsx do diretório data/
+    aliases_path = "data/Aliases.xlsx"
+    
+    if os.path.exists(aliases_path) and 'df_aliases' not in st.session_state:
+        df_aliases = pd.read_excel(aliases_path)
+        st.session_state['df_aliases'] = df_aliases
+        st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
+        st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
+        st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
+        st.success(f"✅ {len(df_aliases)} aliases carregados automaticamente")
+    
+    # Permitir upload manual (opcional)
+    uploaded_file = st.file_uploader("📤 Substituir Aliases.xlsx (opcional)", type=['xlsx'])
     
     if uploaded_file:
         df_aliases = pd.read_excel(uploaded_file)
@@ -66,9 +78,9 @@ with st.sidebar:
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
-        
-        st.success(f"✅ {len(df_aliases)} aliases carregados")
-        
+        st.success(f"✅ {len(df_aliases)} aliases carregados do upload")
+    
+    if 'df_aliases' in st.session_state:
         st.divider()
         st.subheader("📅 Extrair Novos Dados")
         
@@ -122,6 +134,6 @@ if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
     periodos_disponiveis = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
     st.info(f"📅 Períodos disponíveis: {periodos_disponiveis[0]} até {periodos_disponiveis[-1]} ({len(periodos_disponiveis)} trimestres)")
 else:
-    st.info("👆 **Opção 1:** Se já extraiu dados antes, eles foram carregados automaticamente")
-    st.info("👆 **Opção 2:** Faça upload do Aliases.xlsx e extraia novos dados")
+    st.info("👆 **Passo 1:** Os aliases já estão carregados!")
+    st.info("👆 **Passo 2:** Configure o período e clique em 'Extrair e Salvar Dados'")
     st.info("💡 **Dica:** Os dados ficam salvos e carregam automaticamente na próxima vez!")
