@@ -163,7 +163,7 @@ def baixar_cache_inicial():
     
     if not cache_path.exists():
         try:
-            with st.spinner("🔄 Carregando dados do GitHub (10MB)..."):
+            with st.spinner("Carregando dados do GitHub (10MB)..."):
                 r = requests.get(CACHE_URL, timeout=120)
                 if r.status_code == 200:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,10 +175,10 @@ def baixar_cache_inicial():
                     
                     return True
                 else:
-                    st.warning(f"⚠️ Cache não encontrado (HTTP {r.status_code})")
+                    st.warning(f"Cache não encontrado (HTTP {r.status_code})")
                     return False
         except Exception as e:
-            st.error(f"❌ Erro ao baixar cache: {e}")
+            st.error(f"Erro ao baixar cache: {e}")
             return False
     return True
 
@@ -307,42 +307,42 @@ if 'dados_periodos' not in st.session_state:
 
 # SIDEBAR
 with st.sidebar:
-    st.title("📍 Navegação")
+    st.title("Navegação")
     
     # Inicializar menu padrão como "Sobre"
     if 'menu_atual' not in st.session_state:
-        st.session_state['menu_atual'] = "ℹ️ Sobre"
+        st.session_state['menu_atual'] = "Sobre"
     
     # Botões de navegação
-    if st.button("ℹ️ Sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "ℹ️ Sobre" else "secondary"):
-        st.session_state['menu_atual'] = "ℹ️ Sobre"
+    if st.button("Sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Sobre" else "secondary"):
+        st.session_state['menu_atual'] = "Sobre"
         st.rerun()
     
-    if st.button("🏦 Análise Individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "🏦 Análise Individual" else "secondary"):
-        st.session_state['menu_atual'] = "🏦 Análise Individual"
+    if st.button("Análise Individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Análise Individual" else "secondary"):
+        st.session_state['menu_atual'] = "Análise Individual"
         st.rerun()
     
-    if st.button("🎯 Scatter Plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "🎯 Scatter Plot" else "secondary"):
-        st.session_state['menu_atual'] = "🎯 Scatter Plot"
+    if st.button("Scatter Plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Scatter Plot" else "secondary"):
+        st.session_state['menu_atual'] = "Scatter Plot"
         st.rerun()
     
     menu = st.session_state['menu_atual']
     
     st.divider()
-    st.title("⚙️ Controle")
+    st.title("Controle")
     
     # Status
     if 'df_aliases' in st.session_state:
-        st.success(f"✅ {len(st.session_state['df_aliases'])} aliases")
+        st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
     else:
-        st.error("❌ Aliases não encontrados")
+        st.error("Aliases não encontrados")
     
     # Cache info
     info_cache = ler_info_cache()
     if info_cache:
-        with st.expander("💾 Cache"):
+        with st.expander("Informações do Cache"):
             st.text(info_cache)
-            if st.button("🗑️ Limpar", use_container_width=True):
+            if st.button("Limpar Cache", use_container_width=True):
                 if os.path.exists(CACHE_FILE):
                     os.remove(CACHE_FILE)
                 if os.path.exists(CACHE_INFO):
@@ -353,8 +353,8 @@ with st.sidebar:
     
     st.divider()
     
-    # Upload opcional - EM UM EXPANDER para evitar bug de renderização
-    with st.expander("📤 Upload Aliases"):
+    # Upload opcional
+    with st.expander("Upload de Aliases"):
         uploaded_file = st.file_uploader("Selecione arquivo Excel", type=['xlsx'], key="upload_aliases")
         
         if uploaded_file:
@@ -363,23 +363,23 @@ with st.sidebar:
             st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
             st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
             st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
-            st.success("✅ Aliases atualizados")
+            st.success("Aliases atualizados com sucesso")
     
     st.divider()
     
     # Extração
-    st.subheader("📅 Atualizar Dados")
+    st.subheader("Atualizar Dados")
     
     col1, col2 = st.columns(2)
     with col1:
-        ano_i = st.selectbox("Ano", range(2015,2027), index=8, key="ano_i")
-        mes_i = st.selectbox("Trim", ['03','06','09','12'], key="mes_i")
+        ano_i = st.selectbox("Ano Inicial", range(2015,2027), index=8, key="ano_i")
+        mes_i = st.selectbox("Trimestre Inicial", ['03','06','09','12'], key="mes_i")
     with col2:
-        ano_f = st.selectbox("Ano", range(2015,2027), index=10, key="ano_f")
-        mes_f = st.selectbox("Trim", ['03','06','09','12'], index=2, key="mes_f")
+        ano_f = st.selectbox("Ano Final", range(2015,2027), index=10, key="ano_f")
+        mes_f = st.selectbox("Trimestre Final", ['03','06','09','12'], index=2, key="mes_f")
     
     if 'dict_aliases' in st.session_state:
-        if st.button("🚀 Extrair", type="primary", use_container_width=True):
+        if st.button("Extrair Dados", type="primary", use_container_width=True):
             periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
             progress_bar = st.progress(0)
             status = st.empty()
@@ -396,23 +396,23 @@ with st.sidebar:
             
             progress_bar.empty()
             status.empty()
-            st.success(f"✅ {len(dados)} períodos!")
+            st.success(f"{len(dados)} períodos extraídos com sucesso")
             st.rerun()
     else:
-        st.warning("⚠️ Carregue aliases")
+        st.warning("Carregue os aliases primeiro")
 
 # CONTEÚDO PRINCIPAL
-if menu == "ℹ️ Sobre":
+if menu == "Sobre":
     # PÁGINA SOBRE
     st.markdown("---")
     
     st.markdown("""
-    ### 📊 Sobre o Fica de Olho
+    ### Sobre o Fica de Olho
     
     O **Fica de Olho** é uma ferramenta de análise financeira que extrai, processa e visualiza dados 
     de instituições financeiras brasileiras de forma automatizada e interativa.
     
-    #### 🎯 Funcionalidades
+    #### Funcionalidades
     
     - **Extração Automatizada**: Integração direta com a API IF.data do Banco Central do Brasil
     - **Análise Temporal**: Acompanhamento de métricas financeiras ao longo de múltiplos trimestres
@@ -420,7 +420,7 @@ if menu == "ℹ️ Sobre":
     - **Classificação Personalizada**: Sistema de aliases para renomear e categorizar instituições
     - **Métricas Calculadas**: ROE anualizado, alavancagem, funding gap, market share e índices de risco/retorno
     
-    #### 📈 Dados Utilizados
+    #### Dados Utilizados
     
     Todos os dados são extraídos da **API IF.data** do Banco Central do Brasil, incluindo:
     
@@ -430,16 +430,16 @@ if menu == "ℹ️ Sobre":
     - Captações e Ativo Total
     - Cadastro de Instituições Financeiras
     
-    #### 🚀 Como Começar
+    #### Como Começar
     
     1. Os dados já estão carregados automaticamente do GitHub
     2. Acesse **Análise Individual** ou **Scatter Plot** no menu lateral
-    3. Para atualizar dados, configure período e clique em "Extrair Novos Dados"
+    3. Para atualizar dados, configure período e clique em "Extrair Dados"
     4. Personalize visualizações usando os filtros disponíveis
     
     ---
     
-    ### 📚 Recursos Técnicos
+    ### Recursos Técnicos
     
     - **Python 3.10+**
     - **Streamlit** (interface)
@@ -449,9 +449,9 @@ if menu == "ℹ️ Sobre":
     """)
     
     st.markdown("---")
-    st.markdown("💡 **Desenvolvido em 2026 por Matheus Prates, CFA** | *Ferramenta de código aberto para análise do sistema financeiro brasileiro*")
+    st.markdown("**Desenvolvido em 2026 por Matheus Prates, CFA** | *Ferramenta de código aberto para análise do sistema financeiro brasileiro*")
 
-elif menu == "🏦 Análise Individual":
+elif menu == "Análise Individual":
     # ANÁLISE INDIVIDUAL DE BANCO
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
@@ -487,7 +487,7 @@ elif menu == "🏦 Análise Individual":
                 bancos_disponiveis = sorted(bancos_todos)
             
             if len(bancos_disponiveis) > 0:
-                banco_selecionado = st.selectbox("🏦 Selecione uma Instituição", bancos_disponiveis, key="banco_individual")
+                banco_selecionado = st.selectbox("Selecione uma Instituição", bancos_disponiveis, key="banco_individual")
                 
                 if banco_selecionado:
                     df_banco = df[df['Instituição'] == banco_selecionado].copy()
@@ -508,30 +508,30 @@ elif menu == "🏦 Análise Individual":
                     
                     with col1:
                         st.metric(
-                            "💰 Carteira de Crédito",
+                            "Carteira de Crédito",
                             formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito')
                         )
                     
                     with col2:
                         st.metric(
-                            "📈 ROE Anualizado",
+                            "ROE Anualizado",
                             formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)')
                         )
                     
                     with col3:
                         st.metric(
-                            "🛡️ Índice de Basileia",
+                            "Índice de Basileia",
                             formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia')
                         )
                     
                     with col4:
                         st.metric(
-                            "⚖️ Alavancagem",
+                            "Alavancagem",
                             formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem')
                         )
                     
                     st.markdown("---")
-                    st.markdown("### 📊 Evolução Histórica das Variáveis")
+                    st.markdown("### Evolução Histórica das Variáveis")
                     
                     # Variáveis disponíveis (excluindo Instituição e Período)
                     variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
@@ -546,15 +546,15 @@ elif menu == "🏦 Análise Individual":
                                     fig = criar_mini_grafico(df_banco, var, var)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
-                st.warning("⚠️ Nenhuma instituição encontrada nos dados")
+                st.warning("Nenhuma instituição encontrada nos dados")
         else:
-            st.warning("⚠️ Dados incompletos ou vazios")
+            st.warning("Dados incompletos ou vazios")
     
     else:
-        st.info("🔄 **Carregando dados automaticamente do GitHub...**")
-        st.markdown("#### Por favor, aguarde alguns segundos e recarregue a página")
+        st.info("Carregando dados automaticamente do GitHub...")
+        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "🎯 Scatter Plot":
+elif menu == "Scatter Plot":
     # SCATTER PLOT
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
@@ -674,9 +674,9 @@ elif menu == "🎯 Scatter Plot":
         st.plotly_chart(fig_scatter, use_container_width=True)
     
     else:
-        st.info("🔄 **Carregando dados automaticamente do GitHub...**")
-        st.markdown("#### Por favor, aguarde alguns segundos e recarregue a página")
+        st.info("Carregando dados automaticamente do GitHub...")
+        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
 
 # Footer
 st.markdown("---")
-st.caption("💡 **Desenvolvido em 2026 por Matheus Prates, CFA**")
+st.caption("Desenvolvido em 2026 por Matheus Prates, CFA")
