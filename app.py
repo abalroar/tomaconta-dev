@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
-from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, carregar_cores_aliases
+from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -219,6 +219,36 @@ def carregar_aliases():
     if os.path.exists(ALIASES_PATH):
         return pd.read_excel(ALIASES_PATH)
     return None
+
+def carregar_cores_aliases_local(df_aliases):
+    """
+    Carrega cores EXATAS do Aliases.xlsx sem normalização/aproximação.
+    Lê diretamente a coluna 'Código Cor' que contém os hex codes.
+    """
+    dict_cores = {}
+    
+    if df_aliases is None or df_aliases.empty:
+        return dict_cores
+    
+    # Verificar se existe coluna 'Código Cor' (formato #RRGGBB)
+    if 'Código Cor' in df_aliases.columns:
+        for _, row in df_aliases.iterrows():
+            instituicao = row.get('Instituição')
+            cor_hex = row.get('Código Cor')
+            
+            if pd.notna(instituicao) and pd.notna(cor_hex):
+                # Garantir que está no formato #RRGGBB
+                cor_str = str(cor_hex).strip().upper()
+                
+                # Se não tem #, adicionar
+                if not cor_str.startswith('#'):
+                    cor_str = '#' + cor_str
+                
+                # Validar formato hex (deve ter 7 caracteres: # + 6 dígitos)
+                if len(cor_str) == 7:
+                    dict_cores[instituicao] = cor_str
+    
+    return dict_cores
 
 def baixar_cache_inicial():
     """Baixa cache do GitHub Releases se não existir localmente"""
@@ -554,7 +584,8 @@ if 'df_aliases' not in st.session_state:
     if df_aliases is not None:
         st.session_state['df_aliases'] = df_aliases
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
-        st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
+        # USAR FUNÇÃO LOCAL PARA CARREGAR CORES EXATAS
+        st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
 
 if 'dados_periodos' not in st.session_state:
@@ -624,7 +655,8 @@ with st.sidebar:
             df_aliases = pd.read_excel(uploaded_file)
             st.session_state['df_aliases'] = df_aliases
             st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
-            st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
+            # USAR FUNÇÃO LOCAL PARA CARREGAR CORES EXATAS
+            st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(df_aliases)
             st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
             st.success("aliases atualizados com sucesso")
     
@@ -919,7 +951,7 @@ elif menu == "scatter plot":
                 name=instituicao,
                 marker=dict(
                     size=marker_size,
-                    color=cor,  # Cor 100% opaca (sem alpha)
+                    color=cor,  # Cor EXATA do Aliases.xlsx (100% opaca)
                     opacity=1.0,  # Garantir opacidade máxima
                     line=dict(width=1, color='white')
                 ),
