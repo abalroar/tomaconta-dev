@@ -54,6 +54,9 @@ st.markdown("""
         visibility: visible !important;
         opacity: 1 !important;
         pointer-events: auto !important;
+        position: fixed !important;
+        top: 0.5rem !important;
+        left: 0.5rem !important;
         z-index: 999999 !important;
         background-color: white !important;
         border-radius: 0.5rem !important;
@@ -93,6 +96,25 @@ st.markdown("""
         font-family: 'IBM Plex Sans', sans-serif !important;
         font-weight: 300 !important;
     }
+
+    /* Mantém ícones do Streamlit (Material Icons) funcionando.
+       Sem isso, o nome do ícone (ex.: keyboard_double_arrow_left / arrow_drop_down) aparece como texto. */
+    span.material-icons, i.material-icons, [class*="material-icons"],
+    [data-testid="stExpanderToggleIcon"] span,
+    [data-testid="collapsedControl"] span {
+        font-family: 'Material Icons' !important;
+        font-weight: normal !important;
+        font-style: normal !important;
+        line-height: 1 !important;
+        text-transform: none !important;
+        letter-spacing: normal !important;
+        white-space: nowrap !important;
+        direction: ltr !important;
+        -webkit-font-feature-settings: 'liga' !important;
+        -webkit-font-smoothing: antialiased !important;
+        font-feature-settings: 'liga' !important;
+    }
+
 
     h1, h2, h3, h4, h5, h6 {
         font-family: 'IBM Plex Sans', sans-serif !important;
@@ -306,13 +328,18 @@ def normalizar_codigo_cor(cor_valor):
 
 # FIX PROBLEMA 3: Carregamento correto de cores com normalização
 def carregar_cores_aliases_local(df_aliases):
+    """Lê a cor do Aliases.xlsx e cria um dicionário de cores.
+
+    Importante: mapeia tanto o valor da coluna 'Instituição' (nome original vindo do BCB)
+    quanto o valor da coluna 'Alias Banco' (nome amigável que aparece no app),
+    para que a cor seja aplicada em qualquer tela.
+    """
     dict_cores = {}
     if df_aliases is None or df_aliases.empty:
         return dict_cores
 
     colunas_possiveis = ['Código Cor', 'Cor', 'Color', 'Hex', 'Código']
     coluna_cor = None
-
     for col in colunas_possiveis:
         if col in df_aliases.columns:
             coluna_cor = col
@@ -323,15 +350,19 @@ def carregar_cores_aliases_local(df_aliases):
 
     for _, row in df_aliases.iterrows():
         instituicao = row.get('Instituição')
+        alias = row.get('Alias Banco')
         cor_valor = row.get(coluna_cor)
 
-        if pd.notna(instituicao) and pd.notna(cor_valor):
-            # Normaliza o nome da instituição
-            instituicao_norm = normalizar_nome_instituicao(instituicao)
+        cor_str = normalizar_codigo_cor(cor_valor)
+        if not cor_str:
+            continue
 
-            cor_str = normalizar_codigo_cor(cor_valor)
-            if cor_str:
-                dict_cores[instituicao_norm] = cor_str
+        if pd.notna(instituicao):
+            dict_cores[normalizar_nome_instituicao(instituicao)] = cor_str
+
+        # Também mapeia pelo alias (é o que aparece na UI)
+        if pd.notna(alias):
+            dict_cores[normalizar_nome_instituicao(alias)] = cor_str
 
     return dict_cores
 
