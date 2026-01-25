@@ -277,7 +277,7 @@ def get_axis_format(variavel):
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
 def obter_cor_banco(instituicao):
-    """Obtém a cor do banco do arquivo Aliases.xlsx"""
+    """Obtém a cor EXATA do banco do arquivo Aliases.xlsx (sem alterações)"""
     if 'dict_cores_personalizadas' in st.session_state and instituicao in st.session_state['dict_cores_personalizadas']:
         return st.session_state['dict_cores_personalizadas'][instituicao]
     return None
@@ -862,7 +862,10 @@ elif menu == "scatter plot":
         with col2:
             var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
         with col3:
-            var_size = st.selectbox("tamanho", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
+            # Adicionar opção "Tamanho fixo" ao dropdown
+            opcoes_tamanho = ['Tamanho fixo'] + colunas_numericas
+            default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
+            var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
         with col4:
             periodo_scatter = st.selectbox("período", periodos, index=len(periodos)-1)
         with col5:
@@ -872,14 +875,20 @@ elif menu == "scatter plot":
         
         format_x = get_axis_format(var_x)
         format_y = get_axis_format(var_y)
-        format_size = get_axis_format(var_size)
         
         df_scatter_plot = df_scatter.copy()
         df_scatter_plot['x_display'] = df_scatter_plot[var_x] * format_x['multiplicador']
         df_scatter_plot['y_display'] = df_scatter_plot[var_y] * format_y['multiplicador']
-        df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
         
-        # Criar scatter plot com cores mistas
+        # Lógica de tamanho: fixo ou variável
+        if var_size == 'Tamanho fixo':
+            # Tamanho fixo constante (50 é um bom tamanho médio)
+            tamanho_constante = 50
+        else:
+            format_size = get_axis_format(var_size)
+            df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
+        
+        # Criar scatter plot com cores 100% opacas
         fig_scatter = go.Figure()
         
         # Cores padrão do Plotly para bancos sem alias
@@ -889,7 +898,7 @@ elif menu == "scatter plot":
         for instituicao in df_scatter_plot['Instituição'].unique():
             df_inst = df_scatter_plot[df_scatter_plot['Instituição'] == instituicao]
             
-            # Tentar obter cor do Aliases.xlsx
+            # Obter cor EXATA do Aliases.xlsx (sem alterações)
             cor = obter_cor_banco(instituicao)
             
             # Se não tem cor personalizada, usar cor automática do Plotly
@@ -897,14 +906,21 @@ elif menu == "scatter plot":
                 cor = cores_plotly[idx_cor % len(cores_plotly)]
                 idx_cor += 1
             
+            # Definir tamanho das bolinhas
+            if var_size == 'Tamanho fixo':
+                marker_size = tamanho_constante
+            else:
+                marker_size = df_inst['size_display'] / df_scatter_plot['size_display'].max() * 100
+            
             fig_scatter.add_trace(go.Scatter(
                 x=df_inst['x_display'],
                 y=df_inst['y_display'],
                 mode='markers',
                 name=instituicao,
                 marker=dict(
-                    size=df_inst['size_display'] / df_scatter_plot['size_display'].max() * 100,
-                    color=cor,
+                    size=marker_size,
+                    color=cor,  # Cor 100% opaca (sem alpha)
+                    opacity=1.0,  # Garantir opacidade máxima
                     line=dict(width=1, color='white')
                 ),
                 hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}{format_x["ticksuffix"]}<br>{var_y}: %{{y}}{format_y["ticksuffix"]}<extra></extra>'
