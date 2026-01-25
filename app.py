@@ -785,18 +785,28 @@ elif menu == "Análise Individual":
             bancos_todos = df['Instituição'].dropna().unique().tolist()
 
             if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+                # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
+                aliases_set = set(st.session_state['dict_aliases'].values())
+
                 bancos_com_alias = []
                 bancos_sem_alias = []
 
                 for banco in bancos_todos:
-                    if banco in st.session_state['dict_aliases']:
-                        alias = st.session_state['dict_aliases'][banco]
-                        bancos_com_alias.append((alias, banco))
+                    # Verifica se o banco é um alias (está nos valores do dicionário)
+                    if banco in aliases_set:
+                        bancos_com_alias.append(banco)
                     else:
                         bancos_sem_alias.append(banco)
 
-                bancos_com_alias_sorted = [banco for alias, banco in sorted(bancos_com_alias)]
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias)
+                # Ordenação: letras antes de números, case-insensitive
+                def sort_key(nome):
+                    primeiro_char = nome[0].lower() if nome else 'z'
+                    if primeiro_char.isdigit():
+                        return (1, nome.lower())
+                    return (0, nome.lower())
+
+                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
+                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
                 bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
             else:
                 bancos_disponiveis = sorted(bancos_todos)
