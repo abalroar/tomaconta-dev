@@ -223,30 +223,40 @@ def carregar_aliases():
 def carregar_cores_aliases_local(df_aliases):
     """
     Carrega cores EXATAS do Aliases.xlsx sem normalização/aproximação.
-    Lê diretamente a coluna 'Código Cor' que contém os hex codes.
+    Aceita formatos: 'Código Cor', 'Cor', ou qualquer coluna com hex codes.
     """
     dict_cores = {}
     
     if df_aliases is None or df_aliases.empty:
         return dict_cores
     
-    # Verificar se existe coluna 'Código Cor' (formato #RRGGBB)
-    if 'Código Cor' in df_aliases.columns:
-        for _, row in df_aliases.iterrows():
-            instituicao = row.get('Instituição')
-            cor_hex = row.get('Código Cor')
+    # Tentar múltiplas colunas possíveis (ordem de prioridade)
+    colunas_possiveis = ['Código Cor', 'Cor', 'Color', 'Hex', 'Código']
+    coluna_cor = None
+    
+    for col in colunas_possiveis:
+        if col in df_aliases.columns:
+            coluna_cor = col
+            break
+    
+    if coluna_cor is None:
+        return dict_cores
+    
+    for _, row in df_aliases.iterrows():
+        instituicao = row.get('Instituição')
+        cor_valor = row.get(coluna_cor)
+        
+        if pd.notna(instituicao) and pd.notna(cor_valor):
+            # Converter para string e limpar
+            cor_str = str(cor_valor).strip().upper()
             
-            if pd.notna(instituicao) and pd.notna(cor_hex):
-                # Garantir que está no formato #RRGGBB
-                cor_str = str(cor_hex).strip().upper()
-                
-                # Se não tem #, adicionar
-                if not cor_str.startswith('#'):
-                    cor_str = '#' + cor_str
-                
-                # Validar formato hex (deve ter 7 caracteres: # + 6 dígitos)
-                if len(cor_str) == 7:
-                    dict_cores[instituicao] = cor_str
+            # Se não tem #, adicionar
+            if not cor_str.startswith('#'):
+                cor_str = '#' + cor_str
+            
+            # Validar formato hex (deve ter 7 caracteres: # + 6 dígitos)
+            if len(cor_str) == 7 and all(c in '0123456789ABCDEF' for c in cor_str[1:]):
+                dict_cores[instituicao] = cor_str
     
     return dict_cores
 
