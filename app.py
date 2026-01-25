@@ -15,17 +15,25 @@ st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide"
 st.markdown("""
 <style>
     .main-header {
-        font-size: 3rem;
+        font-size: 6rem;
         font-weight: 700;
         color: #1f77b4;
         text-align: center;
         margin-bottom: 0.5rem;
+        line-height: 1.2;
     }
     .sub-header {
-        font-size: 1.2rem;
+        font-size: 2rem;
         color: #666;
         text-align: center;
+        margin-bottom: 0.5rem;
+    }
+    .by-line {
+        font-size: 1.2rem;
+        color: #888;
+        text-align: center;
         margin-bottom: 2rem;
+        font-style: italic;
     }
     .stMetric {
         background-color: #f8f9fa;
@@ -43,6 +51,7 @@ st.markdown("""
 CACHE_FILE = "data/dados_cache.pkl"
 CACHE_INFO = "data/cache_info.txt"
 ALIASES_PATH = "data/Aliases.xlsx"
+LOGO_PATH = "data/logo.jpg"
 CACHE_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/dados_cache.pkl"
 CACHE_INFO_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/cache_info.txt"
 
@@ -187,9 +196,20 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     return fig
 
-# Header
-st.markdown('<p class="main-header">👁️ Fica de Olho</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
+# Header com Logo
+col_logo, col_title = st.columns([1, 5])
+
+with col_logo:
+    # Logo da ferramenta
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, width=150)
+    else:
+        st.markdown('<p style="font-size: 150px; text-align: center;">👁️</p>', unsafe_allow_html=True)
+
+with col_title:
+    st.markdown('<p class="main-header">Fica de Olho</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
+    st.markdown('<p class="by-line">by Matheus Prates, CFA</p>', unsafe_allow_html=True)
 
 # CARREGAR ALIASES AUTOMATICAMENTE
 if 'df_aliases' not in st.session_state:
