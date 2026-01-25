@@ -210,11 +210,10 @@ if 'dados_periodos' not in st.session_state:
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/000000/financial-analytics.png", width=80)
     
-    # Menu de navegação
-    menu = st.radio(
+    # Menu de navegação - SELECTBOX ao invés de RADIO
+    menu = st.selectbox(
         "📍 Navegação",
-        ["🎯 Scatter Plot", "🏦 Análise Individual", "ℹ️ Sobre"],
-        label_visibility="collapsed"
+        ["🎯 Scatter Plot", "🏦 Análise Individual", "ℹ️ Sobre"]
     )
     
     st.divider()
