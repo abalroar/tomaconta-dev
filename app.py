@@ -24,6 +24,104 @@ import numpy as np
 
 st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
+# Botão customizado para toggle da sidebar (sempre visível)
+st.markdown("""
+<div id="custom-sidebar-toggle" onclick="toggleSidebar()" title="Abrir/Fechar Menu">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+</div>
+
+<style>
+    #custom-sidebar-toggle {
+        position: fixed !important;
+        top: 0.75rem !important;
+        left: 0.75rem !important;
+        z-index: 9999999 !important;
+        background-color: white !important;
+        border-radius: 0.5rem !important;
+        padding: 0.5rem !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.15) !important;
+        border: 1px solid rgba(0,0,0,0.08) !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: all 0.2s ease !important;
+        color: #333 !important;
+    }
+
+    #custom-sidebar-toggle:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.25) !important;
+        background-color: #f0f0f0 !important;
+    }
+
+    /* Esconde o botão nativo do Streamlit */
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+</style>
+
+<script>
+function toggleSidebar() {
+    // Tenta encontrar a sidebar
+    const sidebar = document.querySelector('[data-testid="stSidebar"]');
+
+    if (sidebar) {
+        // Verifica o estado atual
+        const isCollapsed = sidebar.getAttribute('aria-expanded') === 'false' ||
+                           sidebar.style.display === 'none' ||
+                           sidebar.classList.contains('st-emotion-cache-1gwvy71');
+
+        if (isCollapsed) {
+            // Abre a sidebar
+            sidebar.setAttribute('aria-expanded', 'true');
+            sidebar.style.display = '';
+            sidebar.style.width = '';
+            sidebar.style.minWidth = '';
+            sidebar.style.transform = '';
+            sidebar.style.marginLeft = '';
+
+            // Remove classes que podem esconder
+            sidebar.classList.remove('st-emotion-cache-1gwvy71');
+
+            // Tenta encontrar e clicar no botão nativo
+            const nativeBtn = document.querySelector('[data-testid="collapsedControl"] button');
+            if (nativeBtn) nativeBtn.click();
+        } else {
+            // Fecha a sidebar
+            sidebar.setAttribute('aria-expanded', 'false');
+            sidebar.style.transform = 'translateX(-100%)';
+            sidebar.style.marginLeft = '-21rem';
+        }
+    }
+
+    // Fallback: tenta clicar no botão nativo se existir
+    const nativeToggle = document.querySelector('[data-testid="collapsedControl"] button') ||
+                         document.querySelector('button[kind="header"]');
+    if (nativeToggle) {
+        nativeToggle.click();
+    }
+}
+
+// Observador para garantir que o botão fique sempre visível
+const observer = new MutationObserver(() => {
+    const toggle = document.getElementById('custom-sidebar-toggle');
+    if (toggle) {
+        toggle.style.display = 'flex';
+        toggle.style.visibility = 'visible';
+    }
+});
+
+// Inicia observação quando o DOM estiver pronto
+if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true });
+}
+</script>
+""", unsafe_allow_html=True)
+
 st.markdown("""
 <style>
     /* ============================================================
@@ -33,21 +131,10 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
     /* ============================================================
-       ESCONDE HEADER MAS PRESERVA BOTÃO DE TOGGLE
+       ESCONDE HEADER E ELEMENTOS DESNECESSÁRIOS
        ============================================================ */
     .stApp > header {
         background-color: transparent !important;
-        height: auto !important;
-        min-height: 2.5rem !important;
-        overflow: visible !important;
-    }
-
-    /* Container pai do header - manter visível */
-    .stApp > header > div {
-        display: block !important;
-        visibility: visible !important;
-        height: auto !important;
-        overflow: visible !important;
     }
 
     [data-testid="stDecoration"] {
@@ -60,59 +147,9 @@ st.markdown("""
         overflow: hidden !important;
     }
 
-    /* ============================================================
-       BOTÃO TOGGLE SIDEBAR - SEMPRE VISÍVEL E ACESSÍVEL
-       Resolve: Problema 3 (sem forma de reabrir sidebar)
-
-       IMPORTANTE: Quando a sidebar fecha, o Streamlit move o botão
-       para dentro do header. Precisamos garantir que ele apareça
-       em AMBOS os estados (sidebar aberta e fechada).
-       ============================================================ */
-
-    /* Estado: Sidebar FECHADA - botão aparece no header */
-    .stApp > header [data-testid="collapsedControl"],
-    .stApp [data-testid="collapsedControl"] {
-        display: flex !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-        position: fixed !important;
-        top: 0.75rem !important;
-        left: 0.75rem !important;
-        z-index: 1000001 !important;
-        background-color: white !important;
-        border-radius: 0.5rem !important;
-        padding: 0.35rem !important;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.15) !important;
-        border: 1px solid rgba(0,0,0,0.08) !important;
-        transition: box-shadow 0.2s ease !important;
-    }
-
-    /* Estado: Sidebar ABERTA - botão dentro da sidebar (opcional, esconder) */
-    [data-testid="stSidebar"][aria-expanded="true"] [data-testid="collapsedControl"] {
+    /* Esconde o botão nativo do Streamlit (usamos o customizado) */
+    [data-testid="collapsedControl"] {
         display: none !important;
-    }
-
-    /* Hover no botão */
-    [data-testid="collapsedControl"]:hover {
-        box-shadow: 0 4px 16px rgba(0,0,0,0.2) !important;
-    }
-
-    /* Botão interno */
-    [data-testid="collapsedControl"] button {
-        background: transparent !important;
-        border: none !important;
-        padding: 0.25rem !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        cursor: pointer !important;
-    }
-
-    /* Garantir que o botão tenha tamanho clicável */
-    [data-testid="collapsedControl"] button {
-        min-width: 2rem !important;
-        min-height: 2rem !important;
     }
 
     /* ============================================================
