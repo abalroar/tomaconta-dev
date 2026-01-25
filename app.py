@@ -16,13 +16,20 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100;200;300;400;500;600;700&display=swap');
     
-    /* Esconder ícone de rerun chato */
-    button[kind="header"] {
+    /* Esconder ícone de rerun chato - VERSÃO AGRESSIVA */
+    button[kind="header"],
+    [data-testid="stStatusWidget"],
+    [data-testid="stAppViewBlockContainer"] button[kind="header"],
+    button[data-testid="baseButton-header"],
+    .stApp > header,
+    [data-testid="stDecoration"],
+    [data-testid="stToolbar"] {
         display: none !important;
-    }
-    
-    [data-testid="stStatusWidget"] {
-        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        position: absolute !important;
+        left: -9999px !important;
     }
     
     /* Aplicar IBM Plex Sans em TODOS os elementos */
@@ -160,7 +167,7 @@ st.markdown("""
 CACHE_FILE = "data/dados_cache.pkl"
 CACHE_INFO = "data/cache_info.txt"
 ALIASES_PATH = "data/Aliases.xlsx"
-LOGO_PATH = "data/logo.jpg"
+LOGO_PATH = "data/logo.png"
 CACHE_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/dados_cache.pkl"
 CACHE_INFO_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/cache_info.txt"
 
