@@ -47,15 +47,6 @@ st.markdown("""
         font-family: 'Inter', sans-serif !important;
     }
     
-    /* File uploader - FIX para não sobrepor */
-    [data-testid="stFileUploader"] {
-        margin-bottom: 1rem !important;
-    }
-    
-    [data-testid="stFileUploader"] label {
-        margin-bottom: 0.5rem !important;
-    }
-    
     /* Métricas */
     [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
         font-family: 'Inter', sans-serif !important;
@@ -362,9 +353,8 @@ with st.sidebar:
     
     st.divider()
     
-    # Upload opcional - COM LABEL VISÍVEL
-    st.subheader("📤 Upload Aliases")
-    uploaded_file = st.file_uploader("Selecione o arquivo", type=['xlsx'], label_visibility="collapsed")
+    # Upload opcional - SEM SUBHEADER, apenas file_uploader com label visível
+    uploaded_file = st.file_uploader("📤 Upload Aliases (Excel)", type=['xlsx'])
     
     if uploaded_file:
         df_aliases = pd.read_excel(uploaded_file)
