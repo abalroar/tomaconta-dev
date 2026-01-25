@@ -1,15 +1,4 @@
-# Cole o código, Ctrl+O para salvar, Enter, Ctrl+X para sair
-
-# 2. Adicionar ao Git
-git add app.py
-
-# 3. Commit
-git commit -m "Muda fonte para IBM Plex Sans (clean e thin)"
-
-# 4. Push para o GitHub
-git push origin main
-
-≈≈import streamlit as st
+import streamlit as st
 import pandas as pd
 import pickle
 import os
