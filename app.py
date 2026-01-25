@@ -11,19 +11,63 @@ from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, car
 
 st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado com fonte Inter
+# CSS customizado com fonte Inter GLOBAL
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
     
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
+    /* Aplicar Inter em TODOS os elementos */
+    * {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     }
     
-    h1, h2, h3, h4, h5, h6, p, div, span, label {
-        font-family: 'Inter', sans-serif;
+    html, body, [class*="css"], div, span, p, label, input, select, textarea, button {
+        font-family: 'Inter', sans-serif !important;
     }
     
+    /* Headers e títulos */
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 700 !important;
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] * {
+        font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Botões */
+    button[kind="primary"], button[kind="secondary"], .stButton button {
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 600 !important;
+    }
+    
+    /* Selectbox, inputs */
+    .stSelectbox, .stTextInput, .stNumberInput, .stSlider {
+        font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Métricas */
+    [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
+        font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Markdown */
+    .stMarkdown, .stMarkdown * {
+        font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Captions */
+    .stCaption {
+        font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Header principal customizado */
     .main-header {
         font-size: 6rem;
         font-weight: 800;
@@ -31,35 +75,39 @@ st.markdown("""
         text-align: center;
         margin-bottom: 0.5rem;
         line-height: 1.2;
-        font-family: 'Inter', sans-serif;
+        font-family: 'Inter', sans-serif !important;
     }
+    
     .sub-header {
         font-size: 2rem;
         color: #666;
         text-align: center;
         margin-bottom: 0.5rem;
-        font-family: 'Inter', sans-serif;
+        font-family: 'Inter', sans-serif !important;
         font-weight: 400;
     }
+    
     .by-line {
         font-size: 1.2rem;
         color: #888;
         text-align: center;
         margin-bottom: 2rem;
         font-style: italic;
-        font-family: 'Inter', sans-serif;
+        font-family: 'Inter', sans-serif !important;
         font-weight: 300;
     }
+    
     .stMetric {
         background-color: #f8f9fa;
         padding: 15px;
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
+    
     div[data-testid="stMetricValue"] {
         font-size: 2rem;
         font-weight: 700;
-        font-family: 'Inter', sans-serif;
+        font-family: 'Inter', sans-serif !important;
     }
 </style>
 """, unsafe_allow_html=True)
