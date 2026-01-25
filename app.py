@@ -353,16 +353,17 @@ with st.sidebar:
     
     st.divider()
     
-    # Upload opcional - SEM SUBHEADER, apenas file_uploader com label visível
-    uploaded_file = st.file_uploader("📤 Upload Aliases (Excel)", type=['xlsx'])
-    
-    if uploaded_file:
-        df_aliases = pd.read_excel(uploaded_file)
-        st.session_state['df_aliases'] = df_aliases
-        st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
-        st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
-        st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
-        st.success("✅ Aliases atualizados")
+    # Upload opcional - EM UM EXPANDER para evitar bug de renderização
+    with st.expander("📤 Upload Aliases"):
+        uploaded_file = st.file_uploader("Selecione arquivo Excel", type=['xlsx'], key="upload_aliases")
+        
+        if uploaded_file:
+            df_aliases = pd.read_excel(uploaded_file)
+            st.session_state['df_aliases'] = df_aliases
+            st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
+            st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
+            st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
+            st.success("✅ Aliases atualizados")
     
     st.divider()
     
