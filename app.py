@@ -97,14 +97,45 @@ def baixar_cache_inicial():
             return False
     return True
 
+def formatar_valor(valor, variavel):
+    """Formata valor de acordo com o tipo de variável"""
+    if pd.isna(valor):
+        return "N/A"
+    
+    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
+    vars_razao = ['Alavancagem', 'Risco/Retorno']
+    vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
+    
+    if variavel in vars_percentual:
+        return f"{valor*100:.2f}%"
+    elif variavel in vars_razao:
+        return f"{valor:.2f}x"
+    elif variavel in vars_monetarias:
+        return f"R$ {valor/1e6:.0f}M"
+    else:
+        return f"{valor:.2f}"
+
 def criar_mini_grafico(df_banco, variavel, titulo):
     """Cria mini gráfico para uma variável específica"""
     df_sorted = df_banco.sort_values('Período')
     
     # Determinar tipo de formatação
     vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
-    vars_razao = ['Alavancagem', 'Risco/Retorno']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
+    
+    # Criar valores formatados para hover
+    if variavel in vars_percentual:
+        hover_values = df_sorted[variavel] * 100
+        tickformat = '.2f'
+        suffix = '%'
+    elif variavel in vars_monetarias:
+        hover_values = df_sorted[variavel] / 1e6
+        tickformat = ',.0f'
+        suffix = 'M'
+    else:
+        hover_values = df_sorted[variavel]
+        tickformat = '.2f'
+        suffix = ''
     
     # Criar figura
     fig = go.Figure()
@@ -112,12 +143,12 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     # Adicionar linha
     fig.add_trace(go.Scatter(
         x=df_sorted['Período'],
-        y=df_sorted[variavel],
+        y=hover_values,
         mode='lines',
         line=dict(color='#1f77b4', width=2),
         fill='tozeroy',
         fillcolor='rgba(31, 119, 180, 0.2)',
-        hovertemplate='%{x}<br>%{y}<extra></extra>'
+        hovertemplate='%{x}<br>%{y:' + tickformat + '}' + suffix + '<extra></extra>'
     ))
     
     # Configurar layout
@@ -131,33 +162,11 @@ def criar_mini_grafico(df_banco, variavel, titulo):
         yaxis=dict(
             showgrid=True, 
             gridcolor='#e0e0e0',
-            tickformat='.2%' if variavel in vars_percentual else (',.0f' if variavel in vars_monetarias else '.2f')
+            tickformat=tickformat,
+            ticksuffix=suffix
         ),
         hovermode='x'
     )
-    
-    return fig
-
-def criar_grafico_evolucao(df, top_n=5):
-    """Cria gráfico de evolução temporal das maiores instituições"""
-    top_bancos = df.groupby('Instituição')['Carteira de Crédito'].mean().nlargest(top_n).index
-    df_filtered = df[df['Instituição'].isin(top_bancos)].copy()
-    
-    fig = px.line(df_filtered, x='Período', y='Carteira de Crédito', 
-                  color='Instituição', 
-                  title=f'Evolução da Carteira de Crédito - TOP {top_n}',
-                  labels={'Carteira de Crédito': 'Carteira (R$ bilhões)', 'Período': 'Trimestre'})
-    
-    fig.update_layout(
-        height=400,
-        hovermode='x unified',
-        plot_bgcolor='#f8f9fa',
-        paper_bgcolor='white',
-        font=dict(size=12)
-    )
-    
-    fig.update_traces(line=dict(width=3))
-    fig.update_yaxis(tickformat='.1f')
     
     return fig
 
@@ -188,7 +197,7 @@ with st.sidebar:
     # Menu de navegação
     menu = st.radio(
         "📍 Navegação",
-        ["🏠 Dashboard Principal", "🏦 Análise Individual", "ℹ️ Sobre o Fica de Olho"],
+        ["🎯 Scatter Plot", "🏦 Análise Individual", "ℹ️ Sobre"],
         label_visibility="collapsed"
     )
     
@@ -264,8 +273,8 @@ with st.sidebar:
     else:
         st.warning("⚠️ Carregue aliases")
 
-# CONTEÚDO PRINCIPAL - BASEADO NO MENU
-if menu == "ℹ️ Sobre o Fica de Olho":
+# CONTEÚDO PRINCIPAL
+if menu == "ℹ️ Sobre":
     # PÁGINA SOBRE
     st.markdown("---")
     
@@ -299,7 +308,7 @@ if menu == "ℹ️ Sobre o Fica de Olho":
         #### 🚀 Como Começar
         
         1. Os dados já estão carregados automaticamente do GitHub
-        2. Acesse o **Dashboard Principal** no menu lateral
+        2. Acesse o **Scatter Plot** no menu lateral
         3. Para atualizar dados, configure período e clique em "Extrair Novos Dados"
         4. Personalize visualizações usando os filtros disponíveis
         """)
@@ -310,7 +319,7 @@ if menu == "ℹ️ Sobre o Fica de Olho":
         
         **Aguarde:** Os dados estão sendo baixados automaticamente...
         
-        **Depois:** Clique em "Dashboard Principal" no menu lateral
+        **Depois:** Clique em "Scatter Plot" no menu lateral
         
         **Atualizar:** Configure período e clique em "Extrair Novos Dados"
         
@@ -342,129 +351,87 @@ elif menu == "🏦 Análise Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
         
-        # Seletor de banco
-        bancos_disponiveis = sorted(df['Instituição'].unique())
-        banco_selecionado = st.selectbox("🏦 Selecione uma Instituição", bancos_disponiveis, key="banco_individual")
-        
-        if banco_selecionado:
-            df_banco = df[df['Instituição'] == banco_selecionado].copy()
-            df_banco = df_banco.sort_values('Período')
+        # Verificar se há dados
+        if len(df) > 0 and 'Instituição' in df.columns:
+            # Seletor de banco
+            bancos_disponiveis = sorted(df['Instituição'].dropna().unique().tolist())
             
-            # Header do banco
-            st.markdown(f"## {banco_selecionado}")
-            
-            # Métricas do último período
-            ultimo_periodo = df_banco['Período'].max()
-            dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric(
-                    "💰 Carteira de Crédito",
-                    f"R$ {dados_ultimo['Carteira de Crédito']/1e6:.0f}M"
-                )
-            
-            with col2:
-                st.metric(
-                    "📈 ROE Anualizado",
-                    f"{dados_ultimo['ROE An. (%)']*100:.2f}%" if pd.notna(dados_ultimo['ROE An. (%)']) else "N/A"
-                )
-            
-            with col3:
-                st.metric(
-                    "🛡️ Índice de Basileia",
-                    f"{dados_ultimo['Índice de Basileia']:.2f}%" if pd.notna(dados_ultimo['Índice de Basileia']) else "N/A"
-                )
-            
-            with col4:
-                st.metric(
-                    "⚖️ Alavancagem",
-                    f"{dados_ultimo['Alavancagem']:.2f}x" if pd.notna(dados_ultimo['Alavancagem']) else "N/A"
-                )
-            
-            st.markdown("---")
-            st.markdown("### 📊 Evolução Histórica das Variáveis")
-            
-            # Variáveis disponíveis (excluindo Instituição e Período)
-            variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período'] and df_banco[col].notna().any()]
-            
-            # Criar grid de mini gráficos (3 por linha)
-            for i in range(0, len(variaveis), 3):
-                cols = st.columns(3)
-                for j, col_obj in enumerate(cols):
-                    if i + j < len(variaveis):
-                        var = variaveis[i + j]
-                        with col_obj:
-                            fig = criar_mini_grafico(df_banco, var, var)
-                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            if len(bancos_disponiveis) > 0:
+                banco_selecionado = st.selectbox("🏦 Selecione uma Instituição", bancos_disponiveis, key="banco_individual")
+                
+                if banco_selecionado:
+                    df_banco = df[df['Instituição'] == banco_selecionado].copy()
+                    df_banco = df_banco.sort_values('Período')
+                    
+                    # Header do banco
+                    st.markdown(f"## {banco_selecionado}")
+                    
+                    # Métricas do último período
+                    ultimo_periodo = df_banco['Período'].max()
+                    dados_ultimo = df_banco[df_banco['Período'] == ultimo_periodo].iloc[0]
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric(
+                            "💰 Carteira de Crédito",
+                            formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito')
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "📈 ROE Anualizado",
+                            formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)')
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "🛡️ Índice de Basileia",
+                            formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia')
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "⚖️ Alavancagem",
+                            formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem')
+                        )
+                    
+                    st.markdown("---")
+                    st.markdown("### 📊 Evolução Histórica das Variáveis")
+                    
+                    # Variáveis disponíveis (excluindo Instituição e Período)
+                    variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período'] and df_banco[col].notna().any()]
+                    
+                    # Criar grid de mini gráficos (3 por linha)
+                    for i in range(0, len(variaveis), 3):
+                        cols = st.columns(3)
+                        for j, col_obj in enumerate(cols):
+                            if i + j < len(variaveis):
+                                var = variaveis[i + j]
+                                with col_obj:
+                                    fig = criar_mini_grafico(df_banco, var, var)
+                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            else:
+                st.warning("⚠️ Nenhuma instituição encontrada nos dados")
+        else:
+            st.warning("⚠️ Dados incompletos ou vazios")
     
     else:
         st.info("🔄 **Carregando dados automaticamente do GitHub...**")
         st.markdown("#### Por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "🏠 Dashboard Principal":
-    # DASHBOARD PRINCIPAL COM SCATTER PLOT
+elif menu == "🎯 Scatter Plot":
+    # SCATTER PLOT
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
-        
-        # Calcular variações
-        periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
-        ultimo = periodos[-1]
-        penultimo = periodos[-2] if len(periodos) > 1 else ultimo
-        
-        df_ultimo = df[df['Período'] == ultimo]
-        df_penultimo = df[df['Período'] == penultimo]
-        
-        carteira_atual = df_ultimo['Carteira de Crédito'].sum()
-        carteira_anterior = df_penultimo['Carteira de Crédito'].sum()
-        delta_carteira = ((carteira_atual / carteira_anterior) - 1) * 100 if carteira_anterior > 0 else 0
-        
-        roe_atual = df_ultimo['ROE An. (%)'].mean()
-        roe_anterior = df_penultimo['ROE An. (%)'].mean()
-        delta_roe = (roe_atual - roe_anterior) * 100 if pd.notna(roe_anterior) else 0
-        
-        # KPIs com delta
-        st.markdown("### 📊 Indicadores Principais")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "🏦 Instituições", 
-                f"{df_ultimo['Instituição'].nunique()}", 
-                f"{df_ultimo['Instituição'].nunique() - df_penultimo['Instituição'].nunique()}"
-            )
-        
-        with col2:
-            st.metric(
-                "💰 Carteira Total", 
-                f"R$ {carteira_atual/1e9:.1f}B",
-                f"{delta_carteira:+.1f}%"
-            )
-        
-        with col3:
-            st.metric(
-                "📈 ROE Médio", 
-                f"{roe_atual*100:.1f}%",
-                f"{delta_roe:+.1f} p.p."
-            )
-        
-        with col4:
-            st.metric(
-                "🛡️ Basileia Média", 
-                f"{df_ultimo['Índice de Basileia'].mean():.1f}%",
-                f"{df_ultimo['Índice de Basileia'].mean() - df_penultimo['Índice de Basileia'].mean():+.1f} p.p."
-            )
-        
-        st.markdown("---")
-        
-        # SCATTER PLOT CUSTOMIZÁVEL
-        st.markdown("### 🎯 Análise Comparativa (Scatter Plot)")
         
         # Variáveis numéricas disponíveis
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         
-        col1, col2, col3, col4 = st.columns(4)
+        # Períodos disponíveis
+        periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             var_x = st.selectbox("Eixo X", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
@@ -473,71 +440,73 @@ elif menu == "🏠 Dashboard Principal":
             var_y = st.selectbox("Eixo Y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
         
         with col3:
-            periodo_scatter = st.selectbox("Período", periodos, index=len(periodos)-1)
+            var_size = st.selectbox("Tamanho", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
         
         with col4:
-            top_n_scatter = st.slider("TOP N Bancos", 5, 50, 15)
+            periodo_scatter = st.selectbox("Período", periodos, index=len(periodos)-1)
+        
+        with col5:
+            top_n_scatter = st.slider("TOP N", 5, 50, 15)
         
         # Criar scatter plot
         df_scatter = df[df['Período'] == periodo_scatter].nlargest(top_n_scatter, 'Carteira de Crédito')
         
-        fig_scatter = px.scatter(
-            df_scatter, 
-            x=var_x, 
-            y=var_y, 
-            size='Carteira de Crédito', 
-            color='Instituição',
-            hover_data=['Alavancagem', 'Índice de Basileia', 'ROE An. (%)'],
-            title=f'{var_y} vs {var_x} - {periodo_scatter} (TOP {top_n_scatter})',
-            labels={var_x: var_x, var_y: var_y}
-        )
-        
-        fig_scatter.update_layout(
-            height=550,
-            plot_bgcolor='#f8f9fa',
-            paper_bgcolor='white',
-            showlegend=True,
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.02
+        # Aplicar cores personalizadas se disponível
+        if 'dict_cores_personalizadas' in st.session_state and st.session_state['dict_cores_personalizadas']:
+            color_map = st.session_state['dict_cores_personalizadas']
+            
+            fig_scatter = go.Figure()
+            
+            for instituicao in df_scatter['Instituição'].unique():
+                df_inst = df_scatter[df_scatter['Instituição'] == instituicao]
+                cor = color_map.get(instituicao, '#1f77b4')
+                
+                fig_scatter.add_trace(go.Scatter(
+                    x=df_inst[var_x],
+                    y=df_inst[var_y],
+                    mode='markers',
+                    name=instituicao,
+                    marker=dict(
+                        size=df_inst[var_size] / df_scatter[var_size].max() * 100,
+                        color=cor,
+                        line=dict(width=1, color='white')
+                    ),
+                    hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x}}<br>{var_y}: %{{y}}<extra></extra>'
+                ))
+            
+            fig_scatter.update_layout(
+                title=f'{var_y} vs {var_x} - {periodo_scatter} (TOP {top_n_scatter})',
+                xaxis_title=var_x,
+                yaxis_title=var_y,
+                height=650,
+                plot_bgcolor='#f8f9fa',
+                paper_bgcolor='white',
+                showlegend=True,
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
             )
-        )
-        
-        fig_scatter.update_traces(marker=dict(line=dict(width=1, color='white')))
+        else:
+            fig_scatter = px.scatter(
+                df_scatter, 
+                x=var_x, 
+                y=var_y, 
+                size=var_size, 
+                color='Instituição',
+                hover_data=['Alavancagem', 'Índice de Basileia', 'ROE An. (%)'],
+                title=f'{var_y} vs {var_x} - {periodo_scatter} (TOP {top_n_scatter})',
+                labels={var_x: var_x, var_y: var_y}
+            )
+            
+            fig_scatter.update_layout(
+                height=650,
+                plot_bgcolor='#f8f9fa',
+                paper_bgcolor='white',
+                showlegend=True,
+                legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
+            )
+            
+            fig_scatter.update_traces(marker=dict(line=dict(width=1, color='white')))
         
         st.plotly_chart(fig_scatter, use_container_width=True)
-        
-        st.markdown("---")
-        
-        # Tabs para conteúdo adicional
-        tab1, tab2 = st.tabs(["📋 Rankings", "📈 Evolução Temporal"])
-        
-        with tab1:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("🏆 TOP 10 por Carteira de Crédito")
-                top10 = df_ultimo.nlargest(10, 'Carteira de Crédito')[['Instituição','Carteira de Crédito']].copy()
-                top10['Carteira de Crédito'] = top10['Carteira de Crédito'].apply(lambda x: f"R$ {x/1e9:.2f}B")
-                st.dataframe(top10, use_container_width=True, hide_index=True)
-            
-            with col2:
-                st.subheader("💎 TOP 10 por ROE")
-                top_roe = df_ultimo.nlargest(10, 'ROE An. (%)')[['Instituição','ROE An. (%)']].copy()
-                top_roe['ROE An. (%)'] = top_roe['ROE An. (%)'].apply(lambda x: f"{x*100:.1f}%" if pd.notna(x) else "-")
-                st.dataframe(top_roe, use_container_width=True, hide_index=True)
-        
-        with tab2:
-            st.plotly_chart(criar_grafico_evolucao(df, top_n=5), use_container_width=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("📅 Períodos Disponíveis", f"{len(periodos)}")
-            with col2:
-                st.metric("📆 Cobertura", f"{periodos[0]} → {periodos[-1]}")
     
     else:
         st.info("🔄 **Carregando dados automaticamente do GitHub...**")
@@ -545,4 +514,4 @@ elif menu == "🏠 Dashboard Principal":
 
 # Footer
 st.markdown("---")
-st.caption("💡 **Dica:** Use o menu lateral para navegar entre Dashboard, Análise Individual e Sobre")
+st.caption("💡 **Desenvolvido em 2026 por Matheus Prates, CFA**")
