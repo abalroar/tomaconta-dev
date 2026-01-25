@@ -594,7 +594,6 @@ if 'df_aliases' not in st.session_state:
     if df_aliases is not None:
         st.session_state['df_aliases'] = df_aliases
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
-        # USAR FUNÇÃO LOCAL PARA CARREGAR CORES EXATAS
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
 
@@ -638,37 +637,16 @@ with st.sidebar:
     st.divider()
     st.title("controle")
     
+    # Apenas mostrar status (sem opções de upload ou limpeza)
     if 'df_aliases' in st.session_state:
         st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
     else:
         st.error("aliases não encontrados")
     
+    # Informação sobre cache (apenas leitura, sem botão de limpar)
     info_cache = ler_info_cache()
     if info_cache:
-        with st.expander("informações do cache"):
-            st.text(info_cache)
-            if st.button("limpar cache", use_container_width=True):
-                if os.path.exists(CACHE_FILE):
-                    os.remove(CACHE_FILE)
-                if os.path.exists(CACHE_INFO):
-                    os.remove(CACHE_INFO)
-                if 'dados_periodos' in st.session_state:
-                    del st.session_state['dados_periodos']
-                st.rerun()
-    
-    st.divider()
-    
-    with st.expander("upload de aliases"):
-        uploaded_file = st.file_uploader("selecione arquivo excel", type=['xlsx'], key="upload_aliases")
-        
-        if uploaded_file:
-            df_aliases = pd.read_excel(uploaded_file)
-            st.session_state['df_aliases'] = df_aliases
-            st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
-            # USAR FUNÇÃO LOCAL PARA CARREGAR CORES EXATAS
-            st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(df_aliases)
-            st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
-            st.success("aliases atualizados com sucesso")
+        st.caption(info_cache.replace('\n', ' • '))
     
     st.divider()
     
