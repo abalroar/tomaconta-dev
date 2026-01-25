@@ -15,6 +15,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 import io
+import base64
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -33,9 +34,9 @@ st.markdown("""
     }
     
     .stApp > header > div {
-        visibility: hidden !important;
-        height: 0 !important;
-        overflow: hidden !important;
+        visibility: visible !important;
+        height: auto !important;
+        overflow: visible !important;
     }
     
     [data-testid="stDecoration"] {
@@ -53,9 +54,6 @@ st.markdown("""
         visibility: visible !important;
         opacity: 1 !important;
         pointer-events: auto !important;
-        position: fixed !important;
-        top: 0.5rem !important;
-        left: 0.5rem !important;
         z-index: 999999 !important;
         background-color: white !important;
         border-radius: 0.5rem !important;
@@ -68,6 +66,13 @@ st.markdown("""
         width: 1.5rem !important;
         height: 1.5rem !important;
     }
+
+    [data-testid="collapsedControl"] button span {
+        font-family: 'Material Icons' !important;
+        font-size: 1.5rem !important;
+        line-height: 1 !important;
+    }
+
     
     button[kind="header"] {
         display: flex !important;
@@ -209,7 +214,7 @@ st.markdown("""
     }
 
     [data-testid="stSidebar"] > div:first-child {
-        padding-top: 0rem !important;
+        padding-top: 0.5rem !important;
     }
     
     [data-testid="stSidebar"] .element-container {
@@ -273,7 +278,31 @@ def normalizar_nome_instituicao(nome):
     """Normaliza nome removendo espaços extras e convertendo para uppercase"""
     if pd.isna(nome):
         return ""
-    return str(nome).strip().upper()
+    return " ".join(str(nome).split()).upper()
+
+
+
+def normalizar_codigo_cor(cor_valor):
+    if pd.isna(cor_valor):
+        return None
+
+    if isinstance(cor_valor, (int, np.integer)):
+        cor_str = f"{int(cor_valor):06X}"
+    elif isinstance(cor_valor, (float, np.floating)) and float(cor_valor).is_integer():
+        cor_str = f"{int(cor_valor):06X}"
+    else:
+        cor_str = str(cor_valor).strip().upper()
+        if cor_str.startswith('#'):
+            cor_str = cor_str[1:]
+        cor_str = cor_str.replace(" ", "")
+
+    if len(cor_str) < 6:
+        cor_str = cor_str.zfill(6)
+
+    if len(cor_str) == 6 and all(c in '0123456789ABCDEF' for c in cor_str):
+        return f"#{cor_str}"
+
+    return None
 
 # FIX PROBLEMA 3: Carregamento correto de cores com normalização
 def carregar_cores_aliases_local(df_aliases):
@@ -300,14 +329,9 @@ def carregar_cores_aliases_local(df_aliases):
             # Normaliza o nome da instituição
             instituicao_norm = normalizar_nome_instituicao(instituicao)
             
-            # Processa o código da cor
-            cor_str = str(cor_valor).strip().upper()
-            if not cor_str.startswith('#'):
-                cor_str = '#' + cor_str
-            if len(cor_str) == 7 and all(c in '0123456789ABCDEF' for c in cor_str[1:]):
-                dict_cores[instituicao_norm] = cor_str
-
-    return dict_cores
+                        cor_str = normalizar_codigo_cor(cor_valor)
+            if cor_str:
+                dict_cores[instituicao_norm] = cor_strreturn dict_cores
 
 def baixar_cache_inicial():
     cache_path = Path(CACHE_FILE)
@@ -592,12 +616,11 @@ if 'dados_periodos' not in st.session_state:
 with st.sidebar:
     # FIX PROBLEMA 1: Logo centralizado com HTML inline
     if os.path.exists(LOGO_PATH):
-        col_logo = st.columns([1])[0]
-        with col_logo:
-            st.markdown('<div class="sidebar-logo-container">', unsafe_allow_html=True)
-            st.image(LOGO_PATH, width=100)
-            st.markdown('</div>', unsafe_allow_html=True)
-
+        logo_base64 = base64.b64encode(Path(LOGO_PATH).read_bytes()).decode("utf-8")
+        st.markdown(
+            f'<div class="sidebar-logo-container"><img src="data:image/png;base64,{logo_base64}" width="100" /></div>',
+            unsafe_allow_html=True
+        )
     st.markdown('<p class="sidebar-title">fica de olho</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-subtitle">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-author">por matheus prates, cfa</p>', unsafe_allow_html=True)
