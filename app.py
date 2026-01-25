@@ -689,7 +689,7 @@ if menu == "Sobre":
         st.markdown("""
         <div class="feature-card">
             <h4>extração automatizada</h4>
-            <p>integração direta com a api if.data do banco central do brasil para coleta de dados em tempo real.</p>
+            <p>integração direta com a api if.data do banco central do brasil para coleta de dados históricos.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -710,15 +710,15 @@ if menu == "Sobre":
     with col2:
         st.markdown("""
         <div class="feature-card">
-            <h4>classificação personalizada</h4>
-            <p>sistema de aliases para renomear e categorizar instituições conforme critérios específicos.</p>
+            <h4>nomenclatura personalizada</h4>
+            <p>sistema de nomenclaturas para renomear e categorizar instituições conforme nomes-fantasia.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
             <h4>métricas calculadas</h4>
-            <p>roe anualizado, alavancagem, funding gap, market share e índices de risco/retorno automatizados.</p>
+            <p>roe anualizado (%), alavancagem (crédito / PL), lucro líquido, patrimônio líquido, carteira de crédito (R$ mm)</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -939,5 +939,3 @@ elif menu == "Scatter Plot":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-st.markdown("---")
-st.caption("desenvolvido em 2026 por matheus prates, cfa")
