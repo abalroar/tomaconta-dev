@@ -47,6 +47,15 @@ st.markdown("""
         font-family: 'Inter', sans-serif !important;
     }
     
+    /* File uploader - FIX para não sobrepor */
+    [data-testid="stFileUploader"] {
+        margin-bottom: 1rem !important;
+    }
+    
+    [data-testid="stFileUploader"] label {
+        margin-bottom: 0.5rem !important;
+    }
+    
     /* Métricas */
     [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
         font-family: 'Inter', sans-serif !important;
@@ -65,6 +74,18 @@ st.markdown("""
     /* Captions */
     .stCaption {
         font-family: 'Inter', sans-serif !important;
+    }
+    
+    /* Container do logo */
+    .logo-container {
+        text-align: center;
+        margin-bottom: 1.5rem;
+        padding: 1rem 0;
+    }
+    
+    .logo-container img {
+        border-radius: 50%;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     
     /* Header principal customizado */
@@ -261,20 +282,21 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     return fig
 
-# Header com Logo
-col_logo, col_title = st.columns([1, 5])
+# Header com Logo ACIMA do título (centralizado e com melhor qualidade)
+st.markdown('<div class="logo-container">', unsafe_allow_html=True)
+if os.path.exists(LOGO_PATH):
+    # Usando colunas para centralizar melhor
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        st.image(LOGO_PATH, use_column_width=True)
+else:
+    st.markdown('<p style="font-size: 150px; text-align: center;">👁️</p>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-with col_logo:
-    # Logo da ferramenta
-    if os.path.exists(LOGO_PATH):
-        st.image(LOGO_PATH, width=150)
-    else:
-        st.markdown('<p style="font-size: 150px; text-align: center;">👁️</p>', unsafe_allow_html=True)
-
-with col_title:
-    st.markdown('<p class="main-header">Fica de Olho</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
-    st.markdown('<p class="by-line">by Matheus Prates, CFA</p>', unsafe_allow_html=True)
+# Títulos centralizados
+st.markdown('<p class="main-header">Fica de Olho</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
+st.markdown('<p class="by-line">by Matheus Prates, CFA</p>', unsafe_allow_html=True)
 
 # CARREGAR ALIASES AUTOMATICAMENTE
 if 'df_aliases' not in st.session_state:
@@ -340,8 +362,9 @@ with st.sidebar:
     
     st.divider()
     
-    # Upload opcional
-    uploaded_file = st.file_uploader("📤 Upload Aliases", type=['xlsx'], label_visibility="collapsed")
+    # Upload opcional - COM LABEL VISÍVEL
+    st.subheader("📤 Upload Aliases")
+    uploaded_file = st.file_uploader("Selecione o arquivo", type=['xlsx'], label_visibility="collapsed")
     
     if uploaded_file:
         df_aliases = pd.read_excel(uploaded_file)
@@ -435,12 +458,7 @@ if menu == "ℹ️ Sobre":
     """)
     
     st.markdown("---")
-    st.markdown("""
-    <div style='text-align: center; padding: 20px; color: #666; font-size: 14px;'>
-        Desenvolvido em 2026 por <strong>Matheus Prates, CFA</strong><br>
-        Ferramenta de código aberto para análise do sistema financeiro brasileiro
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("💡 **Desenvolvido em 2026 por Matheus Prates, CFA** | *Ferramenta de código aberto para análise do sistema financeiro brasileiro*")
 
 elif menu == "🏦 Análise Individual":
     # ANÁLISE INDIVIDUAL DE BANCO
