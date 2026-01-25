@@ -328,10 +328,12 @@ def carregar_cores_aliases_local(df_aliases):
         if pd.notna(instituicao) and pd.notna(cor_valor):
             # Normaliza o nome da instituição
             instituicao_norm = normalizar_nome_instituicao(instituicao)
-            
-                        cor_str = normalizar_codigo_cor(cor_valor)
+
+            cor_str = normalizar_codigo_cor(cor_valor)
             if cor_str:
-                dict_cores[instituicao_norm] = cor_strreturn dict_cores
+                dict_cores[instituicao_norm] = cor_str
+
+    return dict_cores
 
 def baixar_cache_inicial():
     cache_path = Path(CACHE_FILE)
