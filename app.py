@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, carregar_cores_aliases
 
-st.set_page_config(page_title="Fica de Olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
 # CSS customizado com fonte IBM Plex Sans (clean e thin como StockPeers)
 st.markdown("""
@@ -200,7 +200,7 @@ def baixar_cache_inicial():
     
     if not cache_path.exists():
         try:
-            with st.spinner("Carregando dados do GitHub (10MB)..."):
+            with st.spinner("carregando dados do github (10mb)..."):
                 r = requests.get(CACHE_URL, timeout=120)
                 if r.status_code == 200:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -212,10 +212,10 @@ def baixar_cache_inicial():
                     
                     return True
                 else:
-                    st.warning(f"Cache não encontrado (HTTP {r.status_code})")
+                    st.warning(f"cache não encontrado (http {r.status_code})")
                     return False
         except Exception as e:
-            st.error(f"Erro ao baixar cache: {e}")
+            st.error(f"erro ao baixar cache: {e}")
             return False
     return True
 
@@ -305,9 +305,9 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     return fig
 
 # Títulos centralizados
-st.markdown('<p class="main-header">Fica de Olho</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
-st.markdown('<p class="by-line">por Matheus Prates, CFA</p>', unsafe_allow_html=True)
+st.markdown('<p class="main-header">fica de olho</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
+st.markdown('<p class="by-line">por matheus prates, cfa</p>', unsafe_allow_html=True)
 
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
@@ -330,38 +330,38 @@ with st.sidebar:
         st.image(LOGO_PATH, width=80)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    st.title("Navegação")
+    st.title("navegação")
     
     if 'menu_atual' not in st.session_state:
-        st.session_state['menu_atual'] = "Sobre"
+        st.session_state['menu_atual'] = "sobre"
     
-    if st.button("Sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Sobre" else "secondary"):
-        st.session_state['menu_atual'] = "Sobre"
+    if st.button("sobre", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "sobre" else "secondary"):
+        st.session_state['menu_atual'] = "sobre"
         st.rerun()
     
-    if st.button("Análise Individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Análise Individual" else "secondary"):
-        st.session_state['menu_atual'] = "Análise Individual"
+    if st.button("análise individual", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "análise individual" else "secondary"):
+        st.session_state['menu_atual'] = "análise individual"
         st.rerun()
     
-    if st.button("Scatter Plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "Scatter Plot" else "secondary"):
-        st.session_state['menu_atual'] = "Scatter Plot"
+    if st.button("scatter plot", use_container_width=True, type="primary" if st.session_state['menu_atual'] == "scatter plot" else "secondary"):
+        st.session_state['menu_atual'] = "scatter plot"
         st.rerun()
     
     menu = st.session_state['menu_atual']
     
     st.divider()
-    st.title("Controle")
+    st.title("controle")
     
     if 'df_aliases' in st.session_state:
         st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
     else:
-        st.error("Aliases não encontrados")
+        st.error("aliases não encontrados")
     
     info_cache = ler_info_cache()
     if info_cache:
-        with st.expander("Informações do Cache"):
+        with st.expander("informações do cache"):
             st.text(info_cache)
-            if st.button("Limpar Cache", use_container_width=True):
+            if st.button("limpar cache", use_container_width=True):
                 if os.path.exists(CACHE_FILE):
                     os.remove(CACHE_FILE)
                 if os.path.exists(CACHE_INFO):
@@ -372,8 +372,8 @@ with st.sidebar:
     
     st.divider()
     
-    with st.expander("Upload de Aliases"):
-        uploaded_file = st.file_uploader("Selecione arquivo Excel", type=['xlsx'], key="upload_aliases")
+    with st.expander("upload de aliases"):
+        uploaded_file = st.file_uploader("selecione arquivo excel", type=['xlsx'], key="upload_aliases")
         
         if uploaded_file:
             df_aliases = pd.read_excel(uploaded_file)
@@ -381,22 +381,22 @@ with st.sidebar:
             st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
             st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases(df_aliases)
             st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
-            st.success("Aliases atualizados com sucesso")
+            st.success("aliases atualizados com sucesso")
     
     st.divider()
     
-    st.subheader("Atualizar Dados")
+    st.subheader("atualizar dados")
     
     col1, col2 = st.columns(2)
     with col1:
-        ano_i = st.selectbox("Ano Inicial", range(2015,2027), index=8, key="ano_i")
-        mes_i = st.selectbox("Trimestre Inicial", ['03','06','09','12'], key="mes_i")
+        ano_i = st.selectbox("ano inicial", range(2015,2027), index=8, key="ano_i")
+        mes_i = st.selectbox("trimestre inicial", ['03','06','09','12'], key="mes_i")
     with col2:
-        ano_f = st.selectbox("Ano Final", range(2015,2027), index=10, key="ano_f")
-        mes_f = st.selectbox("Trimestre Final", ['03','06','09','12'], index=2, key="mes_f")
+        ano_f = st.selectbox("ano final", range(2015,2027), index=10, key="ano_f")
+        mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
     
     if 'dict_aliases' in st.session_state:
-        if st.button("Extrair Dados", type="primary", use_container_width=True):
+        if st.button("extrair dados", type="primary", use_container_width=True):
             periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
             progress_bar = st.progress(0)
             status = st.empty()
@@ -416,15 +416,15 @@ with st.sidebar:
             st.success(f"{len(dados)} períodos extraídos com sucesso")
             st.rerun()
     else:
-        st.warning("Carregue os aliases primeiro")
+        st.warning("carregue os aliases primeiro")
 
-if menu == "Sobre":
+if menu == "sobre":
     st.markdown("---")
     
     st.markdown("""
-    ## Sobre a Plataforma
+    ## sobre a plataforma
     
-    O **Fica de Olho** é uma plataforma de análise financeira que automatiza a extração, processamento e visualização 
+    o **fica de olho** é uma plataforma de análise financeira que automatiza a extração, processamento e visualização 
     de dados de instituições financeiras brasileiras, oferecendo insights comparativos e históricos em tempo real.
     """)
     
@@ -433,96 +433,96 @@ if menu == "Sobre":
     with col1:
         st.markdown("""
         <div class="feature-card">
-            <h4>Extração Automatizada</h4>
-            <p>Integração direta com a API IF.data do Banco Central do Brasil para coleta de dados em tempo real.</p>
+            <h4>extração automatizada</h4>
+            <p>integração direta com a api if.data do banco central do brasil para coleta de dados em tempo real.</p>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("""
         <div class="feature-card">
-            <h4>Análise Temporal</h4>
-            <p>Acompanhamento histórico de métricas financeiras ao longo de múltiplos trimestres com séries temporais.</p>
+            <h4>análise temporal</h4>
+            <p>acompanhamento histórico de métricas financeiras ao longo de múltiplos trimestres com séries temporais.</p>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("""
         <div class="feature-card">
-            <h4>Visualização Interativa</h4>
-            <p>Gráficos de dispersão customizáveis com filtros dinâmicos e comparações multi-institucionais.</p>
+            <h4>visualização interativa</h4>
+            <p>gráficos de dispersão customizáveis com filtros dinâmicos e comparações multi-institucionais.</p>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
         st.markdown("""
         <div class="feature-card">
-            <h4>Classificação Personalizada</h4>
-            <p>Sistema de aliases para renomear e categorizar instituições conforme critérios específicos.</p>
+            <h4>classificação personalizada</h4>
+            <p>sistema de aliases para renomear e categorizar instituições conforme critérios específicos.</p>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("""
         <div class="feature-card">
-            <h4>Métricas Calculadas</h4>
-            <p>ROE anualizado, alavancagem, funding gap, market share e índices de risco/retorno automatizados.</p>
+            <h4>métricas calculadas</h4>
+            <p>roe anualizado, alavancagem, funding gap, market share e índices de risco/retorno automatizados.</p>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("""
         <div class="feature-card">
-            <h4>Dados Oficiais</h4>
-            <p>Fonte única e confiável: API IF.data do Banco Central do Brasil com atualização trimestral.</p>
+            <h4>dados oficiais</h4>
+            <p>fonte única e confiável: api if.data do banco central do brasil com atualização trimestral.</p>
         </div>
         """, unsafe_allow_html=True)
     
     st.markdown("---")
     
     st.markdown("""
-    ## Dados Disponíveis
+    ## dados disponíveis
     
-    Todas as informações são extraídas diretamente da **API IF.data** do Banco Central, incluindo:
+    todas as informações são extraídas diretamente da **api if.data** do banco central, incluindo:
     """)
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
-        - Carteira de Crédito Classificada
-        - Patrimônio Líquido e Resultado
-        - Índice de Basileia e Capital
+        - carteira de crédito classificada
+        - patrimônio líquido e resultado
+        - índice de basileia e capital
         """)
     
     with col2:
         st.markdown("""
-        - Captações e Funding
-        - Ativo Total e Composição
-        - Cadastro de Instituições Autorizadas
+        - captações e funding
+        - ativo total e composição
+        - cadastro de instituições autorizadas
         """)
     
     st.markdown("---")
     
     st.markdown("""
-    ## Como Utilizar
+    ## como utilizar
     
-    1. **Dados pré-carregados**: A plataforma já possui dados históricos prontos para análise
-    2. **Navegue pelas páginas**: Use o menu lateral para acessar "Análise Individual" ou "Scatter Plot"
-    3. **Atualize quando necessário**: Configure o período desejado e clique em "Extrair Dados"
-    4. **Personalize visualizações**: Aplique filtros e ajuste variáveis conforme sua análise
+    1. **dados pré-carregados**: a plataforma já possui dados históricos prontos para análise
+    2. **navegue pelas páginas**: use o menu lateral para acessar "análise individual" ou "scatter plot"
+    3. **atualize quando necessário**: configure o período desejado e clique em "extrair dados"
+    4. **personalize visualizações**: aplique filtros e ajuste variáveis conforme sua análise
     
     ---
     
-    ## Stack Tecnológica
+    ## stack tecnológica
     
-    - **Python 3.10+** | Linguagem base
-    - **Streamlit** | Interface web interativa
-    - **Pandas** | Processamento e análise de dados
-    - **Plotly** | Visualizações dinâmicas
-    - **API BCB Olinda** | Fonte oficial de dados
+    - **python 3.10+** | linguagem base
+    - **streamlit** | interface web interativa
+    - **pandas** | processamento e análise de dados
+    - **plotly** | visualizações dinâmicas
+    - **api bcb olinda** | fonte oficial de dados
     """)
     
     st.markdown("---")
-    st.caption("Desenvolvido em 2026 por Matheus Prates, CFA | Ferramenta open-source para análise do sistema financeiro brasileiro")
+    st.caption("desenvolvido em 2026 por matheus prates, cfa | ferramenta open-source para análise do sistema financeiro brasileiro")
 
-elif menu == "Análise Individual":
+elif menu == "análise individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
         
@@ -547,7 +547,7 @@ elif menu == "Análise Individual":
                 bancos_disponiveis = sorted(bancos_todos)
             
             if len(bancos_disponiveis) > 0:
-                banco_selecionado = st.selectbox("Selecione uma Instituição", bancos_disponiveis, key="banco_individual")
+                banco_selecionado = st.selectbox("selecione uma instituição", bancos_disponiveis, key="banco_individual")
                 
                 if banco_selecionado:
                     df_banco = df[df['Instituição'] == banco_selecionado].copy()
@@ -564,16 +564,16 @@ elif menu == "Análise Individual":
                     col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
-                        st.metric("Carteira de Crédito", formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
+                        st.metric("carteira de crédito", formatar_valor(dados_ultimo.get('Carteira de Crédito'), 'Carteira de Crédito'))
                     with col2:
-                        st.metric("ROE Anualizado", formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
+                        st.metric("roe anualizado", formatar_valor(dados_ultimo.get('ROE An. (%)'), 'ROE An. (%)'))
                     with col3:
-                        st.metric("Índice de Basileia", formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
+                        st.metric("índice de basileia", formatar_valor(dados_ultimo.get('Índice de Basileia'), 'Índice de Basileia'))
                     with col4:
-                        st.metric("Alavancagem", formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
+                        st.metric("alavancagem", formatar_valor(dados_ultimo.get('Alavancagem'), 'Alavancagem'))
                     
                     st.markdown("---")
-                    st.markdown("### Evolução Histórica das Variáveis")
+                    st.markdown("### evolução histórica das variáveis")
                     
                     variaveis = [col for col in df_banco.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco[col].notna().any()]
                     
@@ -586,14 +586,14 @@ elif menu == "Análise Individual":
                                     fig = criar_mini_grafico(df_banco, var, var)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
-                st.warning("Nenhuma instituição encontrada nos dados")
+                st.warning("nenhuma instituição encontrada nos dados")
         else:
-            st.warning("Dados incompletos ou vazios")
+            st.warning("dados incompletos ou vazios")
     else:
-        st.info("Carregando dados automaticamente do GitHub...")
-        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Scatter Plot":
+elif menu == "scatter plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
         
@@ -603,15 +603,15 @@ elif menu == "Scatter Plot":
         col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
-            var_x = st.selectbox("Eixo X", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
+            var_x = st.selectbox("eixo x", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
         with col2:
-            var_y = st.selectbox("Eixo Y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
+            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
         with col3:
-            var_size = st.selectbox("Tamanho", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
+            var_size = st.selectbox("tamanho", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
         with col4:
-            periodo_scatter = st.selectbox("Período", periodos, index=len(periodos)-1)
+            periodo_scatter = st.selectbox("período", periodos, index=len(periodos)-1)
         with col5:
-            top_n_scatter = st.slider("TOP N", 5, 50, 15)
+            top_n_scatter = st.slider("top n", 5, 50, 15)
         
         df_scatter = df[df['Período'] == periodo_scatter].nlargest(top_n_scatter, 'Carteira de Crédito')
         
@@ -646,7 +646,7 @@ elif menu == "Scatter Plot":
                 ))
             
             fig_scatter.update_layout(
-                title=f'{var_y} vs {var_x} - {periodo_scatter} (TOP {top_n_scatter})',
+                title=f'{var_y} vs {var_x} - {periodo_scatter} (top {top_n_scatter})',
                 xaxis_title=var_x,
                 yaxis_title=var_y,
                 height=650,
@@ -666,7 +666,7 @@ elif menu == "Scatter Plot":
                 size='size_display', 
                 color='Instituição',
                 hover_data=['Alavancagem', 'Índice de Basileia', 'ROE An. (%)'],
-                title=f'{var_y} vs {var_x} - {periodo_scatter} (TOP {top_n_scatter})',
+                title=f'{var_y} vs {var_x} - {periodo_scatter} (top {top_n_scatter})',
                 labels={'x_display': var_x, 'y_display': var_y}
             )
             
@@ -685,8 +685,8 @@ elif menu == "Scatter Plot":
         
         st.plotly_chart(fig_scatter, use_container_width=True)
     else:
-        st.info("Carregando dados automaticamente do GitHub...")
-        st.markdown("Por favor, aguarde alguns segundos e recarregue a página")
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 st.markdown("---")
-st.caption("Desenvolvido em 2026 por Matheus Prates, CFA")
+st.caption("desenvolvido em 2026 por matheus prates, cfa")
