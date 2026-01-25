@@ -38,6 +38,18 @@ st.markdown("""
         font-weight: 300 !important;
     }
     
+    /* Logo no sidebar */
+    .sidebar-logo {
+        text-align: center;
+        padding: 1rem 0 1.5rem 0;
+    }
+    
+    .sidebar-logo img {
+        border-radius: 50%;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        max-width: 80px;
+    }
+    
     /* Botões */
     button[kind="primary"], button[kind="secondary"], .stButton button {
         font-family: 'IBM Plex Sans', sans-serif !important;
@@ -81,21 +93,9 @@ st.markdown("""
         font-weight: 300 !important;
     }
     
-    /* Container do logo */
-    .logo-container {
-        text-align: center;
-        margin-bottom: 1.5rem;
-        padding: 1rem 0;
-    }
-    
-    .logo-container img {
-        border-radius: 50%;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
-    
     /* Header principal customizado */
     .main-header {
-        font-size: 6rem;
+        font-size: 4.5rem;
         font-weight: 300 !important;
         color: #1f77b4;
         text-align: center;
@@ -105,7 +105,7 @@ st.markdown("""
     }
     
     .sub-header {
-        font-size: 2rem;
+        font-size: 1.5rem;
         color: #666;
         text-align: center;
         margin-bottom: 0.5rem;
@@ -114,7 +114,7 @@ st.markdown("""
     }
     
     .by-line {
-        font-size: 1.2rem;
+        font-size: 1rem;
         color: #888;
         text-align: center;
         margin-bottom: 2rem;
@@ -134,6 +134,20 @@ st.markdown("""
         font-size: 2rem;
         font-weight: 400 !important;
         font-family: 'IBM Plex Sans', sans-serif !important;
+    }
+    
+    /* Cards de feature */
+    .feature-card {
+        background-color: #f8f9fa;
+        padding: 1.5rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        border-left: 4px solid #1f77b4;
+    }
+    
+    .feature-card h4 {
+        color: #1f77b4;
+        margin-bottom: 0.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -281,18 +295,10 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     
     return fig
 
-st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-if os.path.exists(LOGO_PATH):
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        st.image(LOGO_PATH, use_column_width=True)
-else:
-    st.markdown('<p style="font-size: 150px; text-align: center;">👁️</p>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
+# Títulos centralizados
 st.markdown('<p class="main-header">Fica de Olho</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Dashboard de Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
-st.markdown('<p class="by-line">by Matheus Prates, CFA</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Análise de Instituições Financeiras Brasileiras</p>', unsafe_allow_html=True)
+st.markdown('<p class="by-line">por Matheus Prates, CFA</p>', unsafe_allow_html=True)
 
 if 'df_aliases' not in st.session_state:
     df_aliases = carregar_aliases()
@@ -309,6 +315,12 @@ if 'dados_periodos' not in st.session_state:
         st.session_state['dados_periodos'] = dados_cache
 
 with st.sidebar:
+    # Logo no topo do sidebar
+    if os.path.exists(LOGO_PATH):
+        st.markdown('<div class="sidebar-logo">', unsafe_allow_html=True)
+        st.image(LOGO_PATH, width=80)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
     st.title("Navegação")
     
     if 'menu_atual' not in st.session_state:
@@ -401,49 +413,105 @@ if menu == "Sobre":
     st.markdown("---")
     
     st.markdown("""
-    ### Sobre o Fica de Olho
+    ## Sobre a Plataforma
     
-    O **Fica de Olho** é uma ferramenta de análise financeira que extrai, processa e visualiza dados 
-    de instituições financeiras brasileiras de forma automatizada e interativa.
+    O **Fica de Olho** é uma plataforma de análise financeira que automatiza a extração, processamento e visualização 
+    de dados de instituições financeiras brasileiras, oferecendo insights comparativos e históricos em tempo real.
+    """)
     
-    #### Funcionalidades
+    col1, col2 = st.columns(2)
     
-    - **Extração Automatizada**: Integração direta com a API IF.data do Banco Central do Brasil
-    - **Análise Temporal**: Acompanhamento de métricas financeiras ao longo de múltiplos trimestres
-    - **Visualização Interativa**: Gráficos de dispersão customizáveis com filtros dinâmicos
-    - **Classificação Personalizada**: Sistema de aliases para renomear e categorizar instituições
-    - **Métricas Calculadas**: ROE anualizado, alavancagem, funding gap, market share e índices de risco/retorno
+    with col1:
+        st.markdown("""
+        <div class="feature-card">
+            <h4>Extração Automatizada</h4>
+            <p>Integração direta com a API IF.data do Banco Central do Brasil para coleta de dados em tempo real.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="feature-card">
+            <h4>Análise Temporal</h4>
+            <p>Acompanhamento histórico de métricas financeiras ao longo de múltiplos trimestres com séries temporais.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="feature-card">
+            <h4>Visualização Interativa</h4>
+            <p>Gráficos de dispersão customizáveis com filtros dinâmicos e comparações multi-institucionais.</p>
+        </div>
+        """, unsafe_allow_html=True)
     
-    #### Dados Utilizados
+    with col2:
+        st.markdown("""
+        <div class="feature-card">
+            <h4>Classificação Personalizada</h4>
+            <p>Sistema de aliases para renomear e categorizar instituições conforme critérios específicos.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="feature-card">
+            <h4>Métricas Calculadas</h4>
+            <p>ROE anualizado, alavancagem, funding gap, market share e índices de risco/retorno automatizados.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="feature-card">
+            <h4>Dados Oficiais</h4>
+            <p>Fonte única e confiável: API IF.data do Banco Central do Brasil com atualização trimestral.</p>
+        </div>
+        """, unsafe_allow_html=True)
     
-    Todos os dados são extraídos da **API IF.data** do Banco Central do Brasil, incluindo:
+    st.markdown("---")
     
-    - Carteira de Crédito Classificada
-    - Patrimônio Líquido e Lucro Líquido
-    - Índice de Basileia
-    - Captações e Ativo Total
-    - Cadastro de Instituições Financeiras
+    st.markdown("""
+    ## Dados Disponíveis
     
-    #### Como Começar
+    Todas as informações são extraídas diretamente da **API IF.data** do Banco Central, incluindo:
+    """)
     
-    1. Os dados já estão carregados automaticamente do GitHub
-    2. Acesse **Análise Individual** ou **Scatter Plot** no menu lateral
-    3. Para atualizar dados, configure período e clique em "Extrair Dados"
-    4. Personalize visualizações usando os filtros disponíveis
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        - Carteira de Crédito Classificada
+        - Patrimônio Líquido e Resultado
+        - Índice de Basileia e Capital
+        """)
+    
+    with col2:
+        st.markdown("""
+        - Captações e Funding
+        - Ativo Total e Composição
+        - Cadastro de Instituições Autorizadas
+        """)
+    
+    st.markdown("---")
+    
+    st.markdown("""
+    ## Como Utilizar
+    
+    1. **Dados pré-carregados**: A plataforma já possui dados históricos prontos para análise
+    2. **Navegue pelas páginas**: Use o menu lateral para acessar "Análise Individual" ou "Scatter Plot"
+    3. **Atualize quando necessário**: Configure o período desejado e clique em "Extrair Dados"
+    4. **Personalize visualizações**: Aplique filtros e ajuste variáveis conforme sua análise
     
     ---
     
-    ### Recursos Técnicos
+    ## Stack Tecnológica
     
-    - **Python 3.10+**
-    - **Streamlit** (interface)
-    - **Pandas** (processamento)
-    - **Plotly** (visualizações)
-    - **API BCB Olinda**
+    - **Python 3.10+** | Linguagem base
+    - **Streamlit** | Interface web interativa
+    - **Pandas** | Processamento e análise de dados
+    - **Plotly** | Visualizações dinâmicas
+    - **API BCB Olinda** | Fonte oficial de dados
     """)
     
     st.markdown("---")
-    st.markdown("**Desenvolvido em 2026 por Matheus Prates, CFA** | *Ferramenta de código aberto para análise do sistema financeiro brasileiro*")
+    st.caption("Desenvolvido em 2026 por Matheus Prates, CFA | Ferramenta open-source para análise do sistema financeiro brasileiro")
 
 elif menu == "Análise Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
