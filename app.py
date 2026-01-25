@@ -24,9 +24,11 @@ import numpy as np
 
 st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
-# Botão customizado para toggle da sidebar (sempre visível)
-st.markdown("""
-<div id="custom-sidebar-toggle" onclick="toggleSidebar()" title="Abrir/Fechar Menu">
+# Botão customizado para toggle da sidebar usando components.html (permite JavaScript)
+import streamlit.components.v1 as components
+
+components.html("""
+<div id="sidebar-toggle-btn" title="Abrir/Fechar Menu">
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="3" y1="12" x2="21" y2="12"></line>
         <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -35,92 +37,67 @@ st.markdown("""
 </div>
 
 <style>
-    #custom-sidebar-toggle {
-        position: fixed !important;
-        top: 0.75rem !important;
-        left: 0.75rem !important;
-        z-index: 9999999 !important;
-        background-color: white !important;
-        border-radius: 0.5rem !important;
-        padding: 0.5rem !important;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.15) !important;
-        border: 1px solid rgba(0,0,0,0.08) !important;
-        cursor: pointer !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        transition: all 0.2s ease !important;
-        color: #333 !important;
+    #sidebar-toggle-btn {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 999999999;
+        background-color: white;
+        border-radius: 8px;
+        padding: 8px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+        border: 1px solid rgba(0,0,0,0.08);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+        color: #333;
     }
-
-    #custom-sidebar-toggle:hover {
-        box-shadow: 0 4px 16px rgba(0,0,0,0.25) !important;
-        background-color: #f0f0f0 !important;
-    }
-
-    /* Esconde o botão nativo do Streamlit */
-    [data-testid="collapsedControl"] {
-        display: none !important;
+    #sidebar-toggle-btn:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+        background-color: #f0f0f0;
     }
 </style>
 
 <script>
-function toggleSidebar() {
-    // Tenta encontrar a sidebar
-    const sidebar = document.querySelector('[data-testid="stSidebar"]');
+(function() {
+    const btn = document.getElementById('sidebar-toggle-btn');
 
-    if (sidebar) {
-        // Verifica o estado atual
-        const isCollapsed = sidebar.getAttribute('aria-expanded') === 'false' ||
-                           sidebar.style.display === 'none' ||
-                           sidebar.classList.contains('st-emotion-cache-1gwvy71');
+    function toggleSidebar() {
+        // Acessa o documento pai (onde está o Streamlit)
+        const parent = window.parent.document;
 
-        if (isCollapsed) {
-            // Abre a sidebar
-            sidebar.setAttribute('aria-expanded', 'true');
-            sidebar.style.display = '';
-            sidebar.style.width = '';
-            sidebar.style.minWidth = '';
-            sidebar.style.transform = '';
-            sidebar.style.marginLeft = '';
+        // Tenta clicar no botão nativo primeiro
+        const nativeBtn = parent.querySelector('[data-testid="collapsedControl"] button');
+        if (nativeBtn) {
+            nativeBtn.click();
+            return;
+        }
 
-            // Remove classes que podem esconder
-            sidebar.classList.remove('st-emotion-cache-1gwvy71');
+        // Se não encontrou, manipula a sidebar diretamente
+        const sidebar = parent.querySelector('[data-testid="stSidebar"]');
+        if (sidebar) {
+            const isHidden = sidebar.getAttribute('aria-expanded') === 'false' ||
+                           getComputedStyle(sidebar).transform.includes('-') ||
+                           getComputedStyle(sidebar).marginLeft.includes('-');
 
-            // Tenta encontrar e clicar no botão nativo
-            const nativeBtn = document.querySelector('[data-testid="collapsedControl"] button');
-            if (nativeBtn) nativeBtn.click();
-        } else {
-            // Fecha a sidebar
-            sidebar.setAttribute('aria-expanded', 'false');
-            sidebar.style.transform = 'translateX(-100%)';
-            sidebar.style.marginLeft = '-21rem';
+            if (isHidden) {
+                sidebar.style.transform = 'none';
+                sidebar.style.marginLeft = '0';
+                sidebar.setAttribute('aria-expanded', 'true');
+            } else {
+                sidebar.style.transform = 'translateX(-100%)';
+                sidebar.style.marginLeft = '-21rem';
+                sidebar.setAttribute('aria-expanded', 'false');
+            }
         }
     }
 
-    // Fallback: tenta clicar no botão nativo se existir
-    const nativeToggle = document.querySelector('[data-testid="collapsedControl"] button') ||
-                         document.querySelector('button[kind="header"]');
-    if (nativeToggle) {
-        nativeToggle.click();
-    }
-}
-
-// Observador para garantir que o botão fique sempre visível
-const observer = new MutationObserver(() => {
-    const toggle = document.getElementById('custom-sidebar-toggle');
-    if (toggle) {
-        toggle.style.display = 'flex';
-        toggle.style.visibility = 'visible';
-    }
-});
-
-// Inicia observação quando o DOM estiver pronto
-if (document.body) {
-    observer.observe(document.body, { childList: true, subtree: true });
-}
+    btn.addEventListener('click', toggleSidebar);
+})();
 </script>
-""", unsafe_allow_html=True)
+""", height=50)
 
 st.markdown("""
 <style>
