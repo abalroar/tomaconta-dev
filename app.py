@@ -26,79 +26,172 @@ st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide"
 
 st.markdown("""
 <style>
+    /* ============================================================
+       FONTES - IBM Plex Sans para texto, Material Symbols para ícones
+       ============================================================ */
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@100;200;300;400;500;600;700&display=swap');
-    @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
-    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
     @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
-    /* ESCONDE HEADER MAS PRESERVA BOTÃO DA SIDEBAR */
+    /* ============================================================
+       ESCONDE HEADER MAS PRESERVA FUNCIONALIDADES ESSENCIAIS
+       ============================================================ */
     .stApp > header {
         background-color: transparent !important;
     }
-    
-    .stApp > header > div {
-        visibility: visible !important;
-        height: auto !important;
-        overflow: visible !important;
-    }
-    
+
     [data-testid="stDecoration"] {
         display: none !important;
     }
-    
+
     [data-testid="stToolbar"] {
         visibility: hidden !important;
         height: 0 !important;
+        overflow: hidden !important;
     }
-    
-    /* FIX PROBLEMA 2: BOTÃO TOGGLE SIDEBAR SEMPRE VISÍVEL */
+
+    /* ============================================================
+       BOTÃO TOGGLE SIDEBAR - SEMPRE VISÍVEL E ACESSÍVEL
+       Resolve: Problema 3 (sem forma de reabrir sidebar)
+       ============================================================ */
     [data-testid="collapsedControl"] {
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
         pointer-events: auto !important;
         position: fixed !important;
-        top: 0.5rem !important;
-        left: 0.5rem !important;
-        z-index: 999999 !important;
+        top: 0.75rem !important;
+        left: 0.75rem !important;
+        z-index: 1000000 !important;
         background-color: white !important;
         border-radius: 0.5rem !important;
+        padding: 0.35rem !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.15) !important;
+        border: 1px solid rgba(0,0,0,0.08) !important;
+        transition: box-shadow 0.2s ease !important;
+    }
+
+    [data-testid="collapsedControl"]:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2) !important;
+    }
+
+    [data-testid="collapsedControl"] button {
+        background: transparent !important;
+        border: none !important;
         padding: 0.25rem !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
-    }
-    
-    /* Remove texto "keyboard_double" do botão */
-    [data-testid="collapsedControl"] svg {
-        width: 1.5rem !important;
-        height: 1.5rem !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
     }
 
-    
-    /* GARANTE FONTES DE ÍCONES (evita aparecer "keyboard_double_arrow_left" / "arrow_drop_down") */
-    .material-icons { font-family: 'Material Icons' !important; font-weight: normal !important; font-style: normal !important; }
-    .material-symbols-outlined { font-family: 'Material Symbols Outlined' !important; font-weight: normal !important; font-style: normal !important; }
-    .material-symbols-rounded { font-family: 'Material Symbols Rounded' !important; font-weight: normal !important; font-style: normal !important; }
+    /* ============================================================
+       ÍCONES - MATERIAL SYMBOLS ROUNDED
+       Resolve: Problema 1 (ícones virando texto)
 
-    /* Alguns ícones do Streamlit vêm como spans sem classe explícita */
+       CRÍTICO: Estes seletores DEVEM ter maior especificidade que
+       as regras de fonte genéricas para funcionar corretamente.
+       ============================================================ */
+
+    /* Ícone do botão toggle sidebar (keyboard_double_arrow) */
     [data-testid="collapsedControl"] button span,
-    [data-testid="stExpander"] summary span[data-testid="stExpanderToggleIcon"],
-    [data-testid="stExpander"] summary span[aria-hidden="true"] {
-        font-family: 'Material Icons' !important;
+    [data-testid="collapsedControl"] span,
+    [data-testid="stSidebar"] [data-testid="collapsedControl"] span {
+        font-family: 'Material Symbols Rounded', sans-serif !important;
+        font-weight: normal !important;
+        font-style: normal !important;
+        font-size: 1.5rem !important;
+        line-height: 1 !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        display: inline-block !important;
+        white-space: nowrap !important;
+        word-wrap: normal !important;
+        direction: ltr !important;
+        -webkit-font-feature-settings: 'liga' !important;
+        font-feature-settings: 'liga' !important;
+        -webkit-font-smoothing: antialiased !important;
+        text-rendering: optimizeLegibility !important;
+    }
+
+    /* Ícone do expander (arrow_drop_down) */
+    [data-testid="stExpander"] summary span,
+    [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"],
+    [data-testid="stExpander"] [data-testid="stExpanderToggleIcon"] span,
+    [data-testid="stExpander"] summary [aria-hidden="true"],
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary span {
+        font-family: 'Material Symbols Rounded', sans-serif !important;
+        font-weight: normal !important;
+        font-style: normal !important;
+        font-size: 1.5rem !important;
+        line-height: 1 !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        display: inline-block !important;
+        white-space: nowrap !important;
+        word-wrap: normal !important;
+        direction: ltr !important;
+        -webkit-font-feature-settings: 'liga' !important;
+        font-feature-settings: 'liga' !important;
+        -webkit-font-smoothing: antialiased !important;
+        text-rendering: optimizeLegibility !important;
+    }
+
+    /* Classes genéricas de ícones Material (fallback) */
+    .material-symbols-rounded,
+    .material-symbols-outlined,
+    .material-icons,
+    [class*="material-symbols"],
+    [class*="material-icons"] {
+        font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
         font-weight: normal !important;
         font-style: normal !important;
         line-height: 1 !important;
-    }
-[data-testid="collapsedControl"] button span {
-        font-family: 'Material Icons' !important;
-        font-size: 1.5rem !important;
-        line-height: 1 !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        white-space: nowrap !important;
+        word-wrap: normal !important;
+        direction: ltr !important;
+        -webkit-font-feature-settings: 'liga' !important;
+        font-feature-settings: 'liga' !important;
+        -webkit-font-smoothing: antialiased !important;
     }
 
-    
-    button[kind="header"] {
-        display: flex !important;
-        visibility: visible !important;
-        opacity: 1 !important;
+    /* ============================================================
+       TIPOGRAFIA - IBM PLEX SANS
+       Usando :not() para excluir elementos de ícone
+       ============================================================ */
+
+    html, body, .stApp {
+        font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    }
+
+    /* Regra geral - exclui elementos de ícone */
+    div:not([data-testid="collapsedControl"]):not([data-testid="stExpanderToggleIcon"]),
+    p, label, input, select, textarea,
+    button:not([data-testid="collapsedControl"] button) {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 300 !important;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 500 !important;
+    }
+
+    /* Sidebar - exclui ícones */
+    [data-testid="stSidebar"] div:not([data-testid="stExpanderToggleIcon"]),
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] input,
+    [data-testid="stSidebar"] select {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 300 !important;
+    }
+
+    /* Texto do header do expander (não o ícone) */
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary div:not([data-testid="stExpanderToggleIcon"]) {
+        font-family: 'IBM Plex Sans', sans-serif !important;
+        font-weight: 400 !important;
     }
 
     .block-container {
@@ -106,45 +199,52 @@ st.markdown("""
         padding-bottom: 0rem !important;
     }
 
-    * {
-        font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    /* ============================================================
+       SIDEBAR - LAYOUT E ESPAÇAMENTO
+       Resolve: Problema 2 (sobreposição/layout quebrado)
+       ============================================================ */
+
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 0.5rem !important;
     }
 
-    html, body, [class*="css"], div, p, label, input, select, textarea, button {
-        font-family: 'IBM Plex Sans', sans-serif !important;
-        font-weight: 300 !important;
+    [data-testid="stSidebar"] .element-container {
+        margin-bottom: 0.5rem !important;
     }
 
-    /* Mantém ícones do Streamlit (Material Icons) funcionando.
-       Sem isso, o nome do ícone (ex.: keyboard_double_arrow_left / arrow_drop_down) aparece como texto. */
-    span.material-icons, i.material-icons, [class*="material-icons"],
-    [data-testid="stExpanderToggleIcon"] span,
-    [data-testid="collapsedControl"] span {
-        font-family: 'Material Icons' !important;
-        font-weight: normal !important;
-        font-style: normal !important;
-        line-height: 1 !important;
-        text-transform: none !important;
-        letter-spacing: normal !important;
-        white-space: nowrap !important;
-        direction: ltr !important;
-        -webkit-font-feature-settings: 'liga' !important;
-        -webkit-font-smoothing: antialiased !important;
-        font-feature-settings: 'liga' !important;
+    [data-testid="stSegmentedControl"] {
+        margin-bottom: 1.5rem !important;
+        margin-top: 0.5rem !important;
     }
 
-
-    h1, h2, h3, h4, h5, h6 {
-        font-family: 'IBM Plex Sans', sans-serif !important;
-        font-weight: 500 !important;
+    /* Expander - evita sobreposição */
+    [data-testid="stExpander"] {
+        margin-top: 1rem !important;
+        position: relative !important;
+        z-index: 1 !important;
+        overflow: visible !important;
     }
 
-    [data-testid="stSidebar"] * {
-        font-family: 'IBM Plex Sans', sans-serif !important;
-        font-weight: 300 !important;
+    /* Header do expander - layout correto */
+    [data-testid="stExpander"] summary {
+        display: flex !important;
+        align-items: center !important;
+        gap: 0.5rem !important;
+        padding: 0.75rem 1rem !important;
+        cursor: pointer !important;
+        user-select: none !important;
     }
 
-    /* FIX PROBLEMA 1: LOGO CENTRALIZADO */
+    /* Conteúdo do expander */
+    [data-testid="stExpander"] > div[data-testid="stExpanderDetails"] {
+        padding: 0.5rem 1rem 1rem 1rem !important;
+        position: relative !important;
+        z-index: 1 !important;
+    }
+
+    /* ============================================================
+       LOGO E TÍTULOS DA SIDEBAR
+       ============================================================ */
     .sidebar-logo-container {
         width: 100% !important;
         display: flex !important;
@@ -153,7 +253,7 @@ st.markdown("""
         padding: 1rem 0 0.5rem 0 !important;
         margin: 0 !important;
     }
-    
+
     .sidebar-logo-container img {
         border-radius: 50% !important;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
@@ -170,6 +270,7 @@ st.markdown("""
         margin: 0.5rem 0 0.2rem 0 !important;
         line-height: 1.2 !important;
         width: 100% !important;
+        font-family: 'IBM Plex Sans', sans-serif !important;
     }
 
     .sidebar-subtitle {
@@ -179,6 +280,7 @@ st.markdown("""
         margin: 0 0 0.2rem 0 !important;
         line-height: 1.3 !important;
         width: 100% !important;
+        font-family: 'IBM Plex Sans', sans-serif !important;
     }
 
     .sidebar-author {
@@ -188,8 +290,12 @@ st.markdown("""
         font-style: italic !important;
         margin: 0 0 1rem 0 !important;
         width: 100% !important;
+        font-family: 'IBM Plex Sans', sans-serif !important;
     }
 
+    /* ============================================================
+       COMPONENTES UI - BOTÕES, INPUTS, MÉTRICAS
+       ============================================================ */
     button[kind="primary"], button[kind="secondary"], .stButton button {
         font-family: 'IBM Plex Sans', sans-serif !important;
         font-weight: 400 !important;
@@ -212,7 +318,7 @@ st.markdown("""
         font-weight: 400 !important;
     }
 
-    .stMarkdown, .stMarkdown * {
+    .stMarkdown p, .stMarkdown div {
         font-family: 'IBM Plex Sans', sans-serif !important;
         font-weight: 300 !important;
     }
@@ -240,6 +346,9 @@ st.markdown("""
         font-family: 'IBM Plex Sans', sans-serif !important;
     }
 
+    /* ============================================================
+       CARDS E ELEMENTOS CUSTOMIZADOS
+       ============================================================ */
     .feature-card {
         background-color: #f8f9fa;
         padding: 1.5rem;
@@ -251,31 +360,11 @@ st.markdown("""
     .feature-card h4 {
         color: #1f77b4;
         margin-bottom: 0.5rem;
+        font-family: 'IBM Plex Sans', sans-serif !important;
     }
 
-    [data-testid="stSidebar"] > div:first-child {
-        padding-top: 0.5rem !important;
-    }
-    
-    [data-testid="stSidebar"] .element-container {
-        margin-bottom: 0.5rem !important;
-    }
-    
-    [data-testid="stSegmentedControl"] {
-        margin-bottom: 1.5rem !important;
-        margin-top: 0.5rem !important;
-    }
-    
-    /* FIX PROBLEMA 2: Remove sobreposição do expander */
-    [data-testid="stExpander"] {
-        margin-top: 1rem !important;
-        clear: both !important;
-        z-index: 1 !important;
-        position: relative !important;
-    }
-    
-    [data-testid="stSidebar"] .row-widget {
-        margin-top: 0 !important;
+    .feature-card p {
+        font-family: 'IBM Plex Sans', sans-serif !important;
     }
 </style>
 """, unsafe_allow_html=True)
