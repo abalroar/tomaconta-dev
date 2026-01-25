@@ -280,7 +280,7 @@ def obter_cor_banco(instituicao):
     """Obtém a cor do banco do arquivo Aliases.xlsx"""
     if 'dict_cores_personalizadas' in st.session_state and instituicao in st.session_state['dict_cores_personalizadas']:
         return st.session_state['dict_cores_personalizadas'][instituicao]
-    return '#1f77b4'
+    return None
 
 def criar_mini_grafico(df_banco, variavel, titulo):
     """Cria mini gráfico para uma variável específica"""
@@ -292,6 +292,8 @@ def criar_mini_grafico(df_banco, variavel, titulo):
     # Obter cor do banco
     instituicao = df_sorted['Instituição'].iloc[0]
     cor_banco = obter_cor_banco(instituicao)
+    if not cor_banco:
+        cor_banco = '#1f77b4'
     
     vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações', 'Funding Gap', 'Carteira/Ativo', 'Market Share Carteira']
     vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
@@ -351,6 +353,8 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
     # Obter cor do banco
     instituicao = df_sorted['Instituição'].iloc[0]
     cor_banco = obter_cor_banco(instituicao)
+    if not cor_banco:
+        cor_banco = '#1f77b4'
     
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -875,11 +879,23 @@ elif menu == "scatter plot":
         df_scatter_plot['y_display'] = df_scatter_plot[var_y] * format_y['multiplicador']
         df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
         
+        # Criar scatter plot com cores mistas
         fig_scatter = go.Figure()
+        
+        # Cores padrão do Plotly para bancos sem alias
+        cores_plotly = px.colors.qualitative.Plotly
+        idx_cor = 0
         
         for instituicao in df_scatter_plot['Instituição'].unique():
             df_inst = df_scatter_plot[df_scatter_plot['Instituição'] == instituicao]
+            
+            # Tentar obter cor do Aliases.xlsx
             cor = obter_cor_banco(instituicao)
+            
+            # Se não tem cor personalizada, usar cor automática do Plotly
+            if not cor:
+                cor = cores_plotly[idx_cor % len(cores_plotly)]
+                idx_cor += 1
             
             fig_scatter.add_trace(go.Scatter(
                 x=df_inst['x_display'],
