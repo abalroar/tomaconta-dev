@@ -701,7 +701,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Análise Individual", "Lado a Lado", "Scatter Plot"],
+    ["Sobre", "Análise Individual", "Série Histórica", "Scatter Plot"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -1004,7 +1004,7 @@ elif menu == "Análise Individual":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Lado a Lado":
+elif menu == "Série Histórica":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
 
@@ -1053,7 +1053,7 @@ elif menu == "Lado a Lado":
                         "selecionar instituições",
                         bancos_disponiveis,
                         default=bancos_disponiveis[:2],
-                        key="bancos_lado_a_lado"
+                        key="bancos_serie_historica"
                     )
 
                 with col_vars:
@@ -1084,7 +1084,7 @@ elif menu == "Lado a Lado":
                         variaveis_disponiveis,
                         default=defaults_variaveis,
                         max_selections=10,
-                        key="variaveis_lado_a_lado"
+                        key="variaveis_serie_historica"
                     )
 
                 periodos_disponiveis = sorted(
@@ -1096,13 +1096,13 @@ elif menu == "Lado a Lado":
                         "período inicial",
                         periodos_disponiveis,
                         index=0,
-                        key="periodo_ini_lado_a_lado"
+                        key="periodo_ini_serie_historica"
                     )
                     periodo_final = st.selectbox(
                         "período final",
                         periodos_disponiveis,
                         index=len(periodos_disponiveis) - 1,
-                        key="periodo_fin_lado_a_lado"
+                        key="periodo_fin_serie_historica"
                     )
 
                 bancos_do_peer = []
@@ -1127,13 +1127,38 @@ elif menu == "Lado a Lado":
                         format_info = get_axis_format(variavel)
                         fig = go.Figure()
                         export_frames = []
+                        periodos_filtrados_lucro = periodos_filtrados
+                        if variavel == 'Lucro Líquido':
+                            st.markdown("**período lucro líquido**")
+                            col_lucro_ini, col_lucro_fim = st.columns(2)
+                            with col_lucro_ini:
+                                periodo_inicial_lucro = st.selectbox(
+                                    "período inicial",
+                                    periodos_disponiveis,
+                                    index=0,
+                                    key="periodo_ini_lucro_liquido"
+                                )
+                            with col_lucro_fim:
+                                periodo_final_lucro = st.selectbox(
+                                    "período final",
+                                    periodos_disponiveis,
+                                    index=len(periodos_disponiveis) - 1,
+                                    key="periodo_fin_lucro_liquido"
+                                )
+                            idx_lucro_ini = periodos_disponiveis.index(periodo_inicial_lucro)
+                            idx_lucro_fin = periodos_disponiveis.index(periodo_final_lucro)
+                            if idx_lucro_ini > idx_lucro_fin:
+                                idx_lucro_ini, idx_lucro_fin = idx_lucro_fin, idx_lucro_ini
+                            periodos_filtrados_lucro = periodos_disponiveis[idx_lucro_ini:idx_lucro_fin + 1]
 
                         for instituicao in bancos_para_comparar:
                             df_banco = df[df['Instituição'] == instituicao].copy()
                             if df_banco.empty or variavel not in df_banco.columns:
                                 continue
 
-                            df_banco = df_banco[df_banco['Período'].isin(periodos_filtrados)]
+                            df_banco = df_banco[df_banco['Período'].isin(
+                                periodos_filtrados_lucro if variavel == 'Lucro Líquido' else periodos_filtrados
+                            )]
                             df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
                             df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
                             df_banco = df_banco.sort_values(['ano', 'trimestre'])
@@ -1172,7 +1197,14 @@ elif menu == "Lado a Lado":
                             paper_bgcolor='white',
                             showlegend=True,
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                            xaxis=dict(showgrid=False),
+                            xaxis=dict(
+                                showgrid=False,
+                                tickmode='array' if variavel == 'Lucro Líquido' else None,
+                                tickvals=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None,
+                                ticktext=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None,
+                                categoryorder='array' if variavel == 'Lucro Líquido' else None,
+                                categoryarray=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None
+                            ),
                             yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat=format_info['tickformat'], ticksuffix=format_info['ticksuffix']),
                             font=dict(family='IBM Plex Sans'),
                             barmode='group' if variavel == 'Lucro Líquido' else None
@@ -1191,12 +1223,10 @@ elif menu == "Lado a Lado":
                                 df_export.to_excel(writer, index=False, sheet_name='dados')
                             buffer_excel.seek(0)
 
-                            timestamp = datetime.now().strftime('%Y-%m-%d')
-                            nome_variavel = variavel.replace(' ', '_').replace('/', '_')
                             st.download_button(
                                 label="Exportar Excel",
                                 data=buffer_excel,
-                                file_name=f"lado_a_lado_{nome_variavel}_{timestamp}.xlsx",
+                                file_name="Serie_Historica_.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                             )
                 else:
