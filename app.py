@@ -31,16 +31,15 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
     /* ===========================================
-       SIDEBAR SEMPRE VISÍVEL (sem toggle)
+       SIDEBAR - esconde completamente quando recolhido
        =========================================== */
-    [data-testid="stSidebar"] {
-        transform: none !important;
-        margin-left: 0 !important;
-        position: relative !important;
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        display: none !important;
+        width: 0 !important;
+        min-width: 0 !important;
     }
 
-    /* Esconde botão de toggle da sidebar */
-    [data-testid="collapsedControl"] {
+    [data-testid="stSidebar"][aria-expanded="false"] > div {
         display: none !important;
     }
 
@@ -639,8 +638,10 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         align-items: center;
+        justify-content: center;
+        text-align: center;
         padding: 1rem 0 0.5rem 0;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
     }
     .header-logo {
         width: 80px;
@@ -652,7 +653,22 @@ st.markdown("""
         font-size: 1.8rem;
         font-weight: 300;
         color: #1f77b4;
-        margin-bottom: 1rem;
+        margin-bottom: 0.3rem;
+    }
+    .header-subtitle {
+        font-size: 0.9rem;
+        color: #666;
+        margin-bottom: 0.2rem;
+    }
+    .header-author {
+        font-size: 0.8rem;
+        color: #888;
+        font-style: italic;
+        margin-bottom: 0.8rem;
+    }
+    /* Centraliza o menu de navegação */
+    .stColumns [data-testid="stHorizontalBlock"] {
+        justify-content: center !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -663,12 +679,14 @@ if os.path.exists(LOGO_PATH):
         f'<div class="header-container">'
         f'<img src="data:image/png;base64,{logo_base64}" class="header-logo" />'
         f'<div class="header-title">fica de olho</div>'
+        f'<div class="header-subtitle">análise de instituições financeiras brasileiras</div>'
+        f'<div class="header-author">por matheus prates, cfa</div>'
         f'</div>',
         unsafe_allow_html=True
     )
 
 # Menu centralizado
-col_spacer1, col_menu, col_spacer2 = st.columns([1, 2, 1])
+_, col_menu, _ = st.columns([1, 2, 1])
 with col_menu:
     menu = st.segmented_control(
         "navegação",
