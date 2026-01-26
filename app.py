@@ -632,21 +632,44 @@ if 'dados_periodos' not in st.session_state:
 if 'menu_atual' not in st.session_state:
     st.session_state['menu_atual'] = "Sobre"
 
-# Header com logo e navegação horizontal
-col_logo, col_nav = st.columns([1, 3])
+# Header centralizado: logo, nome e menu
+st.markdown("""
+<style>
+    .header-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 1rem 0 0.5rem 0;
+        margin-bottom: 1rem;
+    }
+    .header-logo {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        margin-bottom: 0.5rem;
+    }
+    .header-title {
+        font-size: 1.8rem;
+        font-weight: 300;
+        color: #1f77b4;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-with col_logo:
-    if os.path.exists(LOGO_PATH):
-        logo_base64 = base64.b64encode(Path(LOGO_PATH).read_bytes()).decode("utf-8")
-        st.markdown(
-            f'<div style="display: flex; align-items: center; gap: 10px;">'
-            f'<img src="data:image/png;base64,{logo_base64}" width="50" style="border-radius: 50%;" />'
-            f'<span style="font-size: 1.5rem; font-weight: 300; color: #1f77b4;">fica de olho</span>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
+if os.path.exists(LOGO_PATH):
+    logo_base64 = base64.b64encode(Path(LOGO_PATH).read_bytes()).decode("utf-8")
+    st.markdown(
+        f'<div class="header-container">'
+        f'<img src="data:image/png;base64,{logo_base64}" class="header-logo" />'
+        f'<div class="header-title">fica de olho</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
-with col_nav:
+# Menu centralizado
+col_spacer1, col_menu, col_spacer2 = st.columns([1, 2, 1])
+with col_menu:
     menu = st.segmented_control(
         "navegação",
         ["Sobre", "Análise Individual", "Scatter Plot"],
