@@ -1256,6 +1256,7 @@ elif menu == "Série Histórica":
                                 df_export.to_excel(writer, index=False, sheet_name='dados')
                             buffer_excel.seek(0)
 
+                            nome_variavel = variavel.replace(' ', '_').replace('/', '_')
                             st.download_button(
                                 label="Exportar Excel",
                                 data=buffer_excel,
