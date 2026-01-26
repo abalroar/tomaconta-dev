@@ -692,8 +692,8 @@ with col_header:
     st.markdown("""
         <div style="text-align: center; margin-top: -0.5rem;">
             <p style="font-size: 3.6rem; font-weight: 700; color: #1f77b4; margin-bottom: 0.2rem;">fica de olho</p>
-            <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.1rem;">análise de instituições financeiras brasileiras</p>
-            <p style="font-size: 1.6rem; color: #888; font-style: italic; margin-bottom: 0.5rem;">por matheus prates, cfa</p>
+            <p style="font-size: 1.6rem; color: #666; margin-bottom: 0.1rem;">análise de instituições financeiras brasileiras</p>
+            <p style="font-size: 0.9rem; color: #888; font-style: italic; margin-bottom: 0.5rem;">por matheus prates, cfa</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -1042,11 +1042,17 @@ elif menu == "Lado a Lado":
                 col_select, col_vars = st.columns([2, 2])
 
                 with col_select:
+                    peers_disponiveis = []
+                    if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+                        peers_disponiveis = st.session_state['colunas_classificacao']
+
+                    opcoes_peer = ['Nenhum'] + peers_disponiveis
+                    peer_selecionado = st.selectbox("filtrar por peer", opcoes_peer, index=0)
+
                     bancos_selecionados = st.multiselect(
-                        "selecionar instituições (até 4)",
+                        "selecionar instituições",
                         bancos_disponiveis,
                         default=bancos_disponiveis[:2],
-                        max_selections=4,
                         key="bancos_lado_a_lado"
                     )
 
@@ -1074,19 +1080,30 @@ elif menu == "Lado a Lado":
                     defaults_variaveis = [v for v in defaults_variaveis if v in variaveis_disponiveis]
 
                     variaveis_selecionadas = st.multiselect(
-                        "selecionar variáveis (até 5)",
+                        "selecionar variáveis (até 10)",
                         variaveis_disponiveis,
                         default=defaults_variaveis,
-                        max_selections=5,
+                        max_selections=10,
                         key="variaveis_lado_a_lado"
                     )
 
-                if bancos_selecionados and variaveis_selecionadas:
+                bancos_do_peer = []
+                if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
+                    df_aliases = st.session_state['df_aliases']
+                    coluna_peer = df_aliases[peer_selecionado]
+                    mask_peer = (
+                        coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+                    )
+                    bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
+
+                bancos_para_comparar = sorted(set(bancos_do_peer) | set(bancos_selecionados))
+
+                if bancos_para_comparar and variaveis_selecionadas:
                     for variavel in variaveis_selecionadas:
                         format_info = get_axis_format(variavel)
                         fig = go.Figure()
 
-                        for instituicao in bancos_selecionados:
+                        for instituicao in bancos_para_comparar:
                             df_banco = df[df['Instituição'] == instituicao].copy()
                             if df_banco.empty or variavel not in df_banco.columns:
                                 continue
