@@ -667,8 +667,15 @@ st.markdown("""
         margin-bottom: 0.8rem;
     }
     /* Centraliza o menu de navegação */
-    .stColumns [data-testid="stHorizontalBlock"] {
-        justify-content: center !important;
+    .menu-container {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        margin-bottom: 0.5rem;
+    }
+    .menu-container > div {
+        display: flex;
+        justify-content: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -686,14 +693,25 @@ if os.path.exists(LOGO_PATH):
     )
 
 # Menu centralizado
-_, col_menu, _ = st.columns([1, 2, 1])
-with col_menu:
-    menu = st.segmented_control(
-        "navegação",
-        ["Sobre", "Análise Individual", "Scatter Plot"],
-        default=st.session_state['menu_atual'],
-        label_visibility="collapsed"
-    )
+st.markdown("""
+<style>
+    /* Força centralização do segmented control */
+    [data-testid="stHorizontalBlock"]:has([data-testid="stSegmentedControlContainer"]) {
+        justify-content: center !important;
+    }
+    [data-testid="stSegmentedControlContainer"] {
+        display: flex;
+        justify-content: center;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+menu = st.segmented_control(
+    "navegação",
+    ["Sobre", "Análise Individual", "Scatter Plot"],
+    default=st.session_state['menu_atual'],
+    label_visibility="collapsed"
+)
 
 if menu != st.session_state['menu_atual']:
     st.session_state['menu_atual'] = menu
