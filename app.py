@@ -1039,7 +1039,7 @@ elif menu == "Lado a Lado":
                 bancos_disponiveis = sorted(bancos_todos)
 
             if len(bancos_disponiveis) > 0:
-                col_select, col_vars = st.columns([2, 2])
+                col_select, col_vars, col_periodo = st.columns([2, 2, 2])
 
                 with col_select:
                     peers_disponiveis = []
@@ -1087,6 +1087,24 @@ elif menu == "Lado a Lado":
                         key="variaveis_lado_a_lado"
                     )
 
+                periodos_disponiveis = sorted(
+                    df['Período'].dropna().unique(),
+                    key=lambda x: (x.split('/')[1], x.split('/')[0])
+                )
+                with col_periodo:
+                    periodo_inicial = st.selectbox(
+                        "período inicial",
+                        periodos_disponiveis,
+                        index=0,
+                        key="periodo_ini_lado_a_lado"
+                    )
+                    periodo_final = st.selectbox(
+                        "período final",
+                        periodos_disponiveis,
+                        index=len(periodos_disponiveis) - 1,
+                        key="periodo_fin_lado_a_lado"
+                    )
+
                 bancos_do_peer = []
                 if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
                     df_aliases = st.session_state['df_aliases']
@@ -1099,15 +1117,23 @@ elif menu == "Lado a Lado":
                 bancos_para_comparar = sorted(set(bancos_do_peer) | set(bancos_selecionados))
 
                 if bancos_para_comparar and variaveis_selecionadas:
+                    idx_ini = periodos_disponiveis.index(periodo_inicial)
+                    idx_fin = periodos_disponiveis.index(periodo_final)
+                    if idx_ini > idx_fin:
+                        idx_ini, idx_fin = idx_fin, idx_ini
+                    periodos_filtrados = periodos_disponiveis[idx_ini:idx_fin + 1]
+
                     for variavel in variaveis_selecionadas:
                         format_info = get_axis_format(variavel)
                         fig = go.Figure()
+                        export_frames = []
 
                         for instituicao in bancos_para_comparar:
                             df_banco = df[df['Instituição'] == instituicao].copy()
                             if df_banco.empty or variavel not in df_banco.columns:
                                 continue
 
+                            df_banco = df_banco[df_banco['Período'].isin(periodos_filtrados)]
                             df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
                             df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
                             df_banco = df_banco.sort_values(['ano', 'trimestre'])
@@ -1124,8 +1150,13 @@ elif menu == "Lado a Lado":
                                 hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
                             ))
 
+                            export_frames.append(
+                                df_banco[['Período', 'Instituição', variavel]].copy()
+                            )
+
+                        st.markdown(f"### {variavel}")
+                        st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
                         fig.update_layout(
-                            title=variavel,
                             height=320,
                             margin=dict(l=10, r=10, t=40, b=30),
                             plot_bgcolor='#f8f9fa',
@@ -1138,6 +1169,26 @@ elif menu == "Lado a Lado":
                         )
 
                         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+                        if export_frames:
+                            df_export = pd.concat(export_frames, ignore_index=True)
+                            df_export['ano'] = df_export['Período'].str.split('/').str[1].astype(int)
+                            df_export['trimestre'] = df_export['Período'].str.split('/').str[0].astype(int)
+                            df_export = df_export.sort_values(['ano', 'trimestre', 'Instituição']).drop(columns=['ano', 'trimestre'])
+
+                            buffer_excel = BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                df_export.to_excel(writer, index=False, sheet_name='dados')
+                            buffer_excel.seek(0)
+
+                            timestamp = datetime.now().strftime('%Y-%m-%d')
+                            nome_variavel = variavel.replace(' ', '_').replace('/', '_')
+                            st.download_button(
+                                label="Exportar Excel",
+                                data=buffer_excel,
+                                file_name=f"lado_a_lado_{nome_variavel}_{timestamp}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
                 else:
                     st.info("selecione instituições e variáveis para comparar")
             else:
