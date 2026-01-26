@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 from PIL import Image
+from io import BytesIO
 
 st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
@@ -649,6 +650,19 @@ st.markdown("""
     .header-nav [data-testid="stSegmentedControl"] > div {
         justify-content: center;
     }
+
+    .header-logo {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+
+    .header-logo img {
+        width: 200px;
+        height: auto;
+        image-rendering: auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -656,16 +670,23 @@ st.markdown("""
 _, col_header, _ = st.columns([1, 3, 1])
 with col_header:
     if os.path.exists(LOGO_PATH):
-        # Centraliza logo usando subcolunas
-        _, col_logo, _ = st.columns([1, 1, 1])
-        with col_logo:
-            logo_image = Image.open(LOGO_PATH)
-            target_width = 160
-            if logo_image.width < target_width:
-                ratio = target_width / logo_image.width
-                new_height = int(logo_image.height * ratio)
-                logo_image = logo_image.resize((target_width, new_height), Image.LANCZOS)
-            st.image(logo_image, width=target_width)
+        logo_image = Image.open(LOGO_PATH)
+        target_width = 200
+        if logo_image.width < target_width:
+            ratio = target_width / logo_image.width
+            new_height = int(logo_image.height * ratio)
+            logo_image = logo_image.resize((target_width, new_height), Image.LANCZOS)
+        buffer = BytesIO()
+        logo_image.save(buffer, format="PNG", optimize=True)
+        logo_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        st.markdown(
+            f"""
+            <div class="header-logo">
+                <img src="data:image/png;base64,{logo_base64}" alt="fica de olho logo" />
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # Título e subtítulos centralizados via HTML
     st.markdown("""
