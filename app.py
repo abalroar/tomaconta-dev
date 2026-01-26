@@ -21,6 +21,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import numpy as np
+from PIL import Image
+from io import BytesIO
 
 st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
@@ -638,6 +640,29 @@ st.markdown("""
     .main .block-container {
         padding-top: 1rem !important;
     }
+
+    .header-nav {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+    }
+
+    .header-nav [data-testid="stSegmentedControl"] > div {
+        justify-content: center;
+    }
+
+    .header-logo {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+
+    .header-logo img {
+        width: 200px;
+        height: auto;
+        image-rendering: auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -645,29 +670,42 @@ st.markdown("""
 _, col_header, _ = st.columns([1, 3, 1])
 with col_header:
     if os.path.exists(LOGO_PATH):
-        # Centraliza logo usando subcolunas
-        _, col_logo, _ = st.columns([1, 1, 1])
-        with col_logo:
-            st.image(LOGO_PATH, width=80)
+        logo_image = Image.open(LOGO_PATH)
+        target_width = 200
+        if logo_image.width < target_width:
+            ratio = target_width / logo_image.width
+            new_height = int(logo_image.height * ratio)
+            logo_image = logo_image.resize((target_width, new_height), Image.LANCZOS)
+        buffer = BytesIO()
+        logo_image.save(buffer, format="PNG", optimize=True)
+        logo_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        st.markdown(
+            f"""
+            <div class="header-logo">
+                <img src="data:image/png;base64,{logo_base64}" alt="fica de olho logo" />
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     # Título e subtítulos centralizados via HTML
     st.markdown("""
         <div style="text-align: center; margin-top: -0.5rem;">
-            <p style="font-size: 1.8rem; font-weight: 300; color: #1f77b4; margin-bottom: 0.2rem;">fica de olho</p>
+            <p style="font-size: 3.6rem; font-weight: 700; color: #1f77b4; margin-bottom: 0.2rem;">fica de olho</p>
             <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.1rem;">análise de instituições financeiras brasileiras</p>
-            <p style="font-size: 0.8rem; color: #888; font-style: italic; margin-bottom: 0.5rem;">por matheus prates, cfa</p>
+            <p style="font-size: 1.6rem; color: #888; font-style: italic; margin-bottom: 0.5rem;">por matheus prates, cfa</p>
         </div>
     """, unsafe_allow_html=True)
 
-# Menu centralizado usando colunas Streamlit
-_, col_menu, _ = st.columns([1, 2, 1])
-with col_menu:
-    menu = st.segmented_control(
-        "navegação",
-        ["Sobre", "Análise Individual", "Scatter Plot"],
-        default=st.session_state['menu_atual'],
-        label_visibility="collapsed"
-    )
+# Menu centralizado usando CSS flex
+st.markdown('<div class="header-nav">', unsafe_allow_html=True)
+menu = st.segmented_control(
+    "navegação",
+    ["Sobre", "Análise Individual", "Lado a Lado", "Scatter Plot"],
+    default=st.session_state['menu_atual'],
+    label_visibility="collapsed"
+)
+st.markdown('</div>', unsafe_allow_html=True)
 
 if menu != st.session_state['menu_atual']:
     st.session_state['menu_atual'] = menu
@@ -966,6 +1004,133 @@ elif menu == "Análise Individual":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
+elif menu == "Lado a Lado":
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+
+        if len(df) > 0 and 'Instituição' in df.columns:
+            bancos_todos = df['Instituição'].dropna().unique().tolist()
+
+            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+                # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
+                aliases_set = set(st.session_state['dict_aliases'].values())
+
+                bancos_com_alias = []
+                bancos_sem_alias = []
+
+                for banco in bancos_todos:
+                    # Verifica se o banco é um alias (está nos valores do dicionário)
+                    if banco in aliases_set:
+                        bancos_com_alias.append(banco)
+                    else:
+                        bancos_sem_alias.append(banco)
+
+                # Ordenação: letras antes de números, case-insensitive
+                def sort_key(nome):
+                    primeiro_char = nome[0].lower() if nome else 'z'
+                    if primeiro_char.isdigit():
+                        return (1, nome.lower())
+                    return (0, nome.lower())
+
+                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
+                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
+                bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
+            else:
+                bancos_disponiveis = sorted(bancos_todos)
+
+            if len(bancos_disponiveis) > 0:
+                col_select, col_vars = st.columns([2, 2])
+
+                with col_select:
+                    bancos_selecionados = st.multiselect(
+                        "selecionar instituições (até 4)",
+                        bancos_disponiveis,
+                        default=bancos_disponiveis[:2],
+                        max_selections=4,
+                        key="bancos_lado_a_lado"
+                    )
+
+                with col_vars:
+                    variaveis_disponiveis = [
+                        'Ativo Total',
+                        'Captações',
+                        'Patrimônio Líquido',
+                        'Carteira de Crédito',
+                        'Carteira/Ativo (%)',
+                        'Índice de Basileia',
+                        'Alavancagem',
+                        'Crédito/Captações (%)',
+                        'Market Share Carteira',
+                        'Lucro Líquido',
+                        'ROE An. (%)'
+                    ]
+                    defaults_variaveis = [
+                        'Carteira de Crédito',
+                        'Patrimônio Líquido',
+                        'Lucro Líquido',
+                        'ROE An. (%)',
+                        'Índice de Basileia'
+                    ]
+                    defaults_variaveis = [v for v in defaults_variaveis if v in variaveis_disponiveis]
+
+                    variaveis_selecionadas = st.multiselect(
+                        "selecionar variáveis (até 5)",
+                        variaveis_disponiveis,
+                        default=defaults_variaveis,
+                        max_selections=5,
+                        key="variaveis_lado_a_lado"
+                    )
+
+                if bancos_selecionados and variaveis_selecionadas:
+                    for variavel in variaveis_selecionadas:
+                        format_info = get_axis_format(variavel)
+                        fig = go.Figure()
+
+                        for instituicao in bancos_selecionados:
+                            df_banco = df[df['Instituição'] == instituicao].copy()
+                            if df_banco.empty or variavel not in df_banco.columns:
+                                continue
+
+                            df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
+                            df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
+                            df_banco = df_banco.sort_values(['ano', 'trimestre'])
+
+                            y_values = df_banco[variavel] * format_info['multiplicador']
+                            cor_banco = obter_cor_banco(instituicao) or None
+
+                            fig.add_trace(go.Scatter(
+                                x=df_banco['Período'],
+                                y=y_values,
+                                mode='lines',
+                                name=instituicao,
+                                line=dict(width=2, color=cor_banco),
+                                hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                            ))
+
+                        fig.update_layout(
+                            title=variavel,
+                            height=320,
+                            margin=dict(l=10, r=10, t=40, b=30),
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                            xaxis=dict(showgrid=False),
+                            yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat=format_info['tickformat'], ticksuffix=format_info['ticksuffix']),
+                            font=dict(family='IBM Plex Sans')
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                else:
+                    st.info("selecione instituições e variáveis para comparar")
+            else:
+                st.warning("nenhuma instituição encontrada nos dados")
+        else:
+            st.warning("dados incompletos ou vazios")
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
@@ -973,8 +1138,35 @@ elif menu == "Scatter Plot":
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
 
-        # Lista de todos os bancos disponíveis no período mais recente
-        todos_bancos = sorted(df['Instituição'].dropna().unique().tolist())
+        # Lista de todos os bancos disponíveis com a mesma ordenação de "Análise Individual"
+        bancos_todos = df['Instituição'].dropna().unique().tolist()
+
+        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+            # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
+            aliases_set = set(st.session_state['dict_aliases'].values())
+
+            bancos_com_alias = []
+            bancos_sem_alias = []
+
+            for banco in bancos_todos:
+                # Verifica se o banco é um alias (está nos valores do dicionário)
+                if banco in aliases_set:
+                    bancos_com_alias.append(banco)
+                else:
+                    bancos_sem_alias.append(banco)
+
+            # Ordenação: letras antes de números, case-insensitive
+            def sort_key(nome):
+                primeiro_char = nome[0].lower() if nome else 'z'
+                if primeiro_char.isdigit():
+                    return (1, nome.lower())
+                return (0, nome.lower())
+
+            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
+            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
+            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
+        else:
+            todos_bancos = sorted(bancos_todos)
 
         # Primeira linha: variáveis dos eixos e tamanho
         col1, col2, col3, col4 = st.columns(4)
@@ -1014,8 +1206,11 @@ elif menu == "Scatter Plot":
         bancos_do_peer = []
         if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
             df_aliases = st.session_state['df_aliases']
-            # Filtra bancos com valor 1 (ou truthy) na coluna do peer
-            bancos_do_peer = df_aliases[df_aliases[peer_selecionado] == 1]['Alias Banco'].tolist()
+            coluna_peer = df_aliases[peer_selecionado]
+            mask_peer = (
+                coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+            )
+            bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
 
         # Multiselect sempre visível para selecionar bancos adicionais
         with col_f2:
@@ -1030,6 +1225,9 @@ elif menu == "Scatter Plot":
 
         # Aplica filtros ao dataframe
         df_periodo = df[df['Período'] == periodo_scatter]
+
+        if peer_selecionado != 'Nenhum':
+            df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
 
         if bancos_selecionados:
             # Usa os bancos selecionados no multiselect
@@ -1101,4 +1299,3 @@ elif menu == "Scatter Plot":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
-
