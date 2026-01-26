@@ -628,23 +628,25 @@ if 'dados_periodos' not in st.session_state:
     if dados_cache:
         st.session_state['dados_periodos'] = dados_cache
 
-with st.sidebar:
-    # FIX PROBLEMA 1: Logo centralizado com HTML inline
+# Menu horizontal no topo
+if 'menu_atual' not in st.session_state:
+    st.session_state['menu_atual'] = "Sobre"
+
+# Header com logo e navegação horizontal
+col_logo, col_nav = st.columns([1, 3])
+
+with col_logo:
     if os.path.exists(LOGO_PATH):
         logo_base64 = base64.b64encode(Path(LOGO_PATH).read_bytes()).decode("utf-8")
         st.markdown(
-            f'<div class="sidebar-logo-container"><img src="data:image/png;base64,{logo_base64}" width="100" /></div>',
+            f'<div style="display: flex; align-items: center; gap: 10px;">'
+            f'<img src="data:image/png;base64,{logo_base64}" width="50" style="border-radius: 50%;" />'
+            f'<span style="font-size: 1.5rem; font-weight: 300; color: #1f77b4;">fica de olho</span>'
+            f'</div>',
             unsafe_allow_html=True
         )
-    st.markdown('<p class="sidebar-title">fica de olho</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sidebar-subtitle">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sidebar-author">por matheus prates, cfa</p>', unsafe_allow_html=True)
 
-    st.markdown("")
-
-    if 'menu_atual' not in st.session_state:
-        st.session_state['menu_atual'] = "Sobre"
-
+with col_nav:
     menu = st.segmented_control(
         "navegação",
         ["Sobre", "Análise Individual", "Scatter Plot"],
@@ -652,9 +654,17 @@ with st.sidebar:
         label_visibility="collapsed"
     )
 
-    if menu != st.session_state['menu_atual']:
-        st.session_state['menu_atual'] = menu
-        st.rerun()
+if menu != st.session_state['menu_atual']:
+    st.session_state['menu_atual'] = menu
+    st.rerun()
+
+st.markdown("---")
+
+# Sidebar apenas para controle avançado
+with st.sidebar:
+    st.markdown('<p class="sidebar-title">fica de olho</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-subtitle">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-author">por matheus prates, cfa</p>', unsafe_allow_html=True)
 
     st.markdown("")
 
@@ -906,7 +916,22 @@ elif menu == "Análise Individual":
                     st.markdown("---")
                     st.markdown("### evolução histórica das variáveis")
 
-                    variaveis = [col for col in df_banco_filtrado.columns if col not in ['Instituição', 'Período', 'ano', 'trimestre'] and df_banco_filtrado[col].notna().any()]
+                    # Ordem fixa dos gráficos (excluindo Funding Gap e Risco/Retorno)
+                    ordem_variaveis = [
+                        'Ativo Total',
+                        'Captações',
+                        'Patrimônio Líquido',
+                        'Carteira de Crédito',
+                        'Carteira/Ativo (%)',
+                        'Alavancagem',
+                        'Crédito/Captações (%)',
+                        'Market Share Carteira',
+                        'Lucro Líquido',
+                        'ROE An. (%)'
+                    ]
+
+                    # Filtra apenas as variáveis que existem e têm dados
+                    variaveis = [v for v in ordem_variaveis if v in df_banco_filtrado.columns and df_banco_filtrado[v].notna().any()]
 
                     for i in range(0, len(variaveis), 3):
                         cols = st.columns(3)
@@ -933,6 +958,9 @@ elif menu == "Scatter Plot":
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
 
+        # Lista de todos os bancos disponíveis no período mais recente
+        todos_bancos = sorted(df['Instituição'].dropna().unique().tolist())
+
         # Primeira linha: variáveis dos eixos e tamanho
         col1, col2, col3, col4 = st.columns(4)
 
@@ -947,51 +975,54 @@ elif menu == "Scatter Plot":
         with col4:
             periodo_scatter = st.selectbox("período", periodos, index=len(periodos)-1)
 
-        # Segunda linha: filtros de seleção de bancos
-        col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+        # Segunda linha: Top N e variável de ordenação
+        col_t1, col_t2, col_t3 = st.columns([1, 1, 2])
 
-        with col_f1:
-            top_n_scatter = st.slider("top n (por carteira)", 5, 50, 15)
+        with col_t1:
+            top_n_scatter = st.slider("top n", 5, 50, 15)
+        with col_t2:
+            var_top_n = st.selectbox("top n por", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
+
+        # Terceira linha: Peers e Seleção de bancos
+        col_f1, col_f2 = st.columns([1, 3])
 
         # Opções de Peers disponíveis
         peers_disponiveis = []
         if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
             peers_disponiveis = st.session_state['colunas_classificacao']
 
-        with col_f2:
+        with col_f1:
             opcoes_peer = ['Nenhum'] + peers_disponiveis
             peer_selecionado = st.selectbox("filtrar por peer", opcoes_peer, index=0)
 
-        # Se um peer foi selecionado, mostrar multiselect com os valores desse peer
-        bancos_peer_selecionados = []
+        # Bancos do peer selecionado (automático: valor = 1)
+        bancos_do_peer = []
         if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
             df_aliases = st.session_state['df_aliases']
-            # Pega valores únicos dessa coluna de peer
-            valores_peer = df_aliases[peer_selecionado].dropna().unique().tolist()
-            valores_peer = [v for v in valores_peer if str(v).strip() != '']
+            # Filtra bancos com valor 1 (ou truthy) na coluna do peer
+            bancos_do_peer = df_aliases[df_aliases[peer_selecionado] == 1]['Alias Banco'].tolist()
 
-            with col_f3:
-                valores_selecionados = st.multiselect(
-                    f"valores de {peer_selecionado}",
-                    sorted(valores_peer),
-                    default=sorted(valores_peer)[:1] if valores_peer else []
-                )
-
-            # Filtra bancos que pertencem aos valores selecionados
-            if valores_selecionados:
-                # Pega os aliases dos bancos que têm os valores selecionados
-                bancos_filtrados = df_aliases[df_aliases[peer_selecionado].isin(valores_selecionados)]['Alias Banco'].tolist()
-                bancos_peer_selecionados = bancos_filtrados
+        # Multiselect sempre visível para selecionar bancos adicionais
+        with col_f2:
+            # Se houver peer selecionado, pré-seleciona os bancos do peer
+            default_bancos = bancos_do_peer if bancos_do_peer else []
+            bancos_selecionados = st.multiselect(
+                "selecionar bancos",
+                todos_bancos,
+                default=default_bancos,
+                key="bancos_multiselect"
+            )
 
         # Aplica filtros ao dataframe
         df_periodo = df[df['Período'] == periodo_scatter]
 
-        if bancos_peer_selecionados:
-            # Filtra pelos bancos do peer selecionado
-            df_scatter = df_periodo[df_periodo['Instituição'].isin(bancos_peer_selecionados)]
+        if bancos_selecionados:
+            # Usa os bancos selecionados no multiselect
+            df_scatter = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados)]
         else:
-            # Usa top N por carteira
-            df_scatter = df_periodo.nlargest(top_n_scatter, 'Carteira de Crédito')
+            # Usa top N pela variável selecionada (remove NaN antes)
+            df_periodo_valid = df_periodo.dropna(subset=[var_top_n])
+            df_scatter = df_periodo_valid.nlargest(top_n_scatter, var_top_n)
 
         format_x = get_axis_format(var_x)
         format_y = get_axis_format(var_y)
@@ -1031,8 +1062,14 @@ elif menu == "Scatter Plot":
                 hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x:{format_x["tickformat"]}}}{format_x["ticksuffix"]}<br>{var_y}: %{{y:{format_y["tickformat"]}}}{format_y["ticksuffix"]}<extra></extra>'
             ))
 
+        # Título dinâmico
+        if bancos_selecionados:
+            titulo_scatter = f'{var_y} vs {var_x} - {periodo_scatter} ({len(df_scatter)} bancos)'
+        else:
+            titulo_scatter = f'{var_y} vs {var_x} - {periodo_scatter} (top {top_n_scatter} por {var_top_n})'
+
         fig_scatter.update_layout(
-            title=f'{var_y} vs {var_x} - {periodo_scatter} (top {top_n_scatter})',
+            title=titulo_scatter,
             xaxis_title=var_x,
             yaxis_title=var_y,
             height=650,
