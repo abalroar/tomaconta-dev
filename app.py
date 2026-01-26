@@ -631,10 +631,15 @@ if 'dados_periodos' not in st.session_state:
 if 'menu_atual' not in st.session_state:
     st.session_state['menu_atual'] = "Sobre"
 
-# Header centralizado: logo, nome e menu
+# Header e menu centralizados com CSS robusto
 st.markdown("""
 <style>
-    .header-container {
+    /* Centraliza o header na área de conteúdo principal */
+    .main .block-container {
+        max-width: 100%;
+    }
+    .header-wrapper {
+        width: 100%;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -643,39 +648,36 @@ st.markdown("""
         padding: 1rem 0 0.5rem 0;
         margin-bottom: 0.5rem;
     }
-    .header-logo {
+    .header-wrapper img {
         width: 80px;
         height: 80px;
         border-radius: 50%;
         margin-bottom: 0.5rem;
     }
-    .header-title {
+    .header-wrapper .title {
         font-size: 1.8rem;
         font-weight: 300;
         color: #1f77b4;
         margin-bottom: 0.3rem;
     }
-    .header-subtitle {
+    .header-wrapper .subtitle {
         font-size: 0.9rem;
         color: #666;
         margin-bottom: 0.2rem;
     }
-    .header-author {
+    .header-wrapper .author {
         font-size: 0.8rem;
         color: #888;
         font-style: italic;
         margin-bottom: 0.8rem;
     }
-    /* Centraliza o menu de navegação */
-    .menu-container {
-        display: flex;
-        justify-content: center;
-        width: 100%;
-        margin-bottom: 0.5rem;
+    /* Centraliza o bloco do menu */
+    [data-testid="stMainBlockContainer"] > div > div > div > div:has([data-baseweb="segmented-control"]) {
+        display: flex !important;
+        justify-content: center !important;
     }
-    .menu-container > div {
-        display: flex;
-        justify-content: center;
+    [data-baseweb="segmented-control"] {
+        margin: 0 auto;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -683,35 +685,24 @@ st.markdown("""
 if os.path.exists(LOGO_PATH):
     logo_base64 = base64.b64encode(Path(LOGO_PATH).read_bytes()).decode("utf-8")
     st.markdown(
-        f'<div class="header-container">'
-        f'<img src="data:image/png;base64,{logo_base64}" class="header-logo" />'
-        f'<div class="header-title">fica de olho</div>'
-        f'<div class="header-subtitle">análise de instituições financeiras brasileiras</div>'
-        f'<div class="header-author">por matheus prates, cfa</div>'
+        f'<div class="header-wrapper">'
+        f'<img src="data:image/png;base64,{logo_base64}" />'
+        f'<div class="title">fica de olho</div>'
+        f'<div class="subtitle">análise de instituições financeiras brasileiras</div>'
+        f'<div class="author">por matheus prates, cfa</div>'
         f'</div>',
         unsafe_allow_html=True
     )
 
 # Menu centralizado
-st.markdown("""
-<style>
-    /* Força centralização do segmented control */
-    [data-testid="stHorizontalBlock"]:has([data-testid="stSegmentedControlContainer"]) {
-        justify-content: center !important;
-    }
-    [data-testid="stSegmentedControlContainer"] {
-        display: flex;
-        justify-content: center;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-menu = st.segmented_control(
-    "navegação",
-    ["Sobre", "Análise Individual", "Scatter Plot"],
-    default=st.session_state['menu_atual'],
-    label_visibility="collapsed"
-)
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    menu = st.segmented_control(
+        "navegação",
+        ["Sobre", "Análise Individual", "Scatter Plot"],
+        default=st.session_state['menu_atual'],
+        label_visibility="collapsed"
+    )
 
 if menu != st.session_state['menu_atual']:
     st.session_state['menu_atual'] = menu
