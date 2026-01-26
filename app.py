@@ -631,87 +631,43 @@ if 'dados_periodos' not in st.session_state:
 if 'menu_atual' not in st.session_state:
     st.session_state['menu_atual'] = "Sobre"
 
-# Header centralizado: logo, nome e menu
+# Header e menu centralizados
 st.markdown("""
 <style>
-    .header-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        padding: 1rem 0 0.5rem 0;
-        margin-bottom: 0.5rem;
-    }
-    .header-logo {
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        margin-bottom: 0.5rem;
-    }
-    .header-title {
-        font-size: 1.8rem;
-        font-weight: 300;
-        color: #1f77b4;
-        margin-bottom: 0.3rem;
-    }
-    .header-subtitle {
-        font-size: 0.9rem;
-        color: #666;
-        margin-bottom: 0.2rem;
-    }
-    .header-author {
-        font-size: 0.8rem;
-        color: #888;
-        font-style: italic;
-        margin-bottom: 0.8rem;
-    }
-    /* Centraliza o menu de navegação */
-    .menu-container {
-        display: flex;
-        justify-content: center;
-        width: 100%;
-        margin-bottom: 0.5rem;
-    }
-    .menu-container > div {
-        display: flex;
-        justify-content: center;
+    /* Remove padding extra do topo */
+    .main .block-container {
+        padding-top: 1rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-if os.path.exists(LOGO_PATH):
-    logo_base64 = base64.b64encode(Path(LOGO_PATH).read_bytes()).decode("utf-8")
-    st.markdown(
-        f'<div class="header-container">'
-        f'<img src="data:image/png;base64,{logo_base64}" class="header-logo" />'
-        f'<div class="header-title">fica de olho</div>'
-        f'<div class="header-subtitle">análise de instituições financeiras brasileiras</div>'
-        f'<div class="header-author">por matheus prates, cfa</div>'
-        f'</div>',
-        unsafe_allow_html=True
+# Header usando colunas Streamlit para garantir centralização
+_, col_header, _ = st.columns([1, 3, 1])
+with col_header:
+    if os.path.exists(LOGO_PATH):
+        # Centraliza logo usando subcolunas
+        _, col_logo, _ = st.columns([1, 1, 1])
+        with col_logo:
+            st.image(LOGO_PATH, width=80)
+
+    # Título e subtítulos centralizados via HTML
+    st.markdown("""
+        <div style="text-align: center; margin-top: -0.5rem;">
+            <p style="font-size: 1.8rem; font-weight: 300; color: #1f77b4; margin-bottom: 0.2rem;">fica de olho</p>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.1rem;">análise de instituições financeiras brasileiras</p>
+            <p style="font-size: 0.8rem; color: #888; font-style: italic; margin-bottom: 0.5rem;">por matheus prates, cfa</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+# Menu centralizado usando colunas Streamlit
+_, col_menu, _ = st.columns([1, 2, 1])
+with col_menu:
+    menu = st.segmented_control(
+        "navegação",
+        ["Sobre", "Análise Individual", "Scatter Plot"],
+        default=st.session_state['menu_atual'],
+        label_visibility="collapsed"
     )
-
-# Menu centralizado
-st.markdown("""
-<style>
-    /* Força centralização do segmented control */
-    [data-testid="stHorizontalBlock"]:has([data-testid="stSegmentedControlContainer"]) {
-        justify-content: center !important;
-    }
-    [data-testid="stSegmentedControlContainer"] {
-        display: flex;
-        justify-content: center;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-menu = st.segmented_control(
-    "navegação",
-    ["Sobre", "Análise Individual", "Scatter Plot"],
-    default=st.session_state['menu_atual'],
-    label_visibility="collapsed"
-)
 
 if menu != st.session_state['menu_atual']:
     st.session_state['menu_atual'] = menu
