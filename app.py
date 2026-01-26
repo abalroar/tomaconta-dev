@@ -701,7 +701,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Análise Individual", "Scatter Plot"],
+    ["Sobre", "Análise Individual", "Lado a Lado", "Scatter Plot"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -996,6 +996,133 @@ elif menu == "Análise Individual":
                                     tipo_grafico = 'barra' if var == 'Lucro Líquido' else 'linha'
                                     fig = criar_mini_grafico(df_banco_filtrado, var, var, tipo=tipo_grafico)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            else:
+                st.warning("nenhuma instituição encontrada nos dados")
+        else:
+            st.warning("dados incompletos ou vazios")
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Lado a Lado":
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+
+        if len(df) > 0 and 'Instituição' in df.columns:
+            bancos_todos = df['Instituição'].dropna().unique().tolist()
+
+            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+                # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
+                aliases_set = set(st.session_state['dict_aliases'].values())
+
+                bancos_com_alias = []
+                bancos_sem_alias = []
+
+                for banco in bancos_todos:
+                    # Verifica se o banco é um alias (está nos valores do dicionário)
+                    if banco in aliases_set:
+                        bancos_com_alias.append(banco)
+                    else:
+                        bancos_sem_alias.append(banco)
+
+                # Ordenação: letras antes de números, case-insensitive
+                def sort_key(nome):
+                    primeiro_char = nome[0].lower() if nome else 'z'
+                    if primeiro_char.isdigit():
+                        return (1, nome.lower())
+                    return (0, nome.lower())
+
+                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
+                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
+                bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
+            else:
+                bancos_disponiveis = sorted(bancos_todos)
+
+            if len(bancos_disponiveis) > 0:
+                col_select, col_vars = st.columns([2, 2])
+
+                with col_select:
+                    bancos_selecionados = st.multiselect(
+                        "selecionar instituições (até 4)",
+                        bancos_disponiveis,
+                        default=bancos_disponiveis[:2],
+                        max_selections=4,
+                        key="bancos_lado_a_lado"
+                    )
+
+                with col_vars:
+                    variaveis_disponiveis = [
+                        'Ativo Total',
+                        'Captações',
+                        'Patrimônio Líquido',
+                        'Carteira de Crédito',
+                        'Carteira/Ativo (%)',
+                        'Índice de Basileia',
+                        'Alavancagem',
+                        'Crédito/Captações (%)',
+                        'Market Share Carteira',
+                        'Lucro Líquido',
+                        'ROE An. (%)'
+                    ]
+                    defaults_variaveis = [
+                        'Carteira de Crédito',
+                        'Patrimônio Líquido',
+                        'Lucro Líquido',
+                        'ROE An. (%)',
+                        'Índice de Basileia'
+                    ]
+                    defaults_variaveis = [v for v in defaults_variaveis if v in variaveis_disponiveis]
+
+                    variaveis_selecionadas = st.multiselect(
+                        "selecionar variáveis (até 5)",
+                        variaveis_disponiveis,
+                        default=defaults_variaveis,
+                        max_selections=5,
+                        key="variaveis_lado_a_lado"
+                    )
+
+                if bancos_selecionados and variaveis_selecionadas:
+                    for variavel in variaveis_selecionadas:
+                        format_info = get_axis_format(variavel)
+                        fig = go.Figure()
+
+                        for instituicao in bancos_selecionados:
+                            df_banco = df[df['Instituição'] == instituicao].copy()
+                            if df_banco.empty or variavel not in df_banco.columns:
+                                continue
+
+                            df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
+                            df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
+                            df_banco = df_banco.sort_values(['ano', 'trimestre'])
+
+                            y_values = df_banco[variavel] * format_info['multiplicador']
+                            cor_banco = obter_cor_banco(instituicao) or None
+
+                            fig.add_trace(go.Scatter(
+                                x=df_banco['Período'],
+                                y=y_values,
+                                mode='lines',
+                                name=instituicao,
+                                line=dict(width=2, color=cor_banco),
+                                hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                            ))
+
+                        fig.update_layout(
+                            title=variavel,
+                            height=320,
+                            margin=dict(l=10, r=10, t=40, b=30),
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                            xaxis=dict(showgrid=False),
+                            yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat=format_info['tickformat'], ticksuffix=format_info['ticksuffix']),
+                            font=dict(family='IBM Plex Sans')
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                else:
+                    st.info("selecione instituições e variáveis para comparar")
             else:
                 st.warning("nenhuma instituição encontrada nos dados")
         else:
