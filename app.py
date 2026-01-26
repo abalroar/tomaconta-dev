@@ -11,9 +11,11 @@ from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 import io
 import base64
 import matplotlib
@@ -21,7 +23,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import numpy as np
-from PIL import Image
+from PIL import Image as PILImage
 from io import BytesIO
 
 st.set_page_config(page_title="🏦 👀 fica de olho!", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
@@ -446,6 +448,31 @@ def criar_mini_grafico(df_banco, variavel, titulo, tipo='linha'):
 def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_final):
     from reportlab.lib.pagesizes import landscape, A4
 
+    def garantir_fontes_ibm_plex():
+        fonts_dir = Path("data/fonts")
+        fonts_dir.mkdir(parents=True, exist_ok=True)
+        regular_path = fonts_dir / "IBMPlexSans-Regular.ttf"
+        bold_path = fonts_dir / "IBMPlexSans-Bold.ttf"
+        if not regular_path.exists() or not bold_path.exists():
+            try:
+                regular_url = "https://github.com/google/fonts/raw/main/ofl/ibmplexsans/IBMPlexSans-Regular.ttf"
+                bold_url = "https://github.com/google/fonts/raw/main/ofl/ibmplexsans/IBMPlexSans-Bold.ttf"
+                if not regular_path.exists():
+                    regular_path.write_bytes(requests.get(regular_url, timeout=30).content)
+                if not bold_path.exists():
+                    bold_path.write_bytes(requests.get(bold_url, timeout=30).content)
+            except Exception:
+                return False
+        try:
+            if "IBMPlexSans" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("IBMPlexSans", str(regular_path)))
+            if "IBMPlexSans-Bold" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("IBMPlexSans-Bold", str(bold_path)))
+            pdfmetrics.registerFontFamily("IBMPlexSans", normal="IBMPlexSans", bold="IBMPlexSans-Bold")
+            return True
+        except Exception:
+            return False
+
     df_sorted = df_banco.copy()
     df_sorted['ano'] = df_sorted['Período'].str.split('/').str[1].astype(int)
     df_sorted['trimestre'] = df_sorted['Período'].str.split('/').str[0].astype(int)
@@ -474,9 +501,15 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
 
     styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=32, textColor=colors.HexColor(cor_banco), spaceAfter=4, alignment=TA_LEFT, fontName='Helvetica-Bold')
-    subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor('#666666'), spaceAfter=20, alignment=TA_LEFT)
-    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor(cor_banco), spaceAfter=12, spaceBefore=16, fontName='Helvetica-Bold')
+    usa_ibm = garantir_fontes_ibm_plex()
+    fonte_regular = "IBMPlexSans" if usa_ibm else "Helvetica"
+    fonte_bold = "IBMPlexSans-Bold" if usa_ibm else "Helvetica-Bold"
+
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=32, textColor=colors.HexColor(cor_banco), spaceAfter=4, alignment=TA_LEFT, fontName=fonte_bold)
+    subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor('#666666'), spaceAfter=20, alignment=TA_LEFT, fontName=fonte_regular)
+    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor(cor_banco), spaceAfter=12, spaceBefore=16, fontName=fonte_bold)
+    metric_style = ParagraphStyle('MetricStyle', parent=styles['Normal'], fontName=fonte_regular)
+    footer_style = ParagraphStyle('FooterStyle', parent=styles['Normal'], fontName=fonte_regular, fontSize=9)
 
     story = []
     story.append(Paragraph(banco_selecionado, title_style))
@@ -500,7 +533,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
 
     # Métricas em linha única (4 colunas) para paisagem
     metrics_table_data = [[
-        Paragraph(f'<font size="10"><b>{m[0]}</b></font><br/><font size="18"><b>{m[1]}</b></font>', styles['Normal'])
+        Paragraph(f'<font size="10"><b>{m[0]}</b></font><br/><font size="18"><b>{m[1]}</b></font>', metric_style)
         for m in metricas_data
     ]]
 
@@ -509,7 +542,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8f9fa')),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTNAME', (0, 0), (-1, -1), fonte_regular),
         ('LEFTPADDING', (0, 0), (-1, -1), 15),
         ('RIGHTPADDING', (0, 0), (-1, -1), 15),
         ('TOPPADDING', (0, 0), (-1, -1), 15),
@@ -528,7 +561,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
 
     def criar_figura_grafico(df_plot, variavel, titulo, use_bar=False):
         # Gráficos maiores e maior DPI para melhor qualidade
-        fig, ax = plt.subplots(figsize=(3.5, 2.2), dpi=150)
+        fig, ax = plt.subplots(figsize=(3.5, 2.2), dpi=200)
 
         vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
         vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
@@ -582,13 +615,13 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
                 use_bar = (var == 'Lucro Líquido')
                 fig = criar_figura_grafico(df_sorted, var, var, use_bar=use_bar)
                 img_buffer = io.BytesIO()
-                fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
+                fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=200)
                 img_buffer.seek(0)
-                img = Image(img_buffer, width=3.3*inch, height=2.0*inch)
+                img = RLImage(img_buffer, width=3.3*inch, height=2.0*inch)
                 row_images.append(img)
                 plt.close(fig)
             except:
-                row_images.append(Paragraph(f"[Erro: {var}]", styles['Normal']))
+                row_images.append(Paragraph(f"[Erro: {var}]", metric_style))
         while len(row_images) < figs_por_linha:
             row_images.append(Spacer(1, 0))
         img_table = Table([row_images], colWidths=[3.5*inch, 3.5*inch, 3.5*inch])
@@ -604,7 +637,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         story.append(Spacer(1, 0.1*inch))
 
     story.append(Spacer(1, 0.15*inch))
-    rodape = Paragraph(f"<font size='9'><i>Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Fonte: API IF.DATA - BCB | fica de olho</i></font>", styles['Normal'])
+    rodape = Paragraph(f"<font size='9'><i>Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Fonte: API IF.DATA - BCB | fica de olho</i></font>", footer_style)
     story.append(rodape)
 
     try:
@@ -670,12 +703,12 @@ st.markdown("""
 _, col_header, _ = st.columns([1, 3, 1])
 with col_header:
     if os.path.exists(LOGO_PATH):
-        logo_image = Image.open(LOGO_PATH)
+        logo_image = PILImage.open(LOGO_PATH)
         target_width = 200
         if logo_image.width < target_width:
             ratio = target_width / logo_image.width
             new_height = int(logo_image.height * ratio)
-            logo_image = logo_image.resize((target_width, new_height), Image.LANCZOS)
+            logo_image = logo_image.resize((target_width, new_height), PILImage.LANCZOS)
         buffer = BytesIO()
         logo_image.save(buffer, format="PNG", optimize=True)
         logo_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
