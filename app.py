@@ -1011,8 +1011,35 @@ elif menu == "Scatter Plot":
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
 
-        # Lista de todos os bancos disponíveis no período mais recente
-        todos_bancos = sorted(df['Instituição'].dropna().unique().tolist())
+        # Lista de todos os bancos disponíveis com a mesma ordenação de "Análise Individual"
+        bancos_todos = df['Instituição'].dropna().unique().tolist()
+
+        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+            # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
+            aliases_set = set(st.session_state['dict_aliases'].values())
+
+            bancos_com_alias = []
+            bancos_sem_alias = []
+
+            for banco in bancos_todos:
+                # Verifica se o banco é um alias (está nos valores do dicionário)
+                if banco in aliases_set:
+                    bancos_com_alias.append(banco)
+                else:
+                    bancos_sem_alias.append(banco)
+
+            # Ordenação: letras antes de números, case-insensitive
+            def sort_key(nome):
+                primeiro_char = nome[0].lower() if nome else 'z'
+                if primeiro_char.isdigit():
+                    return (1, nome.lower())
+                return (0, nome.lower())
+
+            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
+            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
+            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
+        else:
+            todos_bancos = sorted(bancos_todos)
 
         # Primeira linha: variáveis dos eixos e tamanho
         col1, col2, col3, col4 = st.columns(4)
@@ -1052,8 +1079,11 @@ elif menu == "Scatter Plot":
         bancos_do_peer = []
         if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
             df_aliases = st.session_state['df_aliases']
-            # Filtra bancos com valor 1 (ou truthy) na coluna do peer
-            bancos_do_peer = df_aliases[df_aliases[peer_selecionado] == 1]['Alias Banco'].tolist()
+            coluna_peer = df_aliases[peer_selecionado]
+            mask_peer = (
+                coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+            )
+            bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
 
         # Multiselect sempre visível para selecionar bancos adicionais
         with col_f2:
@@ -1068,6 +1098,9 @@ elif menu == "Scatter Plot":
 
         # Aplica filtros ao dataframe
         df_periodo = df[df['Período'] == periodo_scatter]
+
+        if peer_selecionado != 'Nenhum':
+            df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
 
         if bancos_selecionados:
             # Usa os bancos selecionados no multiselect
