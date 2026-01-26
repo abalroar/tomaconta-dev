@@ -26,7 +26,7 @@ import numpy as np
 from PIL import Image as PILImage
 from io import BytesIO
 
-st.set_page_config(page_title="🏦 👀 fica de olho!", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="🏦 👀 tomaconta!", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
 # CSS - sidebar fixa, tipografia e ícones corrigidos
 st.markdown("""
@@ -637,7 +637,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         story.append(Spacer(1, 0.1*inch))
 
     story.append(Spacer(1, 0.15*inch))
-    rodape = Paragraph(f"<font size='9'><i>Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Fonte: API IF.DATA - BCB | fica de olho</i></font>", footer_style)
+    rodape = Paragraph(f"<font size='9'><i>Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Fonte: API IF.DATA - BCB | tomaconta</i></font>", footer_style)
     story.append(rodape)
 
     try:
@@ -715,7 +715,7 @@ with col_header:
         st.markdown(
             f"""
             <div class="header-logo">
-                <img src="data:image/png;base64,{logo_base64}" alt="fica de olho logo" />
+                <img src="data:image/png;base64,{logo_base64}" alt="tomaconta logo" />
             </div>
             """,
             unsafe_allow_html=True
@@ -724,7 +724,7 @@ with col_header:
     # Título e subtítulos centralizados via HTML
     st.markdown("""
         <div style="text-align: center; margin-top: -0.5rem;">
-            <p style="font-size: 3.6rem; font-weight: 700; color: #1f77b4; margin-bottom: 0.2rem;">fica de olho</p>
+            <p style="font-size: 3.6rem; font-weight: 700; color: #1f77b4; margin-bottom: 0.2rem;">tomaconta</p>
             <p style="font-size: 1.6rem; color: #666; margin-bottom: 0.1rem;">análise de instituições financeiras brasileiras</p>
             <p style="font-size: 0.9rem; color: #888; font-style: italic; margin-bottom: 0.5rem;">por matheus prates, cfa</p>
         </div>
@@ -748,7 +748,7 @@ st.markdown("---")
 
 # Sidebar apenas para controle avançado
 with st.sidebar:
-    st.markdown('<p class="sidebar-title">fica de olho</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-title">tomaconta</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-subtitle">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-author">por matheus prates, cfa</p>', unsafe_allow_html=True)
 
@@ -802,7 +802,7 @@ if menu == "Sobre":
     st.markdown("""
     ## sobre a plataforma
 
-    o fica de olho é uma plataforma de análise financeira que automatiza a extração, processamento e visualização de dados de instituições financeiras brasileiras, oferecendo insights comparativos e históricos.
+    o tomaconta é uma plataforma de análise financeira que automatiza a extração, processamento e visualização de dados de instituições financeiras brasileiras, oferecendo insights comparativos e históricos.
     """)
 
     col1, col2 = st.columns(2)
