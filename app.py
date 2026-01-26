@@ -24,7 +24,7 @@ import numpy as np
 from PIL import Image
 from io import BytesIO
 
-st.set_page_config(page_title="fica de olho", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="🏦 👀 fica de olho!", page_icon="👁️", layout="wide", initial_sidebar_state="expanded")
 
 # CSS - sidebar fixa, tipografia e ícones corrigidos
 st.markdown("""
@@ -1141,14 +1141,23 @@ elif menu == "Lado a Lado":
                             y_values = df_banco[variavel] * format_info['multiplicador']
                             cor_banco = obter_cor_banco(instituicao) or None
 
-                            fig.add_trace(go.Scatter(
-                                x=df_banco['Período'],
-                                y=y_values,
-                                mode='lines',
-                                name=instituicao,
-                                line=dict(width=2, color=cor_banco),
-                                hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
-                            ))
+                            if variavel == 'Lucro Líquido':
+                                fig.add_trace(go.Bar(
+                                    x=df_banco['Período'],
+                                    y=y_values,
+                                    name=instituicao,
+                                    marker=dict(color=cor_banco),
+                                    hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                                ))
+                            else:
+                                fig.add_trace(go.Scatter(
+                                    x=df_banco['Período'],
+                                    y=y_values,
+                                    mode='lines',
+                                    name=instituicao,
+                                    line=dict(width=2, color=cor_banco),
+                                    hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                                ))
 
                             export_frames.append(
                                 df_banco[['Período', 'Instituição', variavel]].copy()
@@ -1165,7 +1174,8 @@ elif menu == "Lado a Lado":
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                             xaxis=dict(showgrid=False),
                             yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat=format_info['tickformat'], ticksuffix=format_info['ticksuffix']),
-                            font=dict(family='IBM Plex Sans')
+                            font=dict(family='IBM Plex Sans'),
+                            barmode='group' if variavel == 'Lucro Líquido' else None
                         )
 
                         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
