@@ -1260,7 +1260,8 @@ elif menu == "Série Histórica":
                                 label="Exportar Excel",
                                 data=buffer_excel,
                                 file_name="Serie_Historica_.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"exportar_excel_{nome_variavel}"
                             )
                 else:
                     st.info("selecione instituições e variáveis para comparar")
