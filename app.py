@@ -221,8 +221,11 @@ CACHE_FILE = "data/dados_cache.pkl"
 CACHE_INFO = "data/cache_info.txt"
 ALIASES_PATH = "data/Aliases.xlsx"
 LOGO_PATH = "data/logo.png"
-CACHE_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/dados_cache.pkl"
-CACHE_INFO_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/cache_info.txt"
+CACHE_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/dados_cache.pkl"
+CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/cache_info.txt"
+
+# Senha para proteger a funcionalidade de atualização de cache
+SENHA_ADMIN = "tomaconta2024"
 
 VARS_PERCENTUAL = [
     'ROE An. (%)',
@@ -786,38 +789,43 @@ with st.sidebar:
             st.caption(info_cache.replace('\n', ' • '))
 
         st.markdown("---")
-        st.markdown("**atualizar dados**")
+        st.markdown("**atualizar dados (admin)**")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            ano_i = st.selectbox("ano inicial", range(2015,2027), index=8, key="ano_i")
-            mes_i = st.selectbox("trimestre inicial", ['03','06','09','12'], key="mes_i")
-        with col2:
-            ano_f = st.selectbox("ano final", range(2015,2027), index=10, key="ano_f")
-            mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
+        senha_input = st.text_input("senha de administrador", type="password", key="senha_admin")
 
-        if 'dict_aliases' in st.session_state:
-            if st.button("extrair dados", type="primary", use_container_width=True):
-                periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
-                progress_bar = st.progress(0)
-                status = st.empty()
+        if senha_input == SENHA_ADMIN:
+            col1, col2 = st.columns(2)
+            with col1:
+                ano_i = st.selectbox("ano inicial", range(2015,2028), index=8, key="ano_i")
+                mes_i = st.selectbox("trimestre inicial", ['03','06','09','12'], key="mes_i")
+            with col2:
+                ano_f = st.selectbox("ano final", range(2015,2028), index=10, key="ano_f")
+                mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
 
-                def update(i, total, p):
-                    progress_bar.progress((i+1)/total)
-                    status.text(f"{p[4:6]}/{p[:4]} ({i+1}/{total})")
+            if 'dict_aliases' in st.session_state:
+                if st.button("extrair dados", type="primary", use_container_width=True):
+                    periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
+                    progress_bar = st.progress(0)
+                    status = st.empty()
 
-                dados = processar_todos_periodos(periodos, st.session_state['dict_aliases'], update)
-                st.session_state['dados_periodos'] = dados
+                    def update(i, total, p):
+                        progress_bar.progress((i+1)/total)
+                        status.text(f"{p[4:6]}/{p[:4]} ({i+1}/{total})")
 
-                periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
-                salvar_cache(dados, periodo_info)
+                    dados = processar_todos_periodos(periodos, st.session_state['dict_aliases'], update)
+                    st.session_state['dados_periodos'] = dados
 
-                progress_bar.empty()
-                status.empty()
-                st.success(f"{len(dados)} períodos extraídos com sucesso")
-                st.rerun()
-        else:
-            st.warning("carregue os aliases primeiro")
+                    periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
+                    salvar_cache(dados, periodo_info)
+
+                    progress_bar.empty()
+                    status.empty()
+                    st.success(f"{len(dados)} períodos extraídos com sucesso")
+                    st.rerun()
+            else:
+                st.warning("carregue os aliases primeiro")
+        elif senha_input:
+            st.error("senha incorreta")
 
 if menu == "Sobre":
     st.markdown("""
