@@ -1219,7 +1219,7 @@ elif menu == "Resumo":
                         ], axis=-1),
                         hovertemplate=(
                             "<b>%{x}</b><br>"
-                            f"{indicador_label}: %{customdata[3]}<br>"
+                            f"{indicador_label}: %{{customdata[3]}}<br>"
                             "Ranking: %{customdata[0]}<br>"
                             "Diferença vs média: %{customdata[1]}<br>"
                             "Diferença vs média (%): %{customdata[2]}"
