@@ -23,6 +23,22 @@ def normalizar_nome_coluna(valor: str) -> str:
         return valor
     return " ".join(valor.split())
 
+def obter_coluna_nome_instituicao(df: pd.DataFrame) -> str | None:
+    candidatos = {
+        "NomeInstituicao",
+        "NomeInstituição",
+        "Nome Instituicao",
+        "Nome Instituição",
+        "Nome da Instituicao",
+        "Nome da Instituição",
+    }
+    for coluna in df.columns:
+        if coluna in candidatos:
+            return coluna
+        if normalizar_nome_coluna(str(coluna)) in candidatos:
+            return coluna
+    return None
+
 def extrair_cadastro(ano_mes: str) -> pd.DataFrame:
     url = f"{BASE_URL}/IfDataCadastro(AnoMes={int(ano_mes)})?$format=json&$top=5000"
     try:
@@ -119,9 +135,32 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         return None
     if "NomeColuna" in df_valores.columns:
         df_valores["NomeColuna"] = df_valores["NomeColuna"].map(normalizar_nome_coluna)
+
+    nome_col_valores = obter_coluna_nome_instituicao(df_valores)
+    if nome_col_valores:
+        df_nomes = df_valores[["CodInst", nome_col_valores]].drop_duplicates().rename(
+            columns={nome_col_valores: "NomeInstituicao"}
+        )
+    else:
+        df_nomes = pd.DataFrame()
+
     if df_cad.empty:
-        df_cad = df_valores[["CodInst"]].drop_duplicates().copy()
-        df_cad["NomeInstituicao"] = df_cad["CodInst"]
+        if not df_nomes.empty:
+            df_cad = df_nomes.copy()
+        else:
+            df_cad = df_valores[["CodInst"]].drop_duplicates().copy()
+            df_cad["NomeInstituicao"] = df_cad["CodInst"]
+    elif not df_nomes.empty and "NomeInstituicao" in df_cad.columns:
+        df_cad = df_cad.merge(
+            df_nomes,
+            on="CodInst",
+            how="left",
+            suffixes=("", "_valores")
+        )
+        df_cad["NomeInstituicao"] = df_cad["NomeInstituicao"].fillna(
+            df_cad["NomeInstituicao_valores"]
+        )
+        df_cad = df_cad.drop(columns=["NomeInstituicao_valores"], errors="ignore")
     
     colunas_desejadas = [
         "Ativo Total",
