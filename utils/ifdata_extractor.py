@@ -190,7 +190,7 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         )
     
     if "Carteira de Crédito" in df_out.columns and "Patrimônio Líquido" in df_out.columns:
-        df_out["Alavancagem"] = (
+        df_out["Crédito/PL"] = (
             df_out["Carteira de Crédito"].fillna(0) /
             df_out["Patrimônio Líquido"].replace(0, np.nan)
         )
@@ -201,22 +201,10 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
             df_out["Captações"].replace(0, np.nan)
         )
     
-    if "Carteira de Crédito" in df_out.columns and "Captações" in df_out.columns:
-        df_out["Funding Gap (%)"] = (
-            (df_out["Carteira de Crédito"].fillna(0) - df_out["Captações"].fillna(0)) /
-            df_out["Carteira de Crédito"].replace(0, np.nan)
-        )
-    
     if "Carteira de Crédito" in df_out.columns and "Ativo Total" in df_out.columns:
         df_out["Carteira/Ativo (%)"] = (
             df_out["Carteira de Crédito"].fillna(0) /
             df_out["Ativo Total"].replace(0, np.nan)
-        )
-    
-    if "Índice de Basileia" in df_out.columns and "ROE An. (%)" in df_out.columns:
-        df_out["Risco/Retorno"] = (
-            df_out["Índice de Basileia"].fillna(0) /
-            df_out["ROE An. (%)"].replace(0, np.nan)
         )
     
     df_out = df_out.rename(columns={"NomeInstituicao": "Instituição"})

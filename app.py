@@ -231,12 +231,11 @@ VARS_PERCENTUAL = [
     'ROE An. (%)',
     'Índice de Basileia',
     'Crédito/Captações (%)',
-    'Funding Gap (%)',
     'Carteira/Ativo (%)',
     'Market Share Carteira',
     'Índice de Imobilização',
 ]
-VARS_RAZAO = ['Alavancagem', 'Risco/Retorno']
+VARS_RAZAO = ['Crédito/PL']
 VARS_MOEDAS = [
     'Carteira de Crédito',
     'Lucro Líquido',
@@ -547,7 +546,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         ('Carteira de Crédito', 'Carteira de Crédito'),
         ('ROE Anualizado', 'ROE An. (%)'),
         ('Índice de Basileia', 'Índice de Basileia'),
-        ('Alavancagem', 'Alavancagem'),
+        ('Crédito/PL', 'Crédito/PL'),
     ]
 
     metricas_data = []
@@ -1483,19 +1482,18 @@ elif menu == "Análise Individual":
                     with col3:
                         st.metric("índice de basileia", formatar_valor(dados_periodo_final.get('Índice de Basileia'), 'Índice de Basileia'))
                     with col4:
-                        st.metric("alavancagem", formatar_valor(dados_periodo_final.get('Alavancagem'), 'Alavancagem'))
+                        st.metric("crédito/pl", formatar_valor(dados_periodo_final.get('Crédito/PL'), 'Crédito/PL'))
 
                     st.markdown("---")
                     st.markdown("### evolução histórica das variáveis")
 
-                    # Ordem fixa dos gráficos (excluindo Funding Gap e Risco/Retorno)
                     ordem_variaveis = [
                         'Ativo Total',
                         'Captações',
                         'Patrimônio Líquido',
                         'Carteira de Crédito',
                         'Carteira/Ativo (%)',
-                        'Alavancagem',
+                        'Crédito/PL',
                         'Crédito/Captações (%)',
                         'Market Share Carteira',
                         'Lucro Líquido',
@@ -1583,7 +1581,7 @@ elif menu == "Série Histórica":
                         'Carteira de Crédito',
                         'Carteira/Ativo (%)',
                         'Índice de Basileia',
-                        'Alavancagem',
+                        'Crédito/PL',
                         'Crédito/Captações (%)',
                         'Market Share Carteira',
                         'Lucro Líquido',
