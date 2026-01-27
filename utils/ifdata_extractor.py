@@ -39,6 +39,22 @@ def obter_coluna_nome_instituicao(df: pd.DataFrame) -> str | None:
             return coluna
     return None
 
+def construir_mapa_codinst(ano_mes: str) -> dict:
+    df_cad = extrair_cadastro(ano_mes)
+    if df_cad.empty:
+        return {}
+    coluna_nome = obter_coluna_nome_instituicao(df_cad)
+    if not coluna_nome or "CodInst" not in df_cad.columns:
+        return {}
+
+    df_map = df_cad[["CodInst", coluna_nome]].dropna()
+    mapa = {
+        str(row["CodInst"]).strip(): str(row[coluna_nome]).strip()
+        for _, row in df_map.iterrows()
+        if str(row["CodInst"]).strip() and str(row[coluna_nome]).strip()
+    }
+    return mapa
+
 def extrair_cadastro(ano_mes: str) -> pd.DataFrame:
     url = f"{BASE_URL}/IfDataCadastro(AnoMes={int(ano_mes)})?$format=json&$top=5000"
     try:

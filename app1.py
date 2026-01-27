@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
-from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos
+from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, construir_mapa_codinst
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -309,6 +309,16 @@ def forcar_recarregar_cache():
     """Força o recarregamento do cache do disco, ignorando session_state."""
     dados = carregar_cache()
     if dados:
+        if 'dict_aliases' in st.session_state:
+            mapa_codigos = None
+            periodos_disponiveis = sorted(dados.keys())
+            if periodos_disponiveis:
+                mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
+            dados = aplicar_aliases_em_periodos(
+                dados,
+                st.session_state['dict_aliases'],
+                mapa_codigos=mapa_codigos,
+            )
         st.session_state['dados_periodos'] = dados
         st.session_state['cache_fonte'] = 'local (recarregado)'
         return True
@@ -438,6 +448,31 @@ def normalizar_nome_instituicao(nome):
     if pd.isna(nome):
         return ""
     return " ".join(str(nome).split()).upper()
+
+def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None):
+    if not dados_periodos:
+        return dados_periodos
+    dados_corrigidos = {}
+
+    for periodo, df in dados_periodos.items():
+        if 'Instituição' not in df.columns:
+            dados_corrigidos[periodo] = df
+            continue
+
+        df_corrigido = df.copy()
+
+        if mapa_codigos:
+            df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(
+                lambda nome: mapa_codigos.get(str(nome).strip(), nome) if pd.notna(nome) else nome
+            )
+
+        df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(
+            lambda nome: dict_aliases.get(nome, nome) if pd.notna(nome) else nome
+        )
+
+        dados_corrigidos[periodo] = df_corrigido
+
+    return dados_corrigidos
 
 
 
@@ -846,6 +881,16 @@ if 'dados_periodos' not in st.session_state:
     sucesso, fonte = baixar_cache_inicial()
     dados_cache = carregar_cache()
     if dados_cache:
+        if 'dict_aliases' in st.session_state:
+            mapa_codigos = None
+            periodos_disponiveis = sorted(dados_cache.keys())
+            if periodos_disponiveis:
+                mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
+            dados_cache = aplicar_aliases_em_periodos(
+                dados_cache,
+                st.session_state['dict_aliases'],
+                mapa_codigos=mapa_codigos,
+            )
         st.session_state['dados_periodos'] = dados_cache
         if 'cache_fonte' not in st.session_state:
             st.session_state['cache_fonte'] = fonte
