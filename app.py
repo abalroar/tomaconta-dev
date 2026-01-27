@@ -224,6 +224,29 @@ LOGO_PATH = "data/logo.png"
 CACHE_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/dados_cache.pkl"
 CACHE_INFO_URL = "https://github.com/abalroar/ficadeolho/releases/download/v1.0-cache/cache_info.txt"
 
+VARS_PERCENTUAL = [
+    'ROE An. (%)',
+    'Índice de Basileia',
+    'Crédito/Captações (%)',
+    'Funding Gap (%)',
+    'Carteira/Ativo (%)',
+    'Market Share Carteira',
+    'Índice de Imobilização',
+]
+VARS_RAZAO = ['Alavancagem', 'Risco/Retorno']
+VARS_MOEDAS = [
+    'Carteira de Crédito',
+    'Lucro Líquido',
+    'Patrimônio Líquido',
+    'Captações',
+    'Ativo Total',
+    'Títulos e Valores Mobiliários',
+    'Passivo Exigível',
+    'Patrimônio de Referência',
+    'Patrimônio de Referência para comparação com RWA (PR)',
+]
+VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
+
 def salvar_cache(dados_periodos, periodo_info):
     os.makedirs("data", exist_ok=True)
     with open(CACHE_FILE, 'wb') as f:
@@ -350,28 +373,25 @@ def formatar_valor(valor, variavel):
     if pd.isna(valor) or valor == 0:
         return "N/A"
 
-    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
-    vars_razao = ['Alavancagem', 'Risco/Retorno']
-    vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
-
-    if variavel in vars_percentual:
+    if variavel in VARS_PERCENTUAL:
         return f"{valor*100:.2f}%"
-    elif variavel in vars_razao:
+    elif variavel in VARS_RAZAO:
         return f"{valor:.2f}x"
-    elif variavel in vars_monetarias:
+    elif variavel in VARS_MOEDAS:
         valor_mm = valor / 1e6
         return f"R$ {valor_mm:,.0f}MM".replace(",", ".")
+    elif variavel in VARS_CONTAGEM:
+        return f"{valor:,.0f}".replace(",", ".")
     else:
         return f"{valor:.2f}"
 
 def get_axis_format(variavel):
-    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
-    vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
-
-    if variavel in vars_percentual:
+    if variavel in VARS_PERCENTUAL:
         return {'tickformat': '.2f', 'ticksuffix': '%', 'multiplicador': 100}
-    elif variavel in vars_monetarias:
+    elif variavel in VARS_MOEDAS:
         return {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+    elif variavel in VARS_CONTAGEM:
+        return {'tickformat': ',.0f', 'ticksuffix': '', 'multiplicador': 1}
     else:
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
@@ -395,17 +415,18 @@ def criar_mini_grafico(df_banco, variavel, titulo, tipo='linha'):
     if not cor_banco:
         cor_banco = '#1f77b4'
 
-    vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
-    vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
-
-    if variavel in vars_percentual:
+    if variavel in VARS_PERCENTUAL:
         hover_values = df_sorted[variavel] * 100
         tickformat = '.2f'
         suffix = '%'
-    elif variavel in vars_monetarias:
+    elif variavel in VARS_MOEDAS:
         hover_values = df_sorted[variavel] / 1e6
         tickformat = ',.0f'
         suffix = 'M'
+    elif variavel in VARS_CONTAGEM:
+        hover_values = df_sorted[variavel]
+        tickformat = ',.0f'
+        suffix = ''
     else:
         hover_values = df_sorted[variavel]
         tickformat = '.2f'
@@ -563,19 +584,19 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         # Gráficos maiores e maior DPI para melhor qualidade
         fig, ax = plt.subplots(figsize=(3.5, 2.2), dpi=200)
 
-        vars_percentual = ['ROE An. (%)', 'Índice de Basileia', 'Crédito/Captações (%)', 'Funding Gap (%)', 'Carteira/Ativo (%)', 'Market Share Carteira']
-        vars_monetarias = ['Carteira de Crédito', 'Lucro Líquido', 'Patrimônio Líquido', 'Captações', 'Ativo Total']
-
         y_values = df_plot[variavel].values
         x_labels = df_plot['Período'].values
         x_pos = np.arange(len(x_labels))
 
-        if variavel in vars_percentual:
+        if variavel in VARS_PERCENTUAL:
             y_display = y_values * 100
             suffix = '%'
-        elif variavel in vars_monetarias:
+        elif variavel in VARS_MOEDAS:
             y_display = y_values / 1e6
             suffix = 'M'
+        elif variavel in VARS_CONTAGEM:
+            y_display = y_values
+            suffix = ''
         else:
             y_display = y_values
             suffix = ''
@@ -734,7 +755,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Análise Individual", "Série Histórica", "Scatter Plot"],
+    ["Sobre", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -898,6 +919,344 @@ if menu == "Sobre":
 
     st.markdown("---")
     st.caption("desenvolvido em 2026 por matheus prates, cfa | ferramenta open-source para análise do sistema financeiro brasileiro")
+
+elif menu == "Resumo":
+    st.markdown("## resumo comparativo por período")
+    st.caption("compare múltiplas instituições em um único trimestre, com ranking e média do grupo selecionado.")
+
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+
+        indicadores_config = {
+            'Ativo Total': ['Ativo Total'],
+            'Carteira de Crédito': ['Carteira de Crédito'],
+            'Títulos e Valores Mobiliários': ['Títulos e Valores Mobiliários'],
+            'Passivo Exigível': ['Passivo Exigível'],
+            'Captações': ['Captações'],
+            'Patrimônio Líquido': ['Patrimônio Líquido'],
+            'Lucro Líquido': ['Lucro Líquido'],
+            'Patrimônio de Referência para comparação com RWA (PR)': [
+                'Patrimônio de Referência',
+                'Patrimônio de Referência para comparação com RWA (PR)',
+            ],
+            'Índice de Basileia': ['Índice de Basileia'],
+            'Índice de Imobilização': ['Índice de Imobilização'],
+            'Número de Agências': ['Número de Agências'],
+            'Número de Postos de Atendimento': ['Número de Postos de Atendimento'],
+        }
+
+        indicadores_disponiveis = {}
+        for label, colunas in indicadores_config.items():
+            coluna_valida = next((col for col in colunas if col in df.columns), None)
+            if coluna_valida:
+                indicadores_disponiveis[label] = coluna_valida
+
+        if not indicadores_disponiveis:
+            st.warning("nenhum dos indicadores requeridos foi encontrado nos dados atuais.")
+        else:
+            periodos = sorted(df['Período'].dropna().unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+
+            componentes_indicador = {
+                'Patrimônio de Referência para comparação com RWA (PR)': [
+                    'RWA Crédito',
+                    'RWA Contraparte',
+                    'RWA Operacional',
+                    'RWA Mercado',
+                    'RWA Outros',
+                ]
+            }
+
+            col_periodo, col_indicador, col_escala, col_tipo = st.columns([1.2, 2, 1.1, 1.3])
+            with col_periodo:
+                periodo_resumo = st.selectbox(
+                    "período (trimestre)",
+                    periodos,
+                    index=len(periodos) - 1,
+                    key="periodo_resumo"
+                )
+            with col_indicador:
+                indicador_label = st.selectbox(
+                    "indicador",
+                    list(indicadores_disponiveis.keys()),
+                    key="indicador_resumo"
+                )
+            with col_escala:
+                escala_resumo = st.radio(
+                    "escala",
+                    ["Linear", "Log"],
+                    horizontal=True,
+                    key="escala_resumo"
+                )
+            componentes_disponiveis = [
+                col for col in componentes_indicador.get(indicador_label, []) if col in df.columns
+            ]
+            with col_tipo:
+                if componentes_disponiveis:
+                    tipo_grafico = st.radio(
+                        "tipo de gráfico",
+                        ["Ranking", "Composição (100%)"],
+                        horizontal=True,
+                        key="tipo_grafico_resumo"
+                    )
+                else:
+                    tipo_grafico = "Ranking"
+
+            col_peers, col_bancos = st.columns([1.2, 2.8])
+
+            peers_disponiveis = []
+            if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+                peers_disponiveis = st.session_state['colunas_classificacao']
+
+            with col_peers:
+                peers_selecionados = st.multiselect(
+                    "grupos de peers",
+                    peers_disponiveis,
+                    key="peers_resumo"
+                )
+
+            bancos_do_peer = []
+            if peers_selecionados and 'df_aliases' in st.session_state:
+                df_aliases = st.session_state['df_aliases']
+                peer_vals = df_aliases[peers_selecionados].fillna(0).apply(
+                    lambda col: col.astype(str).str.strip().isin(["1", "1.0"])
+                )
+                mask_peer = peer_vals.any(axis=1)
+                bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
+
+            df_periodo = df[df['Período'] == periodo_resumo].copy()
+
+            if peers_selecionados and bancos_do_peer:
+                df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
+
+            bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
+
+            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+                aliases_set = set(st.session_state['dict_aliases'].values())
+
+                bancos_com_alias = []
+                bancos_sem_alias = []
+
+                for banco in bancos_todos:
+                    if banco in aliases_set:
+                        bancos_com_alias.append(banco)
+                    else:
+                        bancos_sem_alias.append(banco)
+
+                def sort_key(nome):
+                    primeiro_char = nome[0].lower() if nome else 'z'
+                    if primeiro_char.isdigit():
+                        return (1, nome.lower())
+                    return (0, nome.lower())
+
+                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
+                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
+                bancos_todos = bancos_com_alias_sorted + bancos_sem_alias_sorted
+            else:
+                bancos_todos = sorted(bancos_todos)
+
+            with col_bancos:
+                bancos_selecionados = st.multiselect(
+                    "selecionar instituições (até 20)",
+                    bancos_todos,
+                    default=bancos_do_peer[:10] if bancos_do_peer else [],
+                    key="bancos_resumo"
+                )
+
+            col_top, col_ordem, col_sort = st.columns([1.4, 1.4, 1.8])
+            with col_top:
+                usar_top_n = st.toggle("usar top/bottom n", value=True, key="usar_top_resumo")
+                top_n_resumo = st.selectbox("n", [10, 15, 20], index=0, key="top_n_resumo")
+            with col_ordem:
+                direcao_top = st.radio(
+                    "top/bottom",
+                    ["Top", "Bottom"],
+                    horizontal=True,
+                    key="top_bottom_resumo"
+                )
+            with col_sort:
+                modo_ordenacao = st.radio(
+                    "ordenação",
+                    ["Ordenar por valor", "Manter ordem de seleção"],
+                    horizontal=True,
+                    key="ordenacao_resumo"
+                )
+
+            indicador_col = indicadores_disponiveis[indicador_label]
+            coluna_selecao = indicador_col
+            if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
+                df_periodo['total_componentes'] = df_periodo[componentes_disponiveis].sum(axis=1, skipna=True)
+                coluna_selecao = 'total_componentes'
+
+            format_info = get_axis_format(indicador_col)
+
+            def formatar_numero(valor, fmt_info, incluir_sinal=False):
+                if pd.isna(valor):
+                    return "N/A"
+                valor_formatado = format(valor, fmt_info['tickformat'])
+                if incluir_sinal and valor > 0:
+                    valor_formatado = f"+{valor_formatado}"
+                return f"{valor_formatado}{fmt_info['ticksuffix']}"
+
+            max_bancos = 20
+            if bancos_selecionados and len(bancos_selecionados) > max_bancos:
+                st.warning(f"limite de {max_bancos} instituições excedido; exibindo as primeiras {max_bancos}.")
+                bancos_selecionados = bancos_selecionados[:max_bancos]
+
+            if usar_top_n or not bancos_selecionados:
+                df_periodo_valid = df_periodo.dropna(subset=[coluna_selecao]).copy()
+                if df_periodo_valid.empty:
+                    st.info("não há dados suficientes para o período e indicador selecionados.")
+                else:
+                    ascending = direcao_top == "Bottom"
+                    df_selecionado = df_periodo_valid.sort_values(coluna_selecao, ascending=ascending).head(top_n_resumo)
+            else:
+                df_selecionado = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados)].copy()
+
+            df_selecionado = df_selecionado.dropna(subset=[coluna_selecao])
+
+            if df_selecionado.empty:
+                st.info("selecione instituições ou ajuste os filtros para visualizar o resumo.")
+            else:
+                df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
+                media_display = df_selecionado['valor_display'].mean()
+
+                if modo_ordenacao == "Ordenar por valor":
+                    ordenar_asc = direcao_top == "Bottom"
+                    if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
+                        df_selecionado = df_selecionado.sort_values(coluna_selecao, ascending=ordenar_asc)
+                    else:
+                        df_selecionado = df_selecionado.sort_values('valor_display', ascending=ordenar_asc)
+                elif bancos_selecionados:
+                    ordem = bancos_selecionados
+                    df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
+                    df_selecionado = df_selecionado.sort_values('ordem')
+
+                if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
+                    df_componentes = df_selecionado[['Instituição'] + componentes_disponiveis].copy()
+                    df_componentes['total'] = df_componentes[componentes_disponiveis].sum(axis=1, skipna=True)
+                    df_componentes = df_componentes[df_componentes['total'] > 0]
+
+                    if df_componentes.empty:
+                        st.info("não há dados suficientes para exibir a composição selecionada.")
+                    else:
+                        df_percent = df_componentes.copy()
+                        df_percent[componentes_disponiveis] = df_percent[componentes_disponiveis].div(
+                            df_componentes['total'],
+                            axis=0
+                        ) * 100
+
+                        fig_resumo = go.Figure()
+                        for componente in componentes_disponiveis:
+                            fig_resumo.add_trace(go.Bar(
+                                x=df_percent['Instituição'],
+                                y=df_percent[componente],
+                                name=componente,
+                                hovertemplate=(
+                                    "<b>%{x}</b><br>"
+                                    f"{componente}: %{{y:.1f}}%<extra></extra>"
+                                )
+                            ))
+
+                        fig_resumo.update_layout(
+                            title=f"{indicador_label} - {periodo_resumo} ({len(df_percent)} instituições)",
+                            xaxis_title="instituições",
+                            yaxis_title="participação (%)",
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            height=650,
+                            barmode='stack',
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                            xaxis=dict(tickangle=-45),
+                            yaxis=dict(tickformat='.1f', ticksuffix='%'),
+                            font=dict(family='IBM Plex Sans')
+                        )
+
+                        st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+                else:
+                    df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
+                    df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
+
+                    if media_display and media_display != 0:
+                        df_selecionado['diff_pct'] = (df_selecionado['valor_display'] / media_display - 1) * 100
+                        df_selecionado['diff_pct_text'] = df_selecionado['diff_pct'].map(lambda v: f"{v:.1f}%")
+                    else:
+                        df_selecionado['diff_pct_text'] = "N/A"
+
+                    df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
+                        lambda v: formatar_numero(v, format_info)
+                    )
+                    df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
+                        lambda v: formatar_numero(v, format_info, incluir_sinal=True)
+                    )
+
+                    cores_plotly = px.colors.qualitative.Plotly
+                    cores_barras = []
+                    idx_cor = 0
+                    for banco in df_selecionado['Instituição']:
+                        cor = obter_cor_banco(banco)
+                        if not cor:
+                            cor = cores_plotly[idx_cor % len(cores_plotly)]
+                            idx_cor += 1
+                        cores_barras.append(cor)
+
+                    usar_log = escala_resumo == "Log"
+                    if usar_log and (df_selecionado['valor_display'] <= 0).any():
+                        st.warning("escala log desativada: o indicador possui valores zero ou negativos.")
+                        usar_log = False
+
+                    fig_resumo = go.Figure()
+                    fig_resumo.add_trace(go.Bar(
+                        x=df_selecionado['Instituição'],
+                        y=df_selecionado['valor_display'],
+                        marker=dict(color=cores_barras, opacity=0.85),
+                        name=indicador_label,
+                        customdata=np.stack([
+                            df_selecionado['ranking'],
+                            df_selecionado['diff_text'],
+                            df_selecionado['diff_pct_text'],
+                            df_selecionado['valor_text'],
+                        ], axis=-1),
+                        hovertemplate=(
+                            "<b>%{x}</b><br>"
+                            f"{indicador_label}: %{customdata[3]}<br>"
+                            "Ranking: %{customdata[0]}<br>"
+                            "Diferença vs média: %{customdata[1]}<br>"
+                            "Diferença vs média (%): %{customdata[2]}"
+                            "<extra></extra>"
+                        )
+                    ))
+
+                    fig_resumo.add_trace(go.Scatter(
+                        x=df_selecionado['Instituição'],
+                        y=[media_display] * len(df_selecionado),
+                        mode='lines',
+                        name='Média',
+                        line=dict(color='#1f77b4', dash='dash')
+                    ))
+
+                    fig_resumo.update_layout(
+                        title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
+                        xaxis_title="instituições",
+                        yaxis_title=indicador_label,
+                        plot_bgcolor='#f8f9fa',
+                        paper_bgcolor='white',
+                        height=650,
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                        xaxis=dict(tickangle=-45),
+                        yaxis=dict(
+                            tickformat=format_info['tickformat'],
+                            ticksuffix=format_info['ticksuffix'],
+                            type='log' if usar_log else None
+                        ),
+                        font=dict(family='IBM Plex Sans')
+                    )
+
+                    st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Análise Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
