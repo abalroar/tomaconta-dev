@@ -19,6 +19,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 import io
 import base64
 import subprocess
+import re
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -874,6 +875,7 @@ if 'df_aliases' not in st.session_state:
     if df_aliases is not None:
         st.session_state['df_aliases'] = df_aliases
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
+        st.session_state['dict_aliases_norm'] = construir_dict_aliases_normalizado(df_aliases)
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(df_aliases)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
 
