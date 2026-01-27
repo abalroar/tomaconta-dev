@@ -1000,19 +1000,24 @@ with st.sidebar:
 
                     dados = processar_todos_periodos(periodos, st.session_state['dict_aliases'], update)
 
-                    periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
-                    cache_salvo = salvar_cache(dados, periodo_info)
+                    if not dados:
+                        progress_bar.empty()
+                        status.empty()
+                        st.error("falha ao extrair dados: nenhum período retornou dados válidos.")
+                    else:
+                        periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
+                        cache_salvo = salvar_cache(dados, periodo_info)
 
-                    # Atualizar session_state com os novos dados
-                    st.session_state['dados_periodos'] = dados
-                    st.session_state['cache_fonte'] = 'extração local'
+                        # Atualizar session_state com os novos dados
+                        st.session_state['dados_periodos'] = dados
+                        st.session_state['cache_fonte'] = 'extração local'
 
-                    progress_bar.empty()
-                    status.empty()
-                    st.success(f"{len(dados)} períodos extraídos e salvos!")
-                    st.info(f"cache salvo em: {cache_salvo['caminho']}")
-                    st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
-                    st.rerun()
+                        progress_bar.empty()
+                        status.empty()
+                        st.success(f"{len(dados)} períodos extraídos e salvos!")
+                        st.info(f"cache salvo em: {cache_salvo['caminho']}")
+                        st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
+                        st.rerun()
 
                 st.markdown("---")
                 st.markdown("**publicar cache no github**")
