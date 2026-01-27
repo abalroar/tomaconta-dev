@@ -18,6 +18,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import io
 import base64
+import subprocess
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -249,7 +250,35 @@ VARS_MOEDAS = [
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
+def get_cache_info_detalhado():
+    """Retorna informações detalhadas sobre o arquivo de cache."""
+    info = {
+        'existe': False,
+        'caminho': os.path.abspath(CACHE_FILE),
+        'tamanho': 0,
+        'tamanho_formatado': '0 B',
+        'data_modificacao': None,
+        'data_formatada': 'N/A',
+        'fonte': 'nenhuma'
+    }
+    if os.path.exists(CACHE_FILE):
+        info['existe'] = True
+        stat = os.stat(CACHE_FILE)
+        info['tamanho'] = stat.st_size
+        # Formatar tamanho
+        tamanho = stat.st_size
+        for unidade in ['B', 'KB', 'MB', 'GB']:
+            if tamanho < 1024:
+                info['tamanho_formatado'] = f"{tamanho:.1f} {unidade}"
+                break
+            tamanho /= 1024
+        # Data de modificação
+        info['data_modificacao'] = datetime.fromtimestamp(stat.st_mtime)
+        info['data_formatada'] = info['data_modificacao'].strftime('%d/%m/%Y %H:%M:%S')
+    return info
+
 def salvar_cache(dados_periodos, periodo_info):
+    """Salva o cache localmente e retorna informações do arquivo salvo."""
     os.makedirs("data", exist_ok=True)
     with open(CACHE_FILE, 'wb') as f:
         pickle.dump(dados_periodos, f)
@@ -257,8 +286,10 @@ def salvar_cache(dados_periodos, periodo_info):
         f.write(f"Última extração: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
         f.write(f"Períodos: {periodo_info}\n")
         f.write(f"Total de períodos: {len(dados_periodos)}\n")
+    return get_cache_info_detalhado()
 
 def carregar_cache():
+    """Carrega o cache do arquivo local."""
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'rb') as f:
             return pickle.load(f)
@@ -269,6 +300,116 @@ def ler_info_cache():
         with open(CACHE_INFO, 'r') as f:
             return f.read()
     return None
+
+def forcar_recarregar_cache():
+    """Força o recarregamento do cache do disco, ignorando session_state."""
+    dados = carregar_cache()
+    if dados:
+        st.session_state['dados_periodos'] = dados
+        st.session_state['cache_fonte'] = 'local (recarregado)'
+        return True
+    return False
+
+def upload_cache_github(gh_token=None):
+    """Faz upload do cache para GitHub Releases usando gh CLI ou API.
+    Retorna (sucesso, mensagem).
+    """
+    cache_path = Path(CACHE_FILE)
+    cache_info_path = Path(CACHE_INFO)
+
+    if not cache_path.exists():
+        return False, "arquivo de cache não encontrado"
+
+    repo = "abalroar/tomaconta"
+    tag = "v1.0-cache"
+
+    # Tentar usar gh CLI primeiro (mais simples se autenticado)
+    try:
+        # Verificar se gh está disponível e autenticado
+        result = subprocess.run(['gh', 'auth', 'status'], capture_output=True, text=True, timeout=10)
+        gh_available = result.returncode == 0
+
+        if gh_available:
+            # Deletar assets antigos e fazer upload dos novos
+            # Primeiro, tentar deletar os assets existentes
+            subprocess.run(
+                ['gh', 'release', 'delete-asset', tag, 'dados_cache.pkl', '-y', '-R', repo],
+                capture_output=True, text=True, timeout=30
+            )
+            subprocess.run(
+                ['gh', 'release', 'delete-asset', tag, 'cache_info.txt', '-y', '-R', repo],
+                capture_output=True, text=True, timeout=30
+            )
+
+            # Upload do cache
+            result = subprocess.run(
+                ['gh', 'release', 'upload', tag, str(cache_path), '--clobber', '-R', repo],
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                return False, f"erro ao fazer upload do cache: {result.stderr}"
+
+            # Upload do cache_info se existir
+            if cache_info_path.exists():
+                subprocess.run(
+                    ['gh', 'release', 'upload', tag, str(cache_info_path), '--clobber', '-R', repo],
+                    capture_output=True, text=True, timeout=30
+                )
+
+            return True, "cache enviado para github releases com sucesso!"
+
+    except FileNotFoundError:
+        pass  # gh CLI não disponível
+    except subprocess.TimeoutExpired:
+        return False, "timeout ao executar gh CLI"
+    except Exception as e:
+        return False, f"erro ao usar gh CLI: {str(e)}"
+
+    # Se gh CLI não disponível, usar API REST com token
+    if gh_token:
+        try:
+            headers = {
+                'Authorization': f'token {gh_token}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+
+            # Obter release info
+            release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+            r = requests.get(release_url, headers=headers, timeout=30)
+            if r.status_code != 200:
+                return False, f"release '{tag}' não encontrada no github"
+
+            release_data = r.json()
+            release_id = release_data['id']
+            upload_url = release_data['upload_url'].replace('{?name,label}', '')
+
+            # Deletar asset antigo se existir
+            for asset in release_data.get('assets', []):
+                if asset['name'] == 'dados_cache.pkl':
+                    delete_url = f"https://api.github.com/repos/{repo}/releases/assets/{asset['id']}"
+                    requests.delete(delete_url, headers=headers, timeout=30)
+
+            # Upload novo asset
+            with open(cache_path, 'rb') as f:
+                upload_headers = {
+                    'Authorization': f'token {gh_token}',
+                    'Content-Type': 'application/octet-stream'
+                }
+                r = requests.post(
+                    f"{upload_url}?name=dados_cache.pkl",
+                    headers=upload_headers,
+                    data=f,
+                    timeout=300
+                )
+                if r.status_code not in [200, 201]:
+                    return False, f"erro ao fazer upload: {r.status_code}"
+
+            return True, "cache enviado para github releases com sucesso!"
+
+        except Exception as e:
+            return False, f"erro ao usar API do github: {str(e)}"
+
+    return False, "gh CLI não disponível e nenhum token fornecido"
 
 def carregar_aliases():
     if os.path.exists(ALIASES_PATH):
@@ -351,25 +492,31 @@ def carregar_cores_aliases_local(df_aliases):
     return dict_cores
 
 def baixar_cache_inicial():
+    """Baixa o cache inicial do GitHub Releases se não existir localmente.
+    Retorna uma tupla (sucesso, fonte) onde fonte pode ser 'local', 'github' ou 'nenhuma'.
+    """
     cache_path = Path(CACHE_FILE)
-    if not cache_path.exists():
-        try:
-            with st.spinner("carregando dados do github (10mb)..."):
-                r = requests.get(CACHE_URL, timeout=120)
-                if r.status_code == 200:
-                    cache_path.parent.mkdir(parents=True, exist_ok=True)
-                    cache_path.write_bytes(r.content)
-                    r_info = requests.get(CACHE_INFO_URL, timeout=30)
-                    if r_info.status_code == 200:
-                        Path(CACHE_INFO).write_text(r_info.text)
-                    return True
-                else:
-                    st.warning(f"cache não encontrado (http {r.status_code})")
-                    return False
-        except Exception as e:
-            st.error(f"erro ao baixar cache: {e}")
-            return False
-    return True
+    if cache_path.exists():
+        st.session_state['cache_fonte'] = 'local'
+        return True, 'local'
+
+    try:
+        with st.spinner("carregando dados do github releases..."):
+            r = requests.get(CACHE_URL, timeout=120)
+            if r.status_code == 200:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_bytes(r.content)
+                r_info = requests.get(CACHE_INFO_URL, timeout=30)
+                if r_info.status_code == 200:
+                    Path(CACHE_INFO).write_text(r_info.text)
+                st.session_state['cache_fonte'] = 'github releases'
+                return True, 'github releases'
+            else:
+                st.warning(f"cache não encontrado no github (http {r.status_code})")
+                return False, 'nenhuma'
+    except Exception as e:
+        st.error(f"erro ao baixar cache: {e}")
+        return False, 'nenhuma'
 
 def formatar_valor(valor, variavel):
     if pd.isna(valor) or valor == 0:
@@ -680,10 +827,12 @@ if 'df_aliases' not in st.session_state:
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
 
 if 'dados_periodos' not in st.session_state:
-    baixar_cache_inicial()
+    sucesso, fonte = baixar_cache_inicial()
     dados_cache = carregar_cache()
     if dados_cache:
         st.session_state['dados_periodos'] = dados_cache
+        if 'cache_fonte' not in st.session_state:
+            st.session_state['cache_fonte'] = fonte
 
 # Menu horizontal no topo
 if 'menu_atual' not in st.session_state:
@@ -783,9 +932,31 @@ with st.sidebar:
         else:
             st.error("aliases não encontrados")
 
-        info_cache = ler_info_cache()
-        if info_cache:
-            st.caption(info_cache.replace('\n', ' • '))
+        # Informações detalhadas do cache
+        st.markdown("**status do cache**")
+        cache_info = get_cache_info_detalhado()
+        fonte = st.session_state.get('cache_fonte', 'desconhecida')
+
+        if cache_info['existe']:
+            st.caption(f"📁 **caminho:** `{cache_info['caminho']}`")
+            st.caption(f"📅 **modificado:** {cache_info['data_formatada']}")
+            st.caption(f"📦 **tamanho:** {cache_info['tamanho_formatado']}")
+            st.caption(f"🔗 **fonte:** {fonte}")
+
+            # Mostrar info do cache_info.txt se existir
+            info_cache = ler_info_cache()
+            if info_cache:
+                st.caption(f"ℹ️ {info_cache.replace(chr(10), ' • ')}")
+        else:
+            st.warning("cache não encontrado no disco")
+
+        # Botão para forçar recarregamento do cache local
+        if st.button("🔄 recarregar cache do disco", use_container_width=True):
+            if forcar_recarregar_cache():
+                st.success("cache recarregado do disco com sucesso!")
+                st.rerun()
+            else:
+                st.error("falha ao recarregar cache - arquivo não existe")
 
         st.markdown("---")
         st.markdown("**atualizar dados (admin)**")
@@ -802,7 +973,7 @@ with st.sidebar:
                 mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
 
             if 'dict_aliases' in st.session_state:
-                if st.button("extrair dados", type="primary", use_container_width=True):
+                if st.button("🚀 extrair dados do BCB", type="primary", use_container_width=True):
                     periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
                     progress_bar = st.progress(0)
                     status = st.empty()
@@ -812,15 +983,35 @@ with st.sidebar:
                         status.text(f"{p[4:6]}/{p[:4]} ({i+1}/{total})")
 
                     dados = processar_todos_periodos(periodos, st.session_state['dict_aliases'], update)
-                    st.session_state['dados_periodos'] = dados
 
                     periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
-                    salvar_cache(dados, periodo_info)
+                    cache_salvo = salvar_cache(dados, periodo_info)
+
+                    # Atualizar session_state com os novos dados
+                    st.session_state['dados_periodos'] = dados
+                    st.session_state['cache_fonte'] = 'extração local'
 
                     progress_bar.empty()
                     status.empty()
-                    st.success(f"{len(dados)} períodos extraídos com sucesso")
+                    st.success(f"✅ {len(dados)} períodos extraídos e salvos!")
+                    st.info(f"📁 cache salvo em: {cache_salvo['caminho']}")
+                    st.info(f"📦 tamanho: {cache_salvo['tamanho_formatado']}")
                     st.rerun()
+
+                st.markdown("---")
+                st.markdown("**publicar cache no github**")
+                st.caption("envia o cache local para github releases para que outros usuários possam usar")
+
+                gh_token = st.text_input("github token (opcional)", type="password", key="gh_token",
+                                        help="token com permissão 'repo'. deixe em branco se gh CLI estiver autenticado")
+
+                if st.button("☁️ enviar cache para github", use_container_width=True):
+                    with st.spinner("enviando cache para github releases..."):
+                        sucesso, mensagem = upload_cache_github(gh_token if gh_token else None)
+                        if sucesso:
+                            st.success(f"✅ {mensagem}")
+                        else:
+                            st.error(f"❌ {mensagem}")
             else:
                 st.warning("carregue os aliases primeiro")
         elif senha_input:
