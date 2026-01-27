@@ -48,11 +48,19 @@ def construir_mapa_codinst(ano_mes: str) -> dict:
         return {}
 
     df_map = df_cad[["CodInst", coluna_nome]].dropna()
-    mapa = {
-        str(row["CodInst"]).strip(): str(row[coluna_nome]).strip()
-        for _, row in df_map.iterrows()
-        if str(row["CodInst"]).strip() and str(row[coluna_nome]).strip()
-    }
+    mapa = {}
+    for _, row in df_map.iterrows():
+        cod_str = str(row["CodInst"]).strip()
+        nome_str = str(row[coluna_nome]).strip()
+        if not cod_str or not nome_str:
+            continue
+        chaves = {cod_str}
+        if cod_str.isdigit():
+            cod_pad = cod_str.zfill(7)
+            chaves.update({cod_pad, f"C{cod_pad}"})
+        chaves.add(f"C{cod_str}")
+        for chave in chaves:
+            mapa[chave] = nome_str
     return mapa
 
 def extrair_cadastro(ano_mes: str) -> pd.DataFrame:
