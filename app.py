@@ -225,7 +225,7 @@ CACHE_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/
 CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/cache_info.txt"
 
 # Senha para proteger a funcionalidade de atualização de cache
-SENHA_ADMIN = "tomaconta2024"
+SENHA_ADMIN = "m4th3u$987"
 
 VARS_PERCENTUAL = [
     'ROE An. (%)',
