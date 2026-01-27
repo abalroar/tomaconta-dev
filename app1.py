@@ -290,15 +290,46 @@ def get_cache_info_detalhado():
     return info
 
 def salvar_cache(dados_periodos, periodo_info):
-    """Salva o cache localmente e retorna informações do arquivo salvo."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CACHE_FILE, 'wb') as f:
-        pickle.dump(dados_periodos, f)
-    with open(CACHE_INFO, 'w') as f:
-        f.write(f"Última extração: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
-        f.write(f"Períodos: {periodo_info}\n")
-        f.write(f"Total de períodos: {len(dados_periodos)}\n")
-    return get_cache_info_detalhado()
+    """Salva o cache localmente e retorna informações do arquivo salvo.
+
+    Retorna dict com informações do cache ou levanta exceção em caso de erro.
+    """
+    try:
+        # Criar diretório se não existir
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Salvar dados com pickle
+        with open(CACHE_FILE, 'wb') as f:
+            pickle.dump(dados_periodos, f)
+
+        # Verificar se o arquivo foi criado
+        if not os.path.exists(CACHE_FILE):
+            raise IOError(f"Arquivo de cache não foi criado: {CACHE_FILE}")
+
+        # Verificar tamanho (cache vazio seria suspeito)
+        tamanho = os.path.getsize(CACHE_FILE)
+        if tamanho < 100:
+            raise IOError(f"Cache muito pequeno ({tamanho} bytes) - possível erro")
+
+        # Salvar metadados
+        with open(CACHE_INFO, 'w') as f:
+            f.write(f"Última extração: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
+            f.write(f"Períodos: {periodo_info}\n")
+            f.write(f"Total de períodos: {len(dados_periodos)}\n")
+            f.write(f"Tamanho: {tamanho} bytes\n")
+
+        print(f"[CACHE] Salvo com sucesso: {CACHE_FILE} ({tamanho} bytes, {len(dados_periodos)} períodos)")
+        return get_cache_info_detalhado()
+
+    except PermissionError as e:
+        print(f"[CACHE] ERRO de permissão ao salvar: {e}")
+        raise
+    except IOError as e:
+        print(f"[CACHE] ERRO de I/O ao salvar: {e}")
+        raise
+    except Exception as e:
+        print(f"[CACHE] ERRO inesperado ao salvar: {type(e).__name__}: {e}")
+        raise
 
 def carregar_cache():
     """Carrega o cache do arquivo local."""
@@ -1070,33 +1101,69 @@ with st.sidebar:
             if 'dict_aliases' in st.session_state:
                 if st.button("extrair dados do BCB", type="primary", use_container_width=True):
                     periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
+                    st.info(f"Iniciando extração de {len(periodos)} períodos...")
                     progress_bar = st.progress(0)
                     status = st.empty()
+                    error_container = st.empty()
 
                     def update(i, total, p):
                         progress_bar.progress((i+1)/total)
                         status.text(f"{p[4:6]}/{p[:4]} ({i+1}/{total})")
 
-                    dados = processar_todos_periodos(periodos, st.session_state['dict_aliases'], update)
+                    try:
+                        dados = processar_todos_periodos(periodos, st.session_state['dict_aliases'], update)
 
-                    if not dados:
+                        if not dados:
+                            progress_bar.empty()
+                            status.empty()
+                            st.error("falha ao extrair dados: nenhum período retornou dados válidos.")
+                            st.warning("Possíveis causas: API do BCB indisponível, timeout de rede, ou problemas de conexão.")
+                        else:
+                            status.text("Salvando cache no disco...")
+                            periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
+
+                            try:
+                                cache_salvo = salvar_cache(dados, periodo_info)
+
+                                # Verificar se realmente salvou
+                                if not cache_salvo.get('existe'):
+                                    raise IOError("Cache não foi salvo corretamente")
+
+                                # Atualizar session_state com os novos dados
+                                st.session_state['dados_periodos'] = dados
+                                st.session_state['cache_fonte'] = 'extração local'
+
+                                progress_bar.empty()
+                                status.empty()
+                                st.success(f"✓ {len(dados)} períodos extraídos e salvos com sucesso!")
+                                st.info(f"cache salvo em: {cache_salvo['caminho']}")
+                                st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
+                                st.rerun()
+
+                            except PermissionError:
+                                progress_bar.empty()
+                                status.empty()
+                                st.error("ERRO: Sem permissão para salvar cache no disco.")
+                                st.warning("Em ambientes read-only (como Streamlit Cloud), o cache não pode ser salvo localmente.")
+                                # Ainda salva no session_state para uso na sessão atual
+                                st.session_state['dados_periodos'] = dados
+                                st.session_state['cache_fonte'] = 'extração (não salvo em disco)'
+                                st.info(f"Dados carregados em memória: {len(dados)} períodos (serão perdidos ao fechar)")
+
+                            except Exception as e:
+                                progress_bar.empty()
+                                status.empty()
+                                st.error(f"ERRO ao salvar cache: {type(e).__name__}: {e}")
+                                # Ainda salva no session_state
+                                st.session_state['dados_periodos'] = dados
+                                st.session_state['cache_fonte'] = 'extração (erro ao salvar)'
+
+                    except Exception as e:
                         progress_bar.empty()
                         status.empty()
-                        st.error("falha ao extrair dados: nenhum período retornou dados válidos.")
-                    else:
-                        periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
-                        cache_salvo = salvar_cache(dados, periodo_info)
-
-                        # Atualizar session_state com os novos dados
-                        st.session_state['dados_periodos'] = dados
-                        st.session_state['cache_fonte'] = 'extração local'
-
-                        progress_bar.empty()
-                        status.empty()
-                        st.success(f"{len(dados)} períodos extraídos e salvos!")
-                        st.info(f"cache salvo em: {cache_salvo['caminho']}")
-                        st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
-                        st.rerun()
+                        st.error(f"ERRO durante extração: {type(e).__name__}: {e}")
+                        import traceback
+                        st.code(traceback.format_exc(), language="text")
 
                 st.markdown("---")
                 st.markdown("**publicar cache no github**")
