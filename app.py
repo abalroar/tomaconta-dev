@@ -1014,6 +1014,21 @@ elif menu == "Resumo":
                     key="peers_resumo"
                 )
 
+                usar_top_universo = False
+                top_universo_n = 30
+                if not peers_selecionados:
+                    usar_top_universo = st.checkbox(
+                        "selecionar automaticamente top N do universo",
+                        value=True,
+                        key="top_universo_toggle"
+                    )
+                    top_universo_n = st.selectbox(
+                        "top N (universo)",
+                        [10, 20, 30, 40],
+                        index=2,
+                        key="top_universo_n"
+                    )
+
             bancos_do_peer = []
             if peers_selecionados and 'df_aliases' in st.session_state:
                 df_aliases = st.session_state['df_aliases']
@@ -1024,6 +1039,7 @@ elif menu == "Resumo":
                 bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
 
             df_periodo = df[df['Período'] == periodo_resumo].copy()
+            df_periodo_universo = df_periodo.copy()
 
             if peers_selecionados and bancos_do_peer:
                 df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
@@ -1054,11 +1070,26 @@ elif menu == "Resumo":
             else:
                 bancos_todos = sorted(bancos_todos)
 
+            indicador_col = indicadores_disponiveis[indicador_label]
+            coluna_selecao = indicador_col
+            if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
+                df_periodo['total_componentes'] = df_periodo[componentes_disponiveis].sum(axis=1, skipna=True)
+                coluna_selecao = 'total_componentes'
+
+            bancos_default = bancos_do_peer[:10] if bancos_do_peer else []
+            if usar_top_universo:
+                df_universo_valid = df_periodo_universo.dropna(subset=[coluna_selecao]).copy()
+                if df_universo_valid.empty:
+                    st.warning("não há dados disponíveis para calcular o top N do universo.")
+                else:
+                    df_universo_top = df_universo_valid.sort_values(coluna_selecao, ascending=False).head(top_universo_n)
+                    bancos_default = df_universo_top['Instituição'].tolist()
+
             with col_bancos:
                 bancos_selecionados = st.multiselect(
-                    "selecionar instituições (até 20)",
+                    "selecionar instituições (até 40)",
                     bancos_todos,
-                    default=bancos_do_peer[:10] if bancos_do_peer else [],
+                    default=bancos_default,
                     key="bancos_resumo"
                 )
 
@@ -1081,12 +1112,6 @@ elif menu == "Resumo":
                     key="ordenacao_resumo"
                 )
 
-            indicador_col = indicadores_disponiveis[indicador_label]
-            coluna_selecao = indicador_col
-            if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
-                df_periodo['total_componentes'] = df_periodo[componentes_disponiveis].sum(axis=1, skipna=True)
-                coluna_selecao = 'total_componentes'
-
             format_info = get_axis_format(indicador_col)
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False):
@@ -1097,7 +1122,7 @@ elif menu == "Resumo":
                     valor_formatado = f"+{valor_formatado}"
                 return f"{valor_formatado}{fmt_info['ticksuffix']}"
 
-            max_bancos = 20
+            max_bancos = 40
             if bancos_selecionados and len(bancos_selecionados) > max_bancos:
                 st.warning(f"limite de {max_bancos} instituições excedido; exibindo as primeiras {max_bancos}.")
                 bancos_selecionados = bancos_selecionados[:max_bancos]
@@ -1163,7 +1188,7 @@ elif menu == "Resumo":
                             yaxis_title="participação (%)",
                             plot_bgcolor='#f8f9fa',
                             paper_bgcolor='white',
-                            height=650,
+                            height=max(650, len(df_percent) * 24),
                             barmode='stack',
                             showlegend=True,
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
@@ -1173,6 +1198,47 @@ elif menu == "Resumo":
                         )
 
                         st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+
+                        df_componentes['ranking'] = df_componentes['total'].rank(method='first', ascending=False).astype(int)
+                        media_grupo_raw = df_componentes['total'].mean()
+                        df_export_base = df_componentes.copy()
+                        df_export_base['Período'] = periodo_resumo
+                        df_export_base['Indicador'] = indicador_label
+                        df_export_base['Valor'] = df_export_base['total']
+                        df_export_base['Média do Grupo'] = media_grupo_raw
+                        df_export_base['Diferença vs Média'] = df_export_base['Valor'] - media_grupo_raw
+                        df_export_base = df_export_base[[
+                            'Período',
+                            'Instituição',
+                            'Indicador',
+                            'Valor',
+                            'ranking',
+                            'Média do Grupo',
+                            'Diferença vs Média'
+                        ]].rename(columns={'ranking': 'Ranking'})
+
+                        df_export_comp = df_percent.melt(
+                            id_vars=['Instituição'],
+                            value_vars=componentes_disponiveis,
+                            var_name='Componente',
+                            value_name='Participação (%)'
+                        )
+                        df_export_comp['Período'] = periodo_resumo
+                        df_export_comp['Indicador'] = indicador_label
+
+                        buffer_excel = BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                            df_export_base.to_excel(writer, index=False, sheet_name='resumo')
+                            df_export_comp.to_excel(writer, index=False, sheet_name='composicao')
+                        buffer_excel.seek(0)
+
+                        st.download_button(
+                            label="Exportar Excel",
+                            data=buffer_excel,
+                            file_name=f"resumo_{periodo_resumo.replace('/', '-')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="exportar_resumo_excel"
+                        )
                 else:
                     df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
                     df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
@@ -1190,6 +1256,10 @@ elif menu == "Resumo":
                         lambda v: formatar_numero(v, format_info, incluir_sinal=True)
                     )
 
+                    n_bancos = len(df_selecionado)
+                    orientacao_horizontal = n_bancos > 15
+                    altura_grafico = max(650, n_bancos * 24) if orientacao_horizontal else 650
+
                     cores_plotly = px.colors.qualitative.Plotly
                     cores_barras = []
                     idx_cor = 0
@@ -1206,11 +1276,13 @@ elif menu == "Resumo":
                         usar_log = False
 
                     fig_resumo = go.Figure()
+                    banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
                     fig_resumo.add_trace(go.Bar(
-                        x=df_selecionado['Instituição'],
-                        y=df_selecionado['valor_display'],
+                        x=df_selecionado['valor_display'] if orientacao_horizontal else df_selecionado['Instituição'],
+                        y=df_selecionado['Instituição'] if orientacao_horizontal else df_selecionado['valor_display'],
                         marker=dict(color=cores_barras, opacity=0.85),
                         name=indicador_label,
+                        orientation='h' if orientacao_horizontal else 'v',
                         customdata=np.stack([
                             df_selecionado['ranking'],
                             df_selecionado['diff_text'],
@@ -1218,7 +1290,7 @@ elif menu == "Resumo":
                             df_selecionado['valor_text'],
                         ], axis=-1),
                         hovertemplate=(
-                            "<b>%{x}</b><br>"
+                            f"<b>{banco_hover}</b><br>"
                             f"{indicador_label}: %{{customdata[3]}}<br>"
                             "Ranking: %{customdata[0]}<br>"
                             "Diferença vs média: %{customdata[1]}<br>"
@@ -1227,33 +1299,77 @@ elif menu == "Resumo":
                         )
                     ))
 
-                    fig_resumo.add_trace(go.Scatter(
-                        x=df_selecionado['Instituição'],
-                        y=[media_display] * len(df_selecionado),
-                        mode='lines',
-                        name='Média',
-                        line=dict(color='#1f77b4', dash='dash')
-                    ))
+                    if orientacao_horizontal:
+                        fig_resumo.add_trace(go.Scatter(
+                            x=[media_display] * len(df_selecionado),
+                            y=df_selecionado['Instituição'],
+                            mode='lines',
+                            name='Média',
+                            line=dict(color='#1f77b4', dash='dash')
+                        ))
+                    else:
+                        fig_resumo.add_trace(go.Scatter(
+                            x=df_selecionado['Instituição'],
+                            y=[media_display] * len(df_selecionado),
+                            mode='lines',
+                            name='Média',
+                            line=dict(color='#1f77b4', dash='dash')
+                        ))
 
                     fig_resumo.update_layout(
                         title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
-                        xaxis_title="instituições",
-                        yaxis_title=indicador_label,
+                        xaxis_title=indicador_label if orientacao_horizontal else "instituições",
+                        yaxis_title="instituições" if orientacao_horizontal else indicador_label,
                         plot_bgcolor='#f8f9fa',
                         paper_bgcolor='white',
-                        height=650,
+                        height=altura_grafico,
                         showlegend=True,
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                        xaxis=dict(tickangle=-45),
+                        xaxis=dict(
+                            tickangle=-45 if not orientacao_horizontal else 0,
+                            tickformat=format_info['tickformat'] if orientacao_horizontal else None,
+                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None,
+                            type='log' if usar_log and orientacao_horizontal else None
+                        ),
                         yaxis=dict(
-                            tickformat=format_info['tickformat'],
-                            ticksuffix=format_info['ticksuffix'],
-                            type='log' if usar_log else None
+                            tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
+                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None,
+                            type='log' if usar_log and not orientacao_horizontal else None
                         ),
                         font=dict(family='IBM Plex Sans')
                     )
 
                     st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+
+                    media_grupo_raw = df_selecionado[indicador_col].mean()
+                    df_export = df_selecionado.copy()
+                    df_export['Período'] = periodo_resumo
+                    df_export['Indicador'] = indicador_label
+                    df_export['Valor'] = df_export[indicador_col]
+                    df_export['Média do Grupo'] = media_grupo_raw
+                    df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
+                    df_export = df_export[[
+                        'Período',
+                        'Instituição',
+                        'Indicador',
+                        'Valor',
+                        'ranking',
+                        'Média do Grupo',
+                        'Diferença vs Média'
+                    ]].rename(columns={'ranking': 'Ranking'})
+
+                    buffer_excel = BytesIO()
+                    with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                        df_export.to_excel(writer, index=False, sheet_name='resumo')
+                    buffer_excel.seek(0)
+
+                    st.download_button(
+                        label="Exportar Excel",
+                        data=buffer_excel,
+                        file_name=f"resumo_{periodo_resumo.replace('/', '-')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="exportar_resumo_excel"
+                    )
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
