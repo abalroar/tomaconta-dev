@@ -1074,6 +1074,7 @@ elif menu == "Resumo":
             coluna_selecao = indicador_col
             if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
                 df_periodo['total_componentes'] = df_periodo[componentes_disponiveis].sum(axis=1, skipna=True)
+                df_periodo_universo['total_componentes'] = df_periodo_universo[componentes_disponiveis].sum(axis=1, skipna=True)
                 coluna_selecao = 'total_componentes'
 
             bancos_default = bancos_do_peer[:10] if bancos_do_peer else []
@@ -1084,6 +1085,8 @@ elif menu == "Resumo":
                 else:
                     df_universo_top = df_universo_valid.sort_values(coluna_selecao, ascending=False).head(top_universo_n)
                     bancos_default = df_universo_top['Instituição'].tolist()
+
+            bancos_default = [banco for banco in bancos_default if banco in bancos_todos]
 
             with col_bancos:
                 bancos_selecionados = st.multiselect(
