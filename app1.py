@@ -7,7 +7,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
-from utils.ifdata_extractor import gerar_periodos, processar_todos_periodos, construir_mapa_codinst
+from utils.ifdata_extractor import (
+    gerar_periodos,
+    processar_todos_periodos,
+    construir_mapa_codinst,
+    construir_mapa_codinst_multiperiodo,
+    get_log_file_path,
+    parece_codigo_instituicao,
+)
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -449,6 +456,31 @@ def normalizar_nome_instituicao(nome):
     if pd.isna(nome):
         return ""
     return " ".join(str(nome).split()).upper()
+
+def construir_dict_aliases_normalizado(df_aliases):
+    """Constrói dicionário de aliases com nomes normalizados para lookup robusto.
+
+    Mapeia tanto o nome original (Instituição) quanto variantes normalizadas
+    para o alias amigável (Alias Banco).
+    """
+    dict_norm = {}
+    if df_aliases is None or df_aliases.empty:
+        return dict_norm
+
+    for _, row in df_aliases.iterrows():
+        instituicao = row.get('Instituição')
+        alias = row.get('Alias Banco')
+
+        if pd.notna(instituicao) and pd.notna(alias):
+            # Mapeamento direto
+            dict_norm[instituicao] = alias
+            # Mapeamento normalizado (uppercase, sem espaços extras)
+            dict_norm[normalizar_nome_instituicao(instituicao)] = alias
+            # Mapeamento sem acentos (simplificado)
+            nome_simples = instituicao.upper().strip()
+            dict_norm[nome_simples] = alias
+
+    return dict_norm
 
 def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None):
     if not dados_periodos:
