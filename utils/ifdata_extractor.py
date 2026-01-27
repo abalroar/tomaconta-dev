@@ -39,6 +39,59 @@ def obter_coluna_nome_instituicao(df: pd.DataFrame) -> str | None:
             return coluna
     return None
 
+def obter_coluna_cod_instituicao(df: pd.DataFrame) -> str | None:
+    candidatos = {"CodInst", "Cod Inst", "CodInstituicao", "Cod Instituicao", "Código Instituição"}
+    for coluna in df.columns:
+        if coluna in candidatos:
+            return coluna
+        coluna_norm = normalizar_nome_coluna(str(coluna)).replace(" ", "")
+        if coluna_norm.lower() == "codinst":
+            return coluna
+    return None
+
+def construir_mapa_codinst(ano_mes: str) -> dict:
+    df_cad = extrair_cadastro(ano_mes)
+    if df_cad.empty:
+        return {}
+
+    coluna_nome = obter_coluna_nome_instituicao(df_cad)
+    coluna_cod = obter_coluna_cod_instituicao(df_cad)
+    if not coluna_nome or not coluna_cod:
+        return {}
+
+    df_map = df_cad[[coluna_cod, coluna_nome]].dropna()
+    mapa = {}
+
+    for _, row in df_map.iterrows():
+        cod_valor = row[coluna_cod]
+        nome_valor = row[coluna_nome]
+        if pd.isna(cod_valor) or pd.isna(nome_valor):
+            continue
+        cod_str = str(cod_valor).strip()
+        nome_str = str(nome_valor).strip()
+        if not cod_str or not nome_str:
+            continue
+
+        cod_upper = cod_str.upper()
+        chaves = {cod_upper}
+
+        cod_limpo = cod_upper.lstrip("C")
+        if cod_limpo:
+            chaves.add(cod_limpo)
+            if cod_limpo.isdigit():
+                cod_padded = cod_limpo.zfill(7)
+                chaves.add(cod_padded)
+                chaves.add(f"C{cod_padded}")
+        elif cod_upper.startswith("C") and cod_upper[1:].isdigit():
+            cod_padded = cod_upper[1:].zfill(7)
+            chaves.add(cod_padded)
+            chaves.add(f"C{cod_padded}")
+
+        for chave in chaves:
+            mapa[chave] = nome_str
+
+    return mapa
+
 def extrair_cadastro(ano_mes: str) -> pd.DataFrame:
     url = f"{BASE_URL}/IfDataCadastro(AnoMes={int(ano_mes)})?$format=json&$top=5000"
     try:
