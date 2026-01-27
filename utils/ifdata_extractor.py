@@ -102,13 +102,19 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         return None
     
     colunas_desejadas = [
+        "Ativo Total",
         "Carteira de Crédito",
         "Carteira de Crédito Classificada",
-        "Lucro Líquido",
-        "Patrimônio Líquido",
-        "Índice de Basileia",
+        "Títulos e Valores Mobiliários",
+        "Passivo Exigível",
         "Captações",
-        "Ativo Total",
+        "Patrimônio Líquido",
+        "Lucro Líquido",
+        "Patrimônio de Referência para Comparação com o RWA (e)",
+        "Índice de Basileia",
+        "Índice de Imobilização",
+        "Número de Agências",
+        "Número de Postos de Atendimento",
     ]
     
     df_filt = df_valores[df_valores["NomeColuna"].isin(colunas_desejadas)].copy()
@@ -145,12 +151,18 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
     
     colunas_ordem = [
         "NomeInstituicao",
-        "Carteira de Crédito",
-        "Lucro Líquido",
-        "Patrimônio Líquido",
-        "Índice de Basileia",
-        "Captações",
         "Ativo Total",
+        "Carteira de Crédito",
+        "Títulos e Valores Mobiliários",
+        "Passivo Exigível",
+        "Captações",
+        "Patrimônio Líquido",
+        "Lucro Líquido",
+        "Patrimônio de Referência para Comparação com o RWA (e)",
+        "Índice de Basileia",
+        "Índice de Imobilização",
+        "Número de Agências",
+        "Número de Postos de Atendimento",
     ]
     colunas_finais = [c for c in colunas_ordem if c in df_merged.columns]
     df_out = df_merged[colunas_finais].copy()

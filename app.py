@@ -243,7 +243,7 @@ VARS_MOEDAS = [
     'Títulos e Valores Mobiliários',
     'Passivo Exigível',
     'Patrimônio de Referência',
-    'Patrimônio de Referência para comparação com RWA (PR)',
+    'Patrimônio de Referência para Comparação com o RWA (e)',
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
@@ -935,9 +935,9 @@ elif menu == "Resumo":
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
             'Lucro Líquido': ['Lucro Líquido'],
-            'Patrimônio de Referência para comparação com RWA (PR)': [
+            'Patrimônio de Referência': [
+                'Patrimônio de Referência para Comparação com o RWA (e)',
                 'Patrimônio de Referência',
-                'Patrimônio de Referência para comparação com RWA (PR)',
             ],
             'Índice de Basileia': ['Índice de Basileia'],
             'Índice de Imobilização': ['Índice de Imobilização'],
@@ -957,7 +957,7 @@ elif menu == "Resumo":
             periodos = sorted(df['Período'].dropna().unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
 
             componentes_indicador = {
-                'Patrimônio de Referência para comparação com RWA (PR)': [
+                'Patrimônio de Referência': [
                     'RWA Crédito',
                     'RWA Contraparte',
                     'RWA Operacional',
