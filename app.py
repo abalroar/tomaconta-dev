@@ -218,10 +218,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-CACHE_FILE = "data/dados_cache.pkl"
-CACHE_INFO = "data/cache_info.txt"
-ALIASES_PATH = "data/Aliases.xlsx"
-LOGO_PATH = "data/logo.png"
+# Diretório base relativo ao app.py (funciona independente do nome do repo)
+APP_DIR = Path(__file__).parent.resolve()
+DATA_DIR = APP_DIR / "data"
+
+CACHE_FILE = str(DATA_DIR / "dados_cache.pkl")
+CACHE_INFO = str(DATA_DIR / "cache_info.txt")
+ALIASES_PATH = str(DATA_DIR / "Aliases.xlsx")
+LOGO_PATH = str(DATA_DIR / "logo.png")
 CACHE_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/dados_cache.pkl"
 CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/cache_info.txt"
 
@@ -279,7 +283,7 @@ def get_cache_info_detalhado():
 
 def salvar_cache(dados_periodos, periodo_info):
     """Salva o cache localmente e retorna informações do arquivo salvo."""
-    os.makedirs("data", exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(CACHE_FILE, 'wb') as f:
         pickle.dump(dados_periodos, f)
     with open(CACHE_INFO, 'w') as f:
