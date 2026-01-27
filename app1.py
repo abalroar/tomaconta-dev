@@ -2464,6 +2464,62 @@ elif menu == "Deltas":
             df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
             df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
 
+            # ===== CONTROLES DE ESCALA DO EIXO Y =====
+            st.markdown("---")
+            col_escala1, col_escala2, col_escala3 = st.columns([1, 1, 2])
+
+            with col_escala1:
+                # Inicializa session state para escala se não existir
+                if 'delta_escala_modo' not in st.session_state:
+                    st.session_state['delta_escala_modo'] = 'Auto (zoom)'
+
+                modo_escala = st.radio(
+                    "escala do eixo Y",
+                    ["Auto (zoom)", "Zero baseline", "Manual"],
+                    index=["Auto (zoom)", "Zero baseline", "Manual"].index(st.session_state['delta_escala_modo']),
+                    key="delta_escala_modo_radio",
+                    horizontal=True
+                )
+                st.session_state['delta_escala_modo'] = modo_escala
+
+            with col_escala2:
+                # Inicializa session state para margem
+                if 'delta_escala_margem' not in st.session_state:
+                    st.session_state['delta_escala_margem'] = 10
+
+                if modo_escala == "Auto (zoom)":
+                    margem_pct = st.slider(
+                        "margem (%)",
+                        0, 50, st.session_state['delta_escala_margem'],
+                        key="delta_margem_slider",
+                        help="Margem adicional acima/abaixo dos valores"
+                    )
+                    st.session_state['delta_escala_margem'] = margem_pct
+
+            with col_escala3:
+                if modo_escala == "Manual":
+                    col_min, col_max = st.columns(2)
+                    with col_min:
+                        if 'delta_y_min' not in st.session_state:
+                            st.session_state['delta_y_min'] = 0.0
+                        y_min_manual = st.number_input(
+                            "Y mínimo",
+                            value=st.session_state['delta_y_min'],
+                            key="delta_y_min_input"
+                        )
+                        st.session_state['delta_y_min'] = y_min_manual
+                    with col_max:
+                        if 'delta_y_max' not in st.session_state:
+                            st.session_state['delta_y_max'] = 100.0
+                        y_max_manual = st.number_input(
+                            "Y máximo",
+                            value=st.session_state['delta_y_max'],
+                            key="delta_y_max_input"
+                        )
+                        st.session_state['delta_y_max'] = y_max_manual
+
+            st.markdown("---")
+
             for variavel in variaveis_selecionadas_delta:
                 if variavel not in df.columns:
                     st.warning(f"variável '{variavel}' não encontrada nos dados")
@@ -2481,34 +2537,54 @@ elif menu == "Deltas":
                         v_ini = valor_ini[0]
                         v_sub = valor_sub[0]
 
-                        if pd.notna(v_ini) and pd.notna(v_sub):
-                            # Calcula delta absoluto
-                            delta_absoluto = v_sub - v_ini
-                            if variavel in VARS_PERCENTUAL:
-                                # Para percentuais: diferença em pontos percentuais
-                                delta_texto = f"{delta_absoluto * 100:+.2f}pp"
-                            elif variavel in VARS_MOEDAS:
-                                delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
-                            else:
-                                delta_texto = f"{delta_absoluto:+.2f}"
+                        # Tratamento de edge cases
+                        if pd.isna(v_ini) or pd.isna(v_sub):
+                            continue  # Pula NAs
 
-                            # Variação percentual
-                            if v_ini != 0:
-                                variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                                variacao_texto = f"{variacao_pct:+.1f}%"
-                            else:
-                                variacao_pct = float('inf') if delta_absoluto > 0 else float('-inf') if delta_absoluto < 0 else 0
-                                variacao_texto = "N/A"
+                        # Calcula delta absoluto
+                        delta_absoluto = v_sub - v_ini
 
-                            dados_grafico.append({
-                                'instituicao': instituicao,
-                                'valor_ini': v_ini,
-                                'valor_sub': v_sub,
-                                'delta': delta_absoluto,
-                                'delta_texto': delta_texto,
-                                'variacao_pct': variacao_pct,
-                                'variacao_texto': variacao_texto
-                            })
+                        # Formata delta texto conforme tipo de variável
+                        if variavel in VARS_PERCENTUAL:
+                            delta_texto = f"{delta_absoluto * 100:+.2f}pp"
+                        elif variavel in VARS_MOEDAS:
+                            delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                        else:
+                            delta_texto = f"{delta_absoluto:+.2f}"
+
+                        # Variação percentual com tratamento de edge cases
+                        if v_ini == 0:
+                            # Divisão por zero
+                            if delta_absoluto > 0:
+                                variacao_pct = float('inf')
+                                variacao_texto = "+∞"
+                            elif delta_absoluto < 0:
+                                variacao_pct = float('-inf')
+                                variacao_texto = "-∞"
+                            else:
+                                variacao_pct = 0
+                                variacao_texto = "0.0%"
+                        elif v_ini < 0 and v_sub > 0:
+                            # Cruzou de negativo para positivo
+                            variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                            variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
+                        elif v_ini > 0 and v_sub < 0:
+                            # Cruzou de positivo para negativo
+                            variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                            variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
+                        else:
+                            variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                            variacao_texto = f"{variacao_pct:+.1f}%"
+
+                        dados_grafico.append({
+                            'instituicao': instituicao,
+                            'valor_ini': v_ini,
+                            'valor_sub': v_sub,
+                            'delta': delta_absoluto,
+                            'delta_texto': delta_texto,
+                            'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
+                            'variacao_texto': variacao_texto
+                        })
 
                 if not dados_grafico:
                     st.info(f"sem dados disponíveis para '{variavel}' nos períodos selecionados")
@@ -2522,6 +2598,12 @@ elif menu == "Deltas":
 
                 # Cria o gráfico estilo lollipop
                 fig_delta = go.Figure()
+
+                # Coleta todos os valores Y para calcular escala
+                todos_y = []
+                for dado in dados_grafico:
+                    todos_y.append(dado['valor_ini'] * format_info['multiplicador'])
+                    todos_y.append(dado['valor_sub'] * format_info['multiplicador'])
 
                 for i, dado in enumerate(dados_grafico):
                     inst = dado['instituicao']
@@ -2570,6 +2652,31 @@ elif menu == "Deltas":
                 # Título do gráfico
                 titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
 
+                # Calcula limites do eixo Y baseado no modo de escala
+                yaxis_config = dict(
+                    showgrid=True,
+                    gridcolor='#e0e0e0',
+                    tickformat=format_info['tickformat'],
+                    ticksuffix=format_info['ticksuffix'],
+                    title=variavel
+                )
+
+                if todos_y:
+                    y_min_dados = min(todos_y)
+                    y_max_dados = max(todos_y)
+                    y_range = y_max_dados - y_min_dados if y_max_dados != y_min_dados else abs(y_max_dados) * 0.1 or 1
+
+                    if modo_escala == "Zero baseline":
+                        # Sempre incluir zero
+                        yaxis_config['range'] = [min(0, y_min_dados - y_range * 0.05), max(0, y_max_dados + y_range * 0.05)]
+                    elif modo_escala == "Auto (zoom)":
+                        # Zoom nos dados com margem configurável
+                        margem = y_range * (margem_pct / 100)
+                        yaxis_config['range'] = [y_min_dados - margem, y_max_dados + margem]
+                    elif modo_escala == "Manual":
+                        # Usar valores manuais
+                        yaxis_config['range'] = [y_min_manual, y_max_manual]
+
                 fig_delta.update_layout(
                     title=dict(
                         text=titulo_delta,
@@ -2591,13 +2698,7 @@ elif menu == "Deltas":
                         tickangle=45 if len(dados_grafico) > 10 else 0,
                         tickfont=dict(size=10)
                     ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridcolor='#e0e0e0',
-                        tickformat=format_info['tickformat'],
-                        ticksuffix=format_info['ticksuffix'],
-                        title=variavel
-                    ),
+                    yaxis=yaxis_config,
                     font=dict(family='IBM Plex Sans'),
                     margin=dict(l=60, r=20, t=80, b=100)
                 )
