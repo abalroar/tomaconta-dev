@@ -6,37 +6,43 @@ import logging
 import re
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, Dict, List
 
 # =============================================================================
 # CONFIGURAÇÃO DE LOGGING PARA DEPURAÇÃO DE NOMES DE INSTITUIÇÕES
 # =============================================================================
 LOG_DIR = Path(__file__).parent.parent / "data" / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = LOG_DIR / f"ifdata_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+LOG_FILE = None
 
 # Configurar logger
 logger = logging.getLogger("ifdata_extractor")
 logger.setLevel(logging.DEBUG)
 
-# Handler para arquivo
-file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
-file_handler.setLevel(logging.DEBUG)
-file_format = logging.Formatter('%(asctime)s | %(levelname)s | %(funcName)s | %(message)s')
-file_handler.setFormatter(file_format)
-
-# Handler para console (menos verboso)
+# Handler para console (sempre funciona)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 console_format = logging.Formatter('%(levelname)s: %(message)s')
 console_handler.setFormatter(console_format)
-
-logger.addHandler(file_handler)
 logger.addHandler(console_handler)
+
+# Handler para arquivo (opcional - pode falhar em ambientes read-only como Streamlit Cloud)
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_FILE = LOG_DIR / f"ifdata_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_format = logging.Formatter('%(asctime)s | %(levelname)s | %(funcName)s | %(message)s')
+    file_handler.setFormatter(file_format)
+    logger.addHandler(file_handler)
+except (OSError, PermissionError):
+    # Em ambientes read-only, usar apenas console
+    pass
 
 # =============================================================================
 # CONFIGURAÇÕES E CONSTANTES
 # =============================================================================
 BASE_URL = "https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata"
+FALLBACK_FILE = Path(__file__).parent.parent / "data" / "instituicoes_fallback.json"
 
 # Cache de lucros por período (otimização de chamadas)
 cache_lucros = {}
@@ -46,9 +52,43 @@ cache_lucros = {}
 # Este cache é preenchido progressivamente conforme dados são extraídos
 _cache_nomes_instituicoes = {}
 _cache_nomes_carregado = False
+_fallback_carregado = False
 
 # Período de referência para cadastro de nomes (será atualizado dinamicamente)
 _periodo_referencia_cadastro = None
+
+
+def _carregar_fallback_nomes():
+    """Carrega mapeamento de nomes do arquivo de fallback estático."""
+    global _cache_nomes_instituicoes, _fallback_carregado
+
+    if _fallback_carregado:
+        return
+
+    if not FALLBACK_FILE.exists():
+        logger.warning(f"[FALLBACK] Arquivo não encontrado: {FALLBACK_FILE}")
+        _fallback_carregado = True
+        return
+
+    try:
+        import json
+        with open(FALLBACK_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        count = 0
+        for codigo, nome in data.items():
+            if codigo.startswith('_'):  # Ignorar metadados
+                continue
+            # Adicionar variantes do código
+            _adicionar_ao_cache_nomes(codigo, nome)
+            count += 1
+
+        logger.info(f"[FALLBACK] Carregadas {count} instituições do arquivo de fallback")
+        _fallback_carregado = True
+
+    except Exception as e:
+        logger.error(f"[FALLBACK] Erro ao carregar arquivo: {e}")
+        _fallback_carregado = True
 
 
 # =============================================================================
@@ -107,9 +147,9 @@ def diagnosticar_nomes(df: pd.DataFrame, coluna_nome: str = "Instituição", per
         logger.warning(f"[DIAGNÓSTICO] Exemplos de nomes suspeitos: {exemplos}")
 
 
-def get_log_file_path() -> str:
-    """Retorna o caminho do arquivo de log atual."""
-    return str(LOG_FILE)
+def get_log_file_path() -> Optional[str]:
+    """Retorna o caminho do arquivo de log atual, ou None se não disponível."""
+    return str(LOG_FILE) if LOG_FILE else None
 
 
 # =============================================================================
@@ -164,7 +204,7 @@ def normalizar_nome_coluna(valor: str) -> str:
     return " ".join(valor.split())
 
 
-def obter_coluna_nome_instituicao(df: pd.DataFrame) -> str | None:
+def obter_coluna_nome_instituicao(df: pd.DataFrame) -> Optional[str]:
     """Encontra a coluna que contém o nome da instituição no DataFrame."""
     candidatos = {
         "NomeInstituicao",
@@ -233,7 +273,7 @@ def _adicionar_ao_cache_nomes(codinst, nome: str):
             logger.debug(f"[CACHE] Adicionado: '{chave}' -> '{nome_str}'")
 
 
-def _buscar_no_cache_nomes(codinst) -> str | None:
+def _buscar_no_cache_nomes(codinst) -> Optional[str]:
     """Busca um nome no cache global a partir do CodInst."""
     if pd.isna(codinst):
         return None
@@ -387,18 +427,21 @@ def resolver_nome_instituicao(codinst, nome_atual: str = None, periodo: str = No
 
     Ordem de resolução:
     1. Se nome_atual já é um nome válido (não parece código), mantém
-    2. Busca no cache global de nomes
-    3. Se não encontrar, retorna o nome_atual com aviso no log
+    2. Busca no cache global de nomes (inclui fallback estático)
+    3. Se não encontrar, retorna placeholder com logging para diagnóstico
 
     IMPORTANTE: Nunca retorna o CodInst como nome. Se não conseguir resolver,
-    retorna "[Nome não disponível]" com logging para diagnóstico.
+    retorna "[IF {codigo}]" com logging para diagnóstico.
     """
     # Se nome atual é válido, usar
     if nome_atual and not parece_codigo_instituicao(nome_atual):
         log_nome_resolution(str(codinst), nome_atual, nome_atual, "original_valido", periodo)
         return nome_atual
 
-    # Tentar cache
+    # Garantir que o fallback está carregado
+    _carregar_fallback_nomes()
+
+    # Tentar cache (agora inclui dados do fallback)
     nome_cache = _buscar_no_cache_nomes(codinst)
     if nome_cache:
         log_nome_resolution(str(codinst), str(nome_atual), nome_cache, "cache_global", periodo)
