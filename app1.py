@@ -1042,7 +1042,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas"],
+    ["Sobre", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas", "Brincar"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -2744,6 +2744,847 @@ elif menu == "Deltas":
             pass  # Já exibiu warning acima
         elif not variaveis_selecionadas_delta:
             st.info("selecione ao menos uma variável para análise")
+        else:
+            st.info("selecione instituições para comparar")
+
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Brincar":
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+
+        colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
+        periodos_disponiveis = sorted(
+            df['Período'].dropna().unique(),
+            key=lambda x: (x.split('/')[1], x.split('/')[0])
+        )
+
+        # Lista de todos os bancos disponíveis
+        bancos_todos = df['Instituição'].dropna().unique().tolist()
+
+        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+            aliases_set = set(st.session_state['dict_aliases'].values())
+            bancos_com_alias = []
+            bancos_sem_alias = []
+
+            for banco in bancos_todos:
+                if banco in aliases_set:
+                    bancos_com_alias.append(banco)
+                else:
+                    bancos_sem_alias.append(banco)
+
+            def sort_key_brincar(nome):
+                primeiro_char = nome[0].lower() if nome else 'z'
+                if primeiro_char.isdigit():
+                    return (1, nome.lower())
+                return (0, nome.lower())
+
+            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key_brincar)
+            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key_brincar)
+            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
+        else:
+            todos_bancos = sorted(bancos_todos)
+
+        st.markdown("### construtor de métricas derivadas")
+        st.caption("monte uma métrica personalizada combinando variáveis com operações matemáticas")
+
+        # ===== CONSTRUTOR DE FÓRMULA PASSO-A-PASSO =====
+        # Inicializa session state para a fórmula
+        if 'brincar_formula_steps' not in st.session_state:
+            st.session_state['brincar_formula_steps'] = []
+        if 'brincar_nome_metrica' not in st.session_state:
+            st.session_state['brincar_nome_metrica'] = "Métrica Personalizada"
+
+        col_nome, col_formato = st.columns([2, 1])
+        with col_nome:
+            nome_metrica = st.text_input(
+                "nome da métrica",
+                value=st.session_state['brincar_nome_metrica'],
+                key="nome_metrica_input"
+            )
+            st.session_state['brincar_nome_metrica'] = nome_metrica
+
+        with col_formato:
+            formato_resultado = st.selectbox(
+                "formato do resultado",
+                ["Auto", "Valor bruto (R$)", "Percentual (%)", "Múltiplo (x)", "Número"],
+                key="formato_resultado_brincar"
+            )
+
+        st.markdown("---")
+        st.markdown("**construir fórmula**")
+
+        # Interface de construção
+        col_var, col_op, col_add = st.columns([2, 1, 1])
+
+        with col_var:
+            var_nova = st.selectbox(
+                "variável",
+                colunas_numericas,
+                key="var_nova_brincar"
+            )
+
+        with col_op:
+            operacao = st.selectbox(
+                "operação seguinte",
+                ["(fim)", "+", "-", "×", "÷"],
+                key="operacao_brincar"
+            )
+
+        with col_add:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("adicionar", key="btn_add_step", use_container_width=True):
+                st.session_state['brincar_formula_steps'].append({
+                    'variavel': var_nova,
+                    'operacao': operacao if operacao != "(fim)" else None
+                })
+                st.rerun()
+
+        # Exibir fórmula atual
+        if st.session_state['brincar_formula_steps']:
+            formula_texto = ""
+            for i, step in enumerate(st.session_state['brincar_formula_steps']):
+                formula_texto += f"**{step['variavel']}**"
+                if step['operacao']:
+                    formula_texto += f" {step['operacao']} "
+
+            col_formula, col_limpar = st.columns([3, 1])
+            with col_formula:
+                st.markdown(f"Fórmula: {formula_texto}")
+            with col_limpar:
+                if st.button("limpar fórmula", key="btn_limpar_formula"):
+                    st.session_state['brincar_formula_steps'] = []
+                    st.rerun()
+        else:
+            st.info("adicione variáveis para construir sua fórmula")
+
+        # Função para calcular a métrica derivada
+        def calcular_metrica_derivada(df_input, steps):
+            if not steps:
+                return None
+
+            # Inicializa com a primeira variável
+            resultado = df_input[steps[0]['variavel']].copy()
+
+            for i in range(len(steps) - 1):
+                op = steps[i]['operacao']
+                proxima_var = steps[i + 1]['variavel']
+
+                if op == '+':
+                    resultado = resultado + df_input[proxima_var]
+                elif op == '-':
+                    resultado = resultado - df_input[proxima_var]
+                elif op == '×':
+                    resultado = resultado * df_input[proxima_var]
+                elif op == '÷':
+                    # Evita divisão por zero
+                    resultado = resultado / df_input[proxima_var].replace(0, np.nan)
+
+            return resultado
+
+        # Função para detectar se é uma razão/divisão
+        def formula_eh_divisao(steps):
+            for step in steps:
+                if step['operacao'] == '÷':
+                    return True
+            return False
+
+        # ===== SELEÇÃO DE BANCOS =====
+        st.markdown("---")
+        st.markdown("**seleção de instituições**")
+
+        col_modo, col_config = st.columns([1, 3])
+
+        with col_modo:
+            modo_selecao_brincar = st.radio(
+                "modo de seleção",
+                ["Top N", "Peer", "Personalizado"],
+                index=0,
+                key="modo_selecao_brincar"
+            )
+
+        bancos_selecionados_brincar = []
+
+        with col_config:
+            if modo_selecao_brincar == "Top N":
+                col_slider, col_var_ord = st.columns(2)
+                with col_slider:
+                    top_n_brincar = st.slider("quantidade de bancos", 5, 40, 15, key="top_n_brincar")
+                with col_var_ord:
+                    var_ordenacao_brincar = st.selectbox(
+                        "ordenar por",
+                        colunas_numericas,
+                        index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
+                        key="var_ordenacao_brincar"
+                    )
+                # Obtém top N bancos do período mais recente
+                periodo_mais_recente = periodos_disponiveis[-1]
+                df_recente = df[df['Período'] == periodo_mais_recente].copy()
+                df_recente_valid = df_recente.dropna(subset=[var_ordenacao_brincar])
+                bancos_top_n = df_recente_valid.nlargest(top_n_brincar, var_ordenacao_brincar)['Instituição'].tolist()
+                bancos_selecionados_brincar = bancos_top_n
+
+            elif modo_selecao_brincar == "Peer":
+                peers_disponiveis = []
+                if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+                    peers_disponiveis = st.session_state['colunas_classificacao']
+
+                if peers_disponiveis:
+                    peer_selecionado_brincar = st.selectbox(
+                        "selecionar peer group",
+                        peers_disponiveis,
+                        key="peer_brincar"
+                    )
+                    # Obtém bancos do peer
+                    df_aliases = st.session_state['df_aliases']
+                    coluna_peer = df_aliases[peer_selecionado_brincar]
+                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+                    bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
+                    bancos_selecionados_brincar = [b for b in bancos_do_peer if b in todos_bancos]
+                else:
+                    st.info("nenhum peer group disponível")
+
+            else:  # Personalizado
+                col_peer_custom, col_add_remove = st.columns(2)
+
+                with col_peer_custom:
+                    peers_disponiveis = []
+                    if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+                        peers_disponiveis = st.session_state['colunas_classificacao']
+
+                    opcoes_peer_custom = ['Nenhum'] + peers_disponiveis
+                    peer_base_brincar = st.selectbox(
+                        "peer base (opcional)",
+                        opcoes_peer_custom,
+                        index=0,
+                        key="peer_base_brincar"
+                    )
+
+                bancos_base = []
+                if peer_base_brincar != 'Nenhum' and 'df_aliases' in st.session_state:
+                    df_aliases = st.session_state['df_aliases']
+                    coluna_peer = df_aliases[peer_base_brincar]
+                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+                    bancos_base = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
+                    bancos_base = [b for b in bancos_base if b in todos_bancos]
+
+                with col_add_remove:
+                    bancos_custom_brincar = st.multiselect(
+                        "adicionar/remover bancos",
+                        todos_bancos,
+                        default=bancos_base,
+                        max_selections=40,
+                        key="bancos_custom_brincar"
+                    )
+                bancos_selecionados_brincar = bancos_custom_brincar
+
+        # ===== TIPO DE VISUALIZAÇÃO =====
+        st.markdown("---")
+        st.markdown("**visualização**")
+
+        tipo_visualizacao = st.radio(
+            "tipo de gráfico",
+            ["Scatter Plot", "Deltas", "Ranking (barras)"],
+            horizontal=True,
+            key="tipo_viz_brincar"
+        )
+
+        # ===== CALCULAR E VISUALIZAR =====
+        if st.session_state['brincar_formula_steps'] and bancos_selecionados_brincar:
+            steps = st.session_state['brincar_formula_steps']
+
+            # Verifica se a fórmula está completa (última operação é None ou não tem operação pendente)
+            formula_completa = steps[-1]['operacao'] is None
+
+            if not formula_completa:
+                st.warning("adicione mais uma variável ou selecione '(fim)' como operação para completar a fórmula")
+            else:
+                # ===== SCATTER PLOT =====
+                if tipo_visualizacao == "Scatter Plot":
+                    st.markdown("---")
+                    col_periodo, col_eixo_x, col_eixo_y, col_tamanho = st.columns(4)
+
+                    with col_periodo:
+                        periodo_scatter_brincar = st.selectbox(
+                            "período",
+                            periodos_disponiveis,
+                            index=len(periodos_disponiveis) - 1,
+                            key="periodo_scatter_brincar"
+                        )
+
+                    with col_eixo_x:
+                        opcoes_eixo = ['Métrica Derivada'] + colunas_numericas
+                        eixo_x_brincar = st.selectbox(
+                            "eixo X",
+                            opcoes_eixo,
+                            index=0,
+                            key="eixo_x_brincar"
+                        )
+
+                    with col_eixo_y:
+                        eixo_y_brincar = st.selectbox(
+                            "eixo Y",
+                            opcoes_eixo,
+                            index=min(1, len(opcoes_eixo) - 1),
+                            key="eixo_y_brincar"
+                        )
+
+                    with col_tamanho:
+                        opcoes_tamanho = ['Tamanho Fixo', 'Métrica Derivada'] + colunas_numericas
+                        var_tamanho_brincar = st.selectbox(
+                            "tamanho",
+                            opcoes_tamanho,
+                            index=0,
+                            key="var_tamanho_brincar"
+                        )
+
+                    # Filtrar dados para o período
+                    df_periodo = df[df['Período'] == periodo_scatter_brincar].copy()
+                    df_scatter_brincar = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados_brincar)].copy()
+
+                    # Calcular métrica derivada
+                    df_scatter_brincar['Métrica Derivada'] = calcular_metrica_derivada(df_scatter_brincar, steps)
+
+                    # Remover linhas com NaN na métrica
+                    df_scatter_brincar = df_scatter_brincar.dropna(subset=['Métrica Derivada'])
+
+                    if len(df_scatter_brincar) > 0:
+                        # Preparar dados para o gráfico
+                        def get_format_for_var(var_name):
+                            if var_name == 'Métrica Derivada':
+                                if formato_resultado == "Percentual (%)":
+                                    return {'tickformat': '.2f', 'ticksuffix': '%', 'multiplicador': 100}
+                                elif formato_resultado == "Valor bruto (R$)":
+                                    return {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+                                elif formato_resultado == "Múltiplo (x)":
+                                    return {'tickformat': '.2f', 'ticksuffix': 'x', 'multiplicador': 1}
+                                elif formato_resultado == "Auto":
+                                    if formula_eh_divisao(steps):
+                                        return {'tickformat': '.2f', 'ticksuffix': 'x', 'multiplicador': 1}
+                                    else:
+                                        return {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+                                else:
+                                    return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
+                            else:
+                                return get_axis_format(var_name)
+
+                        format_x = get_format_for_var(eixo_x_brincar)
+                        format_y = get_format_for_var(eixo_y_brincar)
+
+                        df_scatter_brincar['x_display'] = df_scatter_brincar[eixo_x_brincar] * format_x['multiplicador']
+                        df_scatter_brincar['y_display'] = df_scatter_brincar[eixo_y_brincar] * format_y['multiplicador']
+
+                        if var_tamanho_brincar == 'Tamanho Fixo':
+                            tamanho_constante = 25
+                        else:
+                            format_size = get_format_for_var(var_tamanho_brincar)
+                            df_scatter_brincar['size_display'] = df_scatter_brincar[var_tamanho_brincar].abs() * format_size['multiplicador']
+
+                        fig_scatter_brincar = go.Figure()
+                        cores_plotly = px.colors.qualitative.Plotly
+                        idx_cor = 0
+
+                        for instituicao in df_scatter_brincar['Instituição'].unique():
+                            df_inst = df_scatter_brincar[df_scatter_brincar['Instituição'] == instituicao]
+                            cor = obter_cor_banco(instituicao)
+                            if not cor:
+                                cor = cores_plotly[idx_cor % len(cores_plotly)]
+                                idx_cor += 1
+
+                            if var_tamanho_brincar == 'Tamanho Fixo':
+                                marker_size = tamanho_constante
+                            else:
+                                max_size = df_scatter_brincar['size_display'].max()
+                                if max_size > 0:
+                                    marker_size = df_inst['size_display'] / max_size * 100
+                                else:
+                                    marker_size = 25
+
+                            eixo_x_label = nome_metrica if eixo_x_brincar == 'Métrica Derivada' else eixo_x_brincar
+                            eixo_y_label = nome_metrica if eixo_y_brincar == 'Métrica Derivada' else eixo_y_brincar
+
+                            fig_scatter_brincar.add_trace(go.Scatter(
+                                x=df_inst['x_display'],
+                                y=df_inst['y_display'],
+                                mode='markers',
+                                name=instituicao,
+                                marker=dict(size=marker_size, color=cor, opacity=1.0, line=dict(width=1, color='white')),
+                                hovertemplate=f'<b>{instituicao}</b><br>{eixo_x_label}: %{{x:{format_x["tickformat"]}}}{format_x["ticksuffix"]}<br>{eixo_y_label}: %{{y:{format_y["tickformat"]}}}{format_y["ticksuffix"]}<extra></extra>'
+                            ))
+
+                        titulo_scatter = f'{nome_metrica}: {eixo_y_brincar} vs {eixo_x_brincar} - {periodo_scatter_brincar}'
+
+                        fig_scatter_brincar.update_layout(
+                            title=titulo_scatter,
+                            xaxis_title=eixo_x_label,
+                            yaxis_title=eixo_y_label,
+                            height=650,
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            showlegend=True,
+                            legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                            xaxis=dict(tickformat=format_x['tickformat'], ticksuffix=format_x['ticksuffix']),
+                            yaxis=dict(tickformat=format_y['tickformat'], ticksuffix=format_y['ticksuffix']),
+                            font=dict(family='IBM Plex Sans')
+                        )
+
+                        st.plotly_chart(fig_scatter_brincar, use_container_width=True)
+
+                        # Tabela e exportação
+                        with st.expander("ver dados e exportar"):
+                            # Prepara dados para exportação
+                            df_export = df_scatter_brincar[['Instituição', eixo_x_brincar, eixo_y_brincar]].copy()
+                            df_export['Período'] = periodo_scatter_brincar
+
+                            # Adiciona componentes da fórmula
+                            componentes = list(set([s['variavel'] for s in steps]))
+                            for comp in componentes:
+                                if comp not in df_export.columns:
+                                    df_export[comp] = df_scatter_brincar[comp]
+
+                            # Reordena colunas
+                            cols_ordem = ['Período', 'Instituição', 'Métrica Derivada'] + [c for c in df_export.columns if c not in ['Período', 'Instituição', 'Métrica Derivada', eixo_x_brincar, eixo_y_brincar]]
+                            if eixo_x_brincar != 'Métrica Derivada':
+                                cols_ordem.append(eixo_x_brincar)
+                            if eixo_y_brincar != 'Métrica Derivada' and eixo_y_brincar not in cols_ordem:
+                                cols_ordem.append(eixo_y_brincar)
+
+                            df_export['Métrica Derivada'] = df_scatter_brincar['Métrica Derivada']
+                            df_export = df_export[[c for c in cols_ordem if c in df_export.columns]]
+
+                            st.dataframe(df_export, use_container_width=True, hide_index=True)
+
+                            col_excel, col_csv = st.columns(2)
+                            with col_excel:
+                                buffer_excel = BytesIO()
+                                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                    df_export.to_excel(writer, index=False, sheet_name='dados')
+                                buffer_excel.seek(0)
+                                st.download_button(
+                                    label="Exportar Excel",
+                                    data=buffer_excel,
+                                    file_name=f"Brincar_Scatter_{nome_metrica.replace(' ', '_')}_{periodo_scatter_brincar.replace('/', '-')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="export_excel_scatter_brincar"
+                                )
+                            with col_csv:
+                                csv_data = df_export.to_csv(index=False)
+                                st.download_button(
+                                    label="Exportar CSV",
+                                    data=csv_data,
+                                    file_name=f"Brincar_Scatter_{nome_metrica.replace(' ', '_')}_{periodo_scatter_brincar.replace('/', '-')}.csv",
+                                    mime="text/csv",
+                                    key="export_csv_scatter_brincar"
+                                )
+                    else:
+                        st.warning("sem dados válidos para exibir no scatter plot")
+
+                # ===== DELTAS =====
+                elif tipo_visualizacao == "Deltas":
+                    st.markdown("---")
+                    col_p1, col_p2, col_tipo_var = st.columns([2, 2, 1])
+
+                    with col_p1:
+                        periodo_inicial_brincar = st.selectbox(
+                            "período inicial",
+                            periodos_disponiveis,
+                            index=max(0, len(periodos_disponiveis) - 2),
+                            key="periodo_inicial_brincar"
+                        )
+                    with col_p2:
+                        periodo_subsequente_brincar = st.selectbox(
+                            "período subsequente",
+                            periodos_disponiveis,
+                            index=len(periodos_disponiveis) - 1,
+                            key="periodo_subsequente_brincar"
+                        )
+                    with col_tipo_var:
+                        tipo_variacao_brincar = st.radio(
+                            "ordenar por",
+                            ["Δ absoluto", "Δ %"],
+                            index=1,
+                            key="tipo_variacao_brincar",
+                            horizontal=True
+                        )
+
+                    # Validação de períodos
+                    idx_ini = periodos_disponiveis.index(periodo_inicial_brincar)
+                    idx_sub = periodos_disponiveis.index(periodo_subsequente_brincar)
+                    periodo_valido = idx_sub > idx_ini
+
+                    if not periodo_valido:
+                        st.warning("o período subsequente deve ser posterior ao período inicial")
+                    else:
+                        # Filtra dados para os dois períodos
+                        df_inicial = df[df['Período'] == periodo_inicial_brincar].copy()
+                        df_subsequente = df[df['Período'] == periodo_subsequente_brincar].copy()
+
+                        # Calcular métrica derivada para ambos os períodos
+                        df_inicial_calc = df_inicial[df_inicial['Instituição'].isin(bancos_selecionados_brincar)].copy()
+                        df_subsequente_calc = df_subsequente[df_subsequente['Instituição'].isin(bancos_selecionados_brincar)].copy()
+
+                        df_inicial_calc['Métrica Derivada'] = calcular_metrica_derivada(df_inicial_calc, steps)
+                        df_subsequente_calc['Métrica Derivada'] = calcular_metrica_derivada(df_subsequente_calc, steps)
+
+                        # Determinar formato
+                        if formato_resultado == "Percentual (%)":
+                            format_info = {'tickformat': '.2f', 'ticksuffix': '%', 'multiplicador': 100}
+                        elif formato_resultado == "Valor bruto (R$)":
+                            format_info = {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+                        elif formato_resultado == "Múltiplo (x)":
+                            format_info = {'tickformat': '.2f', 'ticksuffix': 'x', 'multiplicador': 1}
+                        elif formato_resultado == "Auto":
+                            if formula_eh_divisao(steps):
+                                format_info = {'tickformat': '.2f', 'ticksuffix': 'x', 'multiplicador': 1}
+                            else:
+                                format_info = {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+                        else:
+                            format_info = {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
+
+                        # Prepara dados para o gráfico
+                        dados_grafico_brincar = []
+                        for instituicao in bancos_selecionados_brincar:
+                            valor_ini = df_inicial_calc[df_inicial_calc['Instituição'] == instituicao]['Métrica Derivada'].values
+                            valor_sub = df_subsequente_calc[df_subsequente_calc['Instituição'] == instituicao]['Métrica Derivada'].values
+
+                            if len(valor_ini) > 0 and len(valor_sub) > 0:
+                                v_ini = valor_ini[0]
+                                v_sub = valor_sub[0]
+
+                                if pd.isna(v_ini) or pd.isna(v_sub):
+                                    continue
+
+                                delta_absoluto = v_sub - v_ini
+
+                                # Formata delta texto
+                                if formato_resultado == "Percentual (%)" or (formato_resultado == "Auto" and formula_eh_divisao(steps)):
+                                    delta_texto = f"{delta_absoluto * format_info['multiplicador']:+.2f}{format_info['ticksuffix']}"
+                                elif formato_resultado == "Valor bruto (R$)" or (formato_resultado == "Auto" and not formula_eh_divisao(steps)):
+                                    delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                                else:
+                                    delta_texto = f"{delta_absoluto:+.2f}"
+
+                                # Variação percentual
+                                if v_ini == 0:
+                                    if delta_absoluto > 0:
+                                        variacao_pct = float('inf')
+                                        variacao_texto = "+∞"
+                                    elif delta_absoluto < 0:
+                                        variacao_pct = float('-inf')
+                                        variacao_texto = "-∞"
+                                    else:
+                                        variacao_pct = 0
+                                        variacao_texto = "0.0%"
+                                else:
+                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                    variacao_texto = f"{variacao_pct:+.1f}%"
+
+                                dados_grafico_brincar.append({
+                                    'instituicao': instituicao,
+                                    'valor_ini': v_ini,
+                                    'valor_sub': v_sub,
+                                    'delta': delta_absoluto,
+                                    'delta_texto': delta_texto,
+                                    'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
+                                    'variacao_texto': variacao_texto
+                                })
+
+                        if dados_grafico_brincar:
+                            # Ordena pela variação
+                            if tipo_variacao_brincar == "Δ %":
+                                dados_grafico_brincar = sorted(dados_grafico_brincar, key=lambda x: x['variacao_pct'], reverse=True)
+                            else:
+                                dados_grafico_brincar = sorted(dados_grafico_brincar, key=lambda x: x['delta'], reverse=True)
+
+                            # Cria o gráfico estilo lollipop
+                            fig_delta_brincar = go.Figure()
+
+                            for i, dado in enumerate(dados_grafico_brincar):
+                                inst = dado['instituicao']
+                                y_ini = dado['valor_ini'] * format_info['multiplicador']
+                                y_sub = dado['valor_sub'] * format_info['multiplicador']
+                                delta_positivo = dado['delta'] > 0
+
+                                cor_sub = '#2E7D32' if delta_positivo else '#C62828'
+
+                                # Linha conectando os dois pontos
+                                fig_delta_brincar.add_trace(go.Scatter(
+                                    x=[inst, inst],
+                                    y=[y_ini, y_sub],
+                                    mode='lines',
+                                    line=dict(color='#9E9E9E', width=2),
+                                    showlegend=False,
+                                    hoverinfo='skip'
+                                ))
+
+                                # Bolinha do período inicial
+                                fig_delta_brincar.add_trace(go.Scatter(
+                                    x=[inst],
+                                    y=[y_ini],
+                                    mode='markers',
+                                    marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
+                                    name=periodo_inicial_brincar if i == 0 else None,
+                                    showlegend=(i == 0),
+                                    legendgroup='inicial',
+                                    hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_brincar}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                                ))
+
+                                # Bolinha do período subsequente
+                                fig_delta_brincar.add_trace(go.Scatter(
+                                    x=[inst],
+                                    y=[y_sub],
+                                    mode='markers',
+                                    marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
+                                    name=periodo_subsequente_brincar if i == 0 else None,
+                                    showlegend=(i == 0),
+                                    legendgroup='subsequente',
+                                    customdata=[[dado['delta_texto'], dado['variacao_texto']]],
+                                    hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_brincar}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<extra></extra>'
+                                ))
+
+                            titulo_delta_brincar = f"{nome_metrica}: {periodo_inicial_brincar} → {periodo_subsequente_brincar}"
+
+                            fig_delta_brincar.update_layout(
+                                title=dict(
+                                    text=titulo_delta_brincar,
+                                    font=dict(size=16, family='IBM Plex Sans')
+                                ),
+                                height=max(400, len(dados_grafico_brincar) * 25 + 150),
+                                plot_bgcolor='#f8f9fa',
+                                paper_bgcolor='white',
+                                showlegend=True,
+                                legend=dict(
+                                    orientation="h",
+                                    yanchor="bottom",
+                                    y=1.02,
+                                    xanchor="left",
+                                    x=0
+                                ),
+                                xaxis=dict(
+                                    showgrid=False,
+                                    tickangle=45 if len(dados_grafico_brincar) > 10 else 0,
+                                    tickfont=dict(size=10)
+                                ),
+                                yaxis=dict(
+                                    showgrid=True,
+                                    gridcolor='#e0e0e0',
+                                    tickformat=format_info['tickformat'],
+                                    ticksuffix=format_info['ticksuffix'],
+                                    title=nome_metrica
+                                ),
+                                font=dict(family='IBM Plex Sans'),
+                                margin=dict(l=60, r=20, t=80, b=100)
+                            )
+
+                            st.plotly_chart(fig_delta_brincar, use_container_width=True, config={'displayModeBar': False})
+
+                            # Tabela e exportação
+                            with st.expander("ver dados e exportar"):
+                                df_resumo_brincar = pd.DataFrame(dados_grafico_brincar)
+                                df_resumo_brincar = df_resumo_brincar.rename(columns={
+                                    'instituicao': 'Instituição',
+                                    'valor_ini': periodo_inicial_brincar,
+                                    'valor_sub': periodo_subsequente_brincar,
+                                    'delta_texto': 'Delta',
+                                    'variacao_texto': 'Variação %'
+                                })
+
+                                # Adiciona componentes da fórmula
+                                componentes = list(set([s['variavel'] for s in steps]))
+                                df_export_delta = df_resumo_brincar[['Instituição', periodo_inicial_brincar, periodo_subsequente_brincar, 'Delta', 'Variação %']].copy()
+
+                                st.dataframe(df_export_delta, use_container_width=True, hide_index=True)
+
+                                col_excel, col_csv = st.columns(2)
+                                with col_excel:
+                                    buffer_excel = BytesIO()
+                                    with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                        df_export_delta.to_excel(writer, index=False, sheet_name='deltas')
+                                    buffer_excel.seek(0)
+                                    st.download_button(
+                                        label="Exportar Excel",
+                                        data=buffer_excel,
+                                        file_name=f"Brincar_Deltas_{nome_metrica.replace(' ', '_')}_{periodo_inicial_brincar.replace('/', '-')}_{periodo_subsequente_brincar.replace('/', '-')}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="export_excel_delta_brincar"
+                                    )
+                                with col_csv:
+                                    csv_data = df_export_delta.to_csv(index=False)
+                                    st.download_button(
+                                        label="Exportar CSV",
+                                        data=csv_data,
+                                        file_name=f"Brincar_Deltas_{nome_metrica.replace(' ', '_')}_{periodo_inicial_brincar.replace('/', '-')}_{periodo_subsequente_brincar.replace('/', '-')}.csv",
+                                        mime="text/csv",
+                                        key="export_csv_delta_brincar"
+                                    )
+                        else:
+                            st.info("sem dados válidos para exibir")
+
+                # ===== RANKING (BARRAS) =====
+                elif tipo_visualizacao == "Ranking (barras)":
+                    st.markdown("---")
+                    col_periodo_rank, col_ordem, col_media = st.columns([2, 1, 1])
+
+                    with col_periodo_rank:
+                        periodo_ranking = st.selectbox(
+                            "período",
+                            periodos_disponiveis,
+                            index=len(periodos_disponiveis) - 1,
+                            key="periodo_ranking_brincar"
+                        )
+
+                    with col_ordem:
+                        ordem_ranking = st.radio(
+                            "ordenação",
+                            ["Maior → Menor", "Menor → Maior"],
+                            horizontal=True,
+                            key="ordem_ranking_brincar"
+                        )
+
+                    with col_media:
+                        mostrar_media = st.checkbox("mostrar média do grupo", value=True, key="mostrar_media_brincar")
+
+                    # Filtrar dados para o período
+                    df_periodo_rank = df[df['Período'] == periodo_ranking].copy()
+                    df_ranking = df_periodo_rank[df_periodo_rank['Instituição'].isin(bancos_selecionados_brincar)].copy()
+
+                    # Calcular métrica derivada
+                    df_ranking['Métrica Derivada'] = calcular_metrica_derivada(df_ranking, steps)
+                    df_ranking = df_ranking.dropna(subset=['Métrica Derivada'])
+
+                    if len(df_ranking) > 0:
+                        # Ordenar
+                        ascending = ordem_ranking == "Menor → Maior"
+                        df_ranking = df_ranking.sort_values('Métrica Derivada', ascending=ascending)
+
+                        # Determinar formato
+                        if formato_resultado == "Percentual (%)":
+                            format_info = {'tickformat': '.2f', 'ticksuffix': '%', 'multiplicador': 100}
+                        elif formato_resultado == "Valor bruto (R$)":
+                            format_info = {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+                        elif formato_resultado == "Múltiplo (x)":
+                            format_info = {'tickformat': '.2f', 'ticksuffix': 'x', 'multiplicador': 1}
+                        elif formato_resultado == "Auto":
+                            if formula_eh_divisao(steps):
+                                format_info = {'tickformat': '.2f', 'ticksuffix': 'x', 'multiplicador': 1}
+                            else:
+                                format_info = {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
+                        else:
+                            format_info = {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
+
+                        # Preparar valores para exibição
+                        df_ranking['valor_display'] = df_ranking['Métrica Derivada'] * format_info['multiplicador']
+
+                        # Cores por instituição
+                        cores = []
+                        cores_plotly = px.colors.qualitative.Plotly
+                        idx_cor = 0
+                        for inst in df_ranking['Instituição']:
+                            cor = obter_cor_banco(inst)
+                            if not cor:
+                                cor = cores_plotly[idx_cor % len(cores_plotly)]
+                                idx_cor += 1
+                            cores.append(cor)
+
+                        fig_ranking = go.Figure()
+
+                        fig_ranking.add_trace(go.Bar(
+                            x=df_ranking['Instituição'],
+                            y=df_ranking['valor_display'],
+                            marker=dict(color=cores, line=dict(width=1, color='white')),
+                            hovertemplate='<b>%{x}</b><br>' + nome_metrica + ': %{y:' + format_info['tickformat'] + '}' + format_info['ticksuffix'] + '<extra></extra>'
+                        ))
+
+                        # Adicionar linha de média
+                        if mostrar_media:
+                            media_valor = df_ranking['valor_display'].mean()
+                            fig_ranking.add_hline(
+                                y=media_valor,
+                                line_dash="dash",
+                                line_color="#FF6B6B",
+                                line_width=2,
+                                annotation_text=f"Média: {media_valor:{format_info['tickformat']}}{format_info['ticksuffix']}",
+                                annotation_position="top right",
+                                annotation_font=dict(color="#FF6B6B", size=12)
+                            )
+
+                        titulo_ranking = f"{nome_metrica} - Ranking {periodo_ranking}"
+
+                        fig_ranking.update_layout(
+                            title=dict(
+                                text=titulo_ranking,
+                                font=dict(size=16, family='IBM Plex Sans')
+                            ),
+                            height=max(400, len(df_ranking) * 25 + 150),
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            showlegend=False,
+                            xaxis=dict(
+                                showgrid=False,
+                                tickangle=45 if len(df_ranking) > 10 else 0,
+                                tickfont=dict(size=10)
+                            ),
+                            yaxis=dict(
+                                showgrid=True,
+                                gridcolor='#e0e0e0',
+                                tickformat=format_info['tickformat'],
+                                ticksuffix=format_info['ticksuffix'],
+                                title=nome_metrica
+                            ),
+                            font=dict(family='IBM Plex Sans'),
+                            margin=dict(l=60, r=20, t=60, b=100)
+                        )
+
+                        st.plotly_chart(fig_ranking, use_container_width=True, config={'displayModeBar': False})
+
+                        # Tabela e exportação
+                        with st.expander("ver dados e exportar"):
+                            # Prepara dados para exportação
+                            df_export_rank = df_ranking[['Instituição']].copy()
+                            df_export_rank['Período'] = periodo_ranking
+                            df_export_rank[nome_metrica] = df_ranking['Métrica Derivada']
+
+                            # Adiciona componentes da fórmula
+                            componentes = list(set([s['variavel'] for s in steps]))
+                            for comp in componentes:
+                                if comp in df_ranking.columns:
+                                    df_export_rank[comp] = df_ranking[comp].values
+
+                            # Reordena colunas
+                            cols_ordem = ['Período', 'Instituição', nome_metrica] + componentes
+                            df_export_rank = df_export_rank[[c for c in cols_ordem if c in df_export_rank.columns]]
+
+                            st.dataframe(df_export_rank, use_container_width=True, hide_index=True)
+
+                            col_excel, col_csv = st.columns(2)
+                            with col_excel:
+                                buffer_excel = BytesIO()
+                                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                    df_export_rank.to_excel(writer, index=False, sheet_name='ranking')
+                                buffer_excel.seek(0)
+                                st.download_button(
+                                    label="Exportar Excel",
+                                    data=buffer_excel,
+                                    file_name=f"Brincar_Ranking_{nome_metrica.replace(' ', '_')}_{periodo_ranking.replace('/', '-')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="export_excel_ranking_brincar"
+                                )
+                            with col_csv:
+                                csv_data = df_export_rank.to_csv(index=False)
+                                st.download_button(
+                                    label="Exportar CSV",
+                                    data=csv_data,
+                                    file_name=f"Brincar_Ranking_{nome_metrica.replace(' ', '_')}_{periodo_ranking.replace('/', '-')}.csv",
+                                    mime="text/csv",
+                                    key="export_csv_ranking_brincar"
+                                )
+                    else:
+                        st.warning("sem dados válidos para exibir no ranking")
+
+        elif not st.session_state['brincar_formula_steps']:
+            st.info("construa uma fórmula adicionando variáveis para começar a análise")
         else:
             st.info("selecione instituições para comparar")
 
