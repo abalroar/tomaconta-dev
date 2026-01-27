@@ -12,27 +12,31 @@ from typing import Optional, Dict, List
 # CONFIGURAÇÃO DE LOGGING PARA DEPURAÇÃO DE NOMES DE INSTITUIÇÕES
 # =============================================================================
 LOG_DIR = Path(__file__).parent.parent / "data" / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = LOG_DIR / f"ifdata_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+LOG_FILE = None
 
 # Configurar logger
 logger = logging.getLogger("ifdata_extractor")
 logger.setLevel(logging.DEBUG)
 
-# Handler para arquivo
-file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
-file_handler.setLevel(logging.DEBUG)
-file_format = logging.Formatter('%(asctime)s | %(levelname)s | %(funcName)s | %(message)s')
-file_handler.setFormatter(file_format)
-
-# Handler para console (menos verboso)
+# Handler para console (sempre funciona)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 console_format = logging.Formatter('%(levelname)s: %(message)s')
 console_handler.setFormatter(console_format)
-
-logger.addHandler(file_handler)
 logger.addHandler(console_handler)
+
+# Handler para arquivo (opcional - pode falhar em ambientes read-only como Streamlit Cloud)
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_FILE = LOG_DIR / f"ifdata_extraction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_format = logging.Formatter('%(asctime)s | %(levelname)s | %(funcName)s | %(message)s')
+    file_handler.setFormatter(file_format)
+    logger.addHandler(file_handler)
+except (OSError, PermissionError):
+    # Em ambientes read-only, usar apenas console
+    pass
 
 # =============================================================================
 # CONFIGURAÇÕES E CONSTANTES
@@ -108,9 +112,9 @@ def diagnosticar_nomes(df: pd.DataFrame, coluna_nome: str = "Instituição", per
         logger.warning(f"[DIAGNÓSTICO] Exemplos de nomes suspeitos: {exemplos}")
 
 
-def get_log_file_path() -> str:
-    """Retorna o caminho do arquivo de log atual."""
-    return str(LOG_FILE)
+def get_log_file_path() -> Optional[str]:
+    """Retorna o caminho do arquivo de log atual, ou None se não disponível."""
+    return str(LOG_FILE) if LOG_FILE else None
 
 
 # =============================================================================
