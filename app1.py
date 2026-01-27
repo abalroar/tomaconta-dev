@@ -2341,8 +2341,8 @@ elif menu == "Deltas":
             key="variaveis_deltas"
         )
 
-        # ===== LINHA 2: Seleção de períodos =====
-        col_p1, col_p2 = st.columns(2)
+        # ===== LINHA 2: Seleção de períodos e tipo de variação =====
+        col_p1, col_p2, col_tipo_var = st.columns([2, 2, 1])
         with col_p1:
             periodo_inicial_delta = st.selectbox(
                 "período inicial",
@@ -2356,6 +2356,14 @@ elif menu == "Deltas":
                 periodos_disponiveis,
                 index=len(periodos_disponiveis) - 1,
                 key="periodo_subsequente_delta"
+            )
+        with col_tipo_var:
+            tipo_variacao = st.radio(
+                "ordenar por",
+                ["Δ absoluto", "Δ %"],
+                index=1,
+                key="tipo_variacao_delta",
+                horizontal=True
             )
 
         # Validação de períodos
@@ -2456,20 +2464,6 @@ elif menu == "Deltas":
             df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
             df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
 
-            # Session state para bancos ocultos
-            if 'bancos_ocultos_delta' not in st.session_state:
-                st.session_state['bancos_ocultos_delta'] = set()
-
-            # Botão para resetar bancos ocultos
-            col_reset, col_info = st.columns([1, 4])
-            with col_reset:
-                if st.button("mostrar todos", key="reset_ocultos_delta"):
-                    st.session_state['bancos_ocultos_delta'] = set()
-                    st.rerun()
-            with col_info:
-                if st.session_state['bancos_ocultos_delta']:
-                    st.caption(f"bancos ocultos: {', '.join(st.session_state['bancos_ocultos_delta'])}")
-
             for variavel in variaveis_selecionadas_delta:
                 if variavel not in df.columns:
                     st.warning(f"variável '{variavel}' não encontrada nos dados")
@@ -2480,9 +2474,6 @@ elif menu == "Deltas":
                 # Prepara dados para o gráfico
                 dados_grafico = []
                 for instituicao in bancos_selecionados_delta:
-                    if instituicao in st.session_state['bancos_ocultos_delta']:
-                        continue
-
                     valor_ini = df_inicial[df_inicial['Instituição'] == instituicao][variavel].values
                     valor_sub = df_subsequente[df_subsequente['Instituição'] == instituicao][variavel].values
 
@@ -2491,32 +2482,31 @@ elif menu == "Deltas":
                         v_sub = valor_sub[0]
 
                         if pd.notna(v_ini) and pd.notna(v_sub):
-                            # Calcula delta
+                            # Calcula delta absoluto
+                            delta_absoluto = v_sub - v_ini
                             if variavel in VARS_PERCENTUAL:
                                 # Para percentuais: diferença em pontos percentuais
-                                delta_absoluto = (v_sub - v_ini) * 100  # já em pp
-                                delta_texto = f"{delta_absoluto:+.2f}pp"
+                                delta_texto = f"{delta_absoluto * 100:+.2f}pp"
+                            elif variavel in VARS_MOEDAS:
+                                delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
                             else:
-                                # Para valores monetários e outros
-                                delta_absoluto = v_sub - v_ini
-                                if variavel in VARS_MOEDAS:
-                                    delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
-                                else:
-                                    delta_texto = f"{delta_absoluto:+.2f}"
+                                delta_texto = f"{delta_absoluto:+.2f}"
 
                             # Variação percentual
                             if v_ini != 0:
                                 variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
                                 variacao_texto = f"{variacao_pct:+.1f}%"
                             else:
+                                variacao_pct = float('inf') if delta_absoluto > 0 else float('-inf') if delta_absoluto < 0 else 0
                                 variacao_texto = "N/A"
 
                             dados_grafico.append({
                                 'instituicao': instituicao,
                                 'valor_ini': v_ini,
                                 'valor_sub': v_sub,
-                                'delta': v_sub - v_ini,
+                                'delta': delta_absoluto,
                                 'delta_texto': delta_texto,
+                                'variacao_pct': variacao_pct,
                                 'variacao_texto': variacao_texto
                             })
 
@@ -2524,8 +2514,11 @@ elif menu == "Deltas":
                     st.info(f"sem dados disponíveis para '{variavel}' nos períodos selecionados")
                     continue
 
-                # Ordena por valor do período subsequente (maior para menor)
-                dados_grafico = sorted(dados_grafico, key=lambda x: x['valor_sub'], reverse=True)
+                # Ordena pela variação (maior positiva → maior negativa)
+                if tipo_variacao == "Δ %":
+                    dados_grafico = sorted(dados_grafico, key=lambda x: x['variacao_pct'], reverse=True)
+                else:
+                    dados_grafico = sorted(dados_grafico, key=lambda x: x['delta'], reverse=True)
 
                 # Cria o gráfico estilo lollipop
                 fig_delta = go.Figure()
@@ -2610,20 +2603,7 @@ elif menu == "Deltas":
                 )
 
                 st.markdown(f"### {variavel}")
-
-                # Cria colunas para gráfico e lista de ocultar
-                col_grafico, col_ocultar = st.columns([5, 1])
-
-                with col_grafico:
-                    st.plotly_chart(fig_delta, use_container_width=True, config={'displayModeBar': False})
-
-                with col_ocultar:
-                    st.markdown("**ocultar:**")
-                    for dado in dados_grafico:
-                        inst = dado['instituicao']
-                        if st.button(f"❌ {inst[:10]}...", key=f"ocultar_{variavel}_{inst}", help=f"Ocultar {inst}"):
-                            st.session_state['bancos_ocultos_delta'].add(inst)
-                            st.rerun()
+                st.plotly_chart(fig_delta, use_container_width=True, config={'displayModeBar': False})
 
                 # Tabela resumo
                 with st.expander("ver dados"):
