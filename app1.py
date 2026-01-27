@@ -643,6 +643,16 @@ def baixar_cache_inicial():
         st.error(f"erro ao baixar cache: {e}")
         return False, 'nenhuma'
 
+def ordenar_periodos(periodos, reverso=False):
+    def chave_periodo(valor):
+        try:
+            mes, ano = valor.split('/')
+            return (int(ano), int(mes))
+        except (ValueError, AttributeError):
+            return (0, 0)
+
+    return sorted(periodos, key=chave_periodo, reverse=reverso)
+
 def formatar_valor(valor, variavel):
     if pd.isna(valor) or valor == 0:
         return "N/A"
@@ -774,7 +784,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
     df_sorted = df_sorted.sort_values(['ano', 'trimestre'])
 
     # Filtra pelo período selecionado
-    periodos_disponiveis = sorted(df_sorted['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+    periodos_disponiveis = ordenar_periodos(df_sorted['Período'].unique())
     try:
         idx_ini = periodos_disponiveis.index(periodo_inicial)
         idx_fin = periodos_disponiveis.index(periodo_final)
@@ -1317,7 +1327,7 @@ elif menu == "Resumo":
         if not indicadores_disponiveis:
             st.warning("nenhum dos indicadores requeridos foi encontrado nos dados atuais.")
         else:
-            periodos = sorted(df['Período'].dropna().unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+            periodos = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
             componentes_indicador = {
                 'Patrimônio de Referência': [
@@ -1334,7 +1344,7 @@ elif menu == "Resumo":
                 periodo_resumo = st.selectbox(
                     "período (trimestre)",
                     periodos,
-                    index=len(periodos) - 1,
+                    index=0,
                     key="periodo_resumo"
                 )
             with col_indicador:
@@ -1785,15 +1795,25 @@ elif menu == "Análise Individual":
 
                     st.markdown(f"## {banco_selecionado}")
 
-                    periodos_disponiveis = sorted(df_banco['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+                    periodos_disponiveis = ordenar_periodos(df_banco['Período'].unique())
+                    periodos_dropdown = ordenar_periodos(df_banco['Período'].unique(), reverso=True)
 
                     # Seletores de período
                     col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
                     with col_p1:
-                        periodo_inicial = st.selectbox("período inicial", periodos_disponiveis, index=0, key="periodo_ini_individual")
+                        periodo_inicial = st.selectbox(
+                            "período inicial",
+                            periodos_dropdown,
+                            index=len(periodos_dropdown) - 1,
+                            key="periodo_ini_individual"
+                        )
                     with col_p2:
-                        idx_final = len(periodos_disponiveis) - 1
-                        periodo_final = st.selectbox("período final", periodos_disponiveis, index=idx_final, key="periodo_fin_individual")
+                        periodo_final = st.selectbox(
+                            "período final",
+                            periodos_dropdown,
+                            index=0,
+                            key="periodo_fin_individual"
+                        )
                     with col_p3:
                         if len(periodos_disponiveis) >= 2:
                             pdf_buffer = gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_final)
@@ -1960,21 +1980,19 @@ elif menu == "Série Histórica":
                         key="variaveis_serie_historica"
                     )
 
-                periodos_disponiveis = sorted(
-                    df['Período'].dropna().unique(),
-                    key=lambda x: (x.split('/')[1], x.split('/')[0])
-                )
+                periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
+                periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
                 with col_periodo:
                     periodo_inicial = st.selectbox(
                         "período inicial",
-                        periodos_disponiveis,
-                        index=0,
+                        periodos_dropdown,
+                        index=len(periodos_dropdown) - 1,
                         key="periodo_ini_serie_historica"
                     )
                     periodo_final = st.selectbox(
                         "período final",
-                        periodos_disponiveis,
-                        index=len(periodos_disponiveis) - 1,
+                        periodos_dropdown,
+                        index=0,
                         key="periodo_fin_serie_historica"
                     )
 
@@ -2007,15 +2025,15 @@ elif menu == "Série Histórica":
                             with col_lucro_ini:
                                 periodo_inicial_lucro = st.selectbox(
                                     "período inicial",
-                                    periodos_disponiveis,
-                                    index=0,
+                                    periodos_dropdown,
+                                    index=len(periodos_dropdown) - 1,
                                     key="periodo_ini_lucro_liquido"
                                 )
                             with col_lucro_fim:
                                 periodo_final_lucro = st.selectbox(
                                     "período final",
-                                    periodos_disponiveis,
-                                    index=len(periodos_disponiveis) - 1,
+                                    periodos_dropdown,
+                                    index=0,
                                     key="periodo_fin_lucro_liquido"
                                 )
                             idx_lucro_ini = periodos_disponiveis.index(periodo_inicial_lucro)
@@ -2119,7 +2137,7 @@ elif menu == "Scatter Plot":
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
 
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
-        periodos = sorted(df['Período'].unique(), key=lambda x: (x.split('/')[1], x.split('/')[0]))
+        periodos = ordenar_periodos(df['Período'].unique(), reverso=True)
 
         # Lista de todos os bancos disponíveis com a mesma ordenação de "Análise Individual"
         bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -2163,7 +2181,7 @@ elif menu == "Scatter Plot":
             default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
             var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
         with col4:
-            periodo_scatter = st.selectbox("período", periodos, index=len(periodos)-1)
+            periodo_scatter = st.selectbox("período", periodos, index=0)
 
         # Segunda linha: Top N e variável de ordenação
         col_t1, col_t2, col_t3 = st.columns([1, 1, 2])
@@ -2288,10 +2306,8 @@ elif menu == "Deltas":
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
 
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
-        periodos_disponiveis = sorted(
-            df['Período'].dropna().unique(),
-            key=lambda x: (x.split('/')[1], x.split('/')[0])
-        )
+        periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
+        periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
         # Lista de todos os bancos disponíveis
         bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -2344,17 +2360,18 @@ elif menu == "Deltas":
         # ===== LINHA 2: Seleção de períodos e tipo de variação =====
         col_p1, col_p2, col_tipo_var = st.columns([2, 2, 1])
         with col_p1:
+            indice_inicial_delta = 1 if len(periodos_dropdown) > 1 else 0
             periodo_inicial_delta = st.selectbox(
                 "período inicial",
-                periodos_disponiveis,
-                index=max(0, len(periodos_disponiveis) - 2),
+                periodos_dropdown,
+                index=indice_inicial_delta,
                 key="periodo_inicial_delta"
             )
         with col_p2:
             periodo_subsequente_delta = st.selectbox(
                 "período subsequente",
-                periodos_disponiveis,
-                index=len(periodos_disponiveis) - 1,
+                periodos_dropdown,
+                index=0,
                 key="periodo_subsequente_delta"
             )
         with col_tipo_var:
@@ -2756,10 +2773,8 @@ elif menu == "Brincar":
         df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
 
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
-        periodos_disponiveis = sorted(
-            df['Período'].dropna().unique(),
-            key=lambda x: (x.split('/')[1], x.split('/')[0])
-        )
+        periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
+        periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
         # Lista de todos os bancos disponíveis
         bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -3009,8 +3024,8 @@ elif menu == "Brincar":
                     with col_periodo:
                         periodo_scatter_brincar = st.selectbox(
                             "período",
-                            periodos_disponiveis,
-                            index=len(periodos_disponiveis) - 1,
+                            periodos_dropdown,
+                            index=0,
                             key="periodo_scatter_brincar"
                         )
 
@@ -3187,17 +3202,18 @@ elif menu == "Brincar":
                     col_p1, col_p2, col_tipo_var = st.columns([2, 2, 1])
 
                     with col_p1:
+                        indice_inicial_brincar = 1 if len(periodos_dropdown) > 1 else 0
                         periodo_inicial_brincar = st.selectbox(
                             "período inicial",
-                            periodos_disponiveis,
-                            index=max(0, len(periodos_disponiveis) - 2),
+                            periodos_dropdown,
+                            index=indice_inicial_brincar,
                             key="periodo_inicial_brincar"
                         )
                     with col_p2:
                         periodo_subsequente_brincar = st.selectbox(
                             "período subsequente",
-                            periodos_disponiveis,
-                            index=len(periodos_disponiveis) - 1,
+                            periodos_dropdown,
+                            index=0,
                             key="periodo_subsequente_brincar"
                         )
                     with col_tipo_var:
@@ -3430,8 +3446,8 @@ elif menu == "Brincar":
                     with col_periodo_rank:
                         periodo_ranking = st.selectbox(
                             "período",
-                            periodos_disponiveis,
-                            index=len(periodos_disponiveis) - 1,
+                            periodos_dropdown,
+                            index=0,
                             key="periodo_ranking_brincar"
                         )
 
