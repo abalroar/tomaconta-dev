@@ -289,15 +289,56 @@ def get_cache_info_detalhado():
         info['data_formatada'] = info['data_modificacao'].strftime('%d/%m/%Y %H:%M:%S')
     return info
 
-def salvar_cache(dados_periodos, periodo_info):
-    """Salva o cache localmente e retorna informações do arquivo salvo."""
+def salvar_cache(dados_periodos, periodo_info, incremental=True):
+    """Salva o cache localmente, fazendo merge incremental com dados existentes.
+
+    Args:
+        dados_periodos: Dicionário {periodo: DataFrame} com os novos dados
+        periodo_info: String com informação do período extraído
+        incremental: Se True (padrão), faz merge com cache existente.
+                     Se False, sobrescreve completamente.
+
+    Returns:
+        Informações do cache salvo
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Se modo incremental, carregar dados existentes e fazer merge
+    dados_finais = {}
+    if incremental and os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'rb') as f:
+                dados_existentes = pickle.load(f)
+            if dados_existentes:
+                dados_finais = dados_existentes.copy()
+                print(f"[CACHE] Carregados {len(dados_existentes)} períodos existentes para merge")
+        except Exception as e:
+            print(f"[CACHE] Erro ao carregar cache existente: {e}, criando novo")
+
+    # Adicionar/atualizar com novos dados
+    novos = 0
+    atualizados = 0
+    for periodo, df in dados_periodos.items():
+        if periodo in dados_finais:
+            atualizados += 1
+        else:
+            novos += 1
+        dados_finais[periodo] = df
+
+    print(f"[CACHE] Merge: {novos} novos, {atualizados} atualizados, {len(dados_finais)} total")
+
+    # Salvar dados combinados
     with open(CACHE_FILE, 'wb') as f:
-        pickle.dump(dados_periodos, f)
+        pickle.dump(dados_finais, f)
+
+    # Atualizar info do cache
     with open(CACHE_INFO, 'w') as f:
         f.write(f"Última extração: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
-        f.write(f"Períodos: {periodo_info}\n")
-        f.write(f"Total de períodos: {len(dados_periodos)}\n")
+        f.write(f"Última operação: {periodo_info}\n")
+        f.write(f"Total de períodos: {len(dados_finais)}\n")
+        if incremental:
+            f.write(f"Novos períodos: {novos}, Atualizados: {atualizados}\n")
+
     return get_cache_info_detalhado()
 
 def carregar_cache():
@@ -1072,28 +1113,52 @@ with st.sidebar:
                     periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
                     progress_bar = st.progress(0)
                     status = st.empty()
+                    save_status = st.empty()
 
                     def update(i, total, p):
                         progress_bar.progress((i+1)/total)
-                        status.text(f"{p[4:6]}/{p[:4]} ({i+1}/{total})")
+                        status.text(f"extraindo {p[4:6]}/{p[:4]} ({i+1}/{total})")
 
-                    dados = processar_todos_periodos(periodos, st.session_state['dict_aliases'], update)
+                    # Callback para salvamento progressivo (a cada 5 períodos)
+                    def save_progress(dados_parciais, info):
+                        save_status.text(f"💾 salvando {len(dados_parciais)} períodos...")
+                        salvar_cache(dados_parciais, info, incremental=True)
+                        save_status.text(f"✓ {len(dados_parciais)} períodos salvos no cache")
+
+                    st.info(f"🔄 iniciando extração de {len(periodos)} períodos. salvamento progressivo a cada 5 períodos.")
+
+                    dados = processar_todos_periodos(
+                        periodos,
+                        st.session_state['dict_aliases'],
+                        progress_callback=update,
+                        save_callback=save_progress,
+                        save_interval=5
+                    )
 
                     if not dados:
                         progress_bar.empty()
                         status.empty()
+                        save_status.empty()
                         st.error("falha ao extrair dados: nenhum período retornou dados válidos.")
                     else:
                         periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
-                        cache_salvo = salvar_cache(dados, periodo_info)
+                        cache_salvo = salvar_cache(dados, periodo_info, incremental=True)
 
-                        # Atualizar session_state com os novos dados
-                        st.session_state['dados_periodos'] = dados
+                        # Atualizar session_state com merge dos dados existentes + novos
+                        if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+                            # Merge: dados existentes + novos (novos sobrescrevem)
+                            dados_merged = st.session_state['dados_periodos'].copy()
+                            dados_merged.update(dados)
+                            st.session_state['dados_periodos'] = dados_merged
+                        else:
+                            st.session_state['dados_periodos'] = dados
+
                         st.session_state['cache_fonte'] = 'extração local'
 
                         progress_bar.empty()
                         status.empty()
-                        st.success(f"{len(dados)} períodos extraídos e salvos!")
+                        save_status.empty()
+                        st.success(f"✓ {len(dados)} períodos extraídos! cache total: {len(st.session_state['dados_periodos'])} períodos")
                         st.info(f"cache salvo em: {cache_salvo['caminho']}")
                         st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
                         st.rerun()

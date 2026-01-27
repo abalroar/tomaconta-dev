@@ -953,11 +953,22 @@ def gerar_periodos(ano_inicial, mes_inicial, ano_final, mes_final):
     return PERIODOS
 
 
-def processar_todos_periodos(periodos, dict_aliases, progress_callback=None):
-    """Processa múltiplos períodos com rate limiting e logging.
+def processar_todos_periodos(periodos, dict_aliases, progress_callback=None, save_callback=None, save_interval=5):
+    """Processa múltiplos períodos com rate limiting, logging e salvamento progressivo.
 
     IMPORTANTE: Antes de processar, carrega cache de nomes de múltiplos períodos
     para maximizar a cobertura de resolução de nomes.
+
+    Args:
+        periodos: Lista de períodos no formato 'YYYYMM'
+        dict_aliases: Dicionário de aliases de instituições
+        progress_callback: Função chamada a cada período (i, total, periodo)
+        save_callback: Função chamada para salvar dados incrementalmente (dados_periodos, periodo_info)
+                       Se fornecida, salva a cada save_interval períodos para evitar perda de dados
+        save_interval: Intervalo de períodos para salvamento progressivo (padrão: 5)
+
+    Returns:
+        Dicionário {periodo: DataFrame} com todos os dados extraídos
     """
     logger.info(f"[BATCH] Iniciando processamento de {len(periodos)} períodos")
 
@@ -966,6 +977,7 @@ def processar_todos_periodos(periodos, dict_aliases, progress_callback=None):
     construir_mapa_codinst_multiperiodo(periodos[-3:] if len(periodos) >= 3 else periodos)
 
     dados_periodos = {}
+    periodos_desde_ultimo_save = 0
 
     for i, per in enumerate(periodos):
         if progress_callback:
@@ -975,6 +987,17 @@ def processar_todos_periodos(periodos, dict_aliases, progress_callback=None):
             df_per = processar_periodo(per, dict_aliases)
             if df_per is not None and not df_per.empty:
                 dados_periodos[per] = df_per
+                periodos_desde_ultimo_save += 1
+
+                # Salvamento progressivo: salva a cada N períodos para evitar perda de dados
+                if save_callback and periodos_desde_ultimo_save >= save_interval:
+                    try:
+                        periodo_info = f"salvamento progressivo até {per[4:6]}/{per[:4]}"
+                        save_callback(dados_periodos, periodo_info)
+                        periodos_desde_ultimo_save = 0
+                        logger.info(f"[BATCH] Salvamento progressivo: {len(dados_periodos)} períodos salvos")
+                    except Exception as save_error:
+                        logger.warning(f"[BATCH] Erro no salvamento progressivo: {save_error}")
 
             # Rate limiting: esperar entre requisições
             time.sleep(1.5)
@@ -982,6 +1005,24 @@ def processar_todos_periodos(periodos, dict_aliases, progress_callback=None):
         except Exception as e:
             logger.error(f"[BATCH] Erro no período {per}: {e}")
             print(f"Erro no período {per}: {e}")
+
+            # Tentar salvar o que temos até agora em caso de erro
+            if save_callback and dados_periodos:
+                try:
+                    periodo_info = f"salvamento de emergência após erro em {per}"
+                    save_callback(dados_periodos, periodo_info)
+                    logger.info(f"[BATCH] Salvamento de emergência: {len(dados_periodos)} períodos salvos")
+                except Exception as save_error:
+                    logger.warning(f"[BATCH] Erro no salvamento de emergência: {save_error}")
+
+    # Salvamento final
+    if save_callback and dados_periodos and periodos_desde_ultimo_save > 0:
+        try:
+            periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
+            save_callback(dados_periodos, periodo_info)
+            logger.info(f"[BATCH] Salvamento final: {len(dados_periodos)} períodos salvos")
+        except Exception as save_error:
+            logger.warning(f"[BATCH] Erro no salvamento final: {save_error}")
 
     logger.info(f"[BATCH] Processamento concluído: {len(dados_periodos)} períodos com dados")
 
