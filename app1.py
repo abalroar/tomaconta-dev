@@ -463,9 +463,17 @@ def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None)
         df_corrigido = df.copy()
 
         if mapa_codigos:
-            df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(
-                lambda nome: mapa_codigos.get(str(nome).strip(), nome) if pd.notna(nome) else nome
-            )
+            def resolver_nome_base(nome):
+                if pd.isna(nome):
+                    return nome
+                chave = str(nome).strip()
+                nome_base = mapa_codigos.get(chave)
+                if not nome_base and chave.startswith("C"):
+                    chave_sem_c = chave[1:]
+                    nome_base = mapa_codigos.get(chave_sem_c) or mapa_codigos.get(chave_sem_c.lstrip("0"))
+                return nome_base if nome_base else nome
+
+            df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(resolver_nome_base)
 
         df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(
             lambda nome: dict_aliases.get(nome, nome) if pd.notna(nome) else nome
