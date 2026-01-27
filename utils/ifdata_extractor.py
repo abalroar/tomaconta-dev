@@ -6,6 +6,7 @@ import logging
 import re
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, Dict, List
 
 # =============================================================================
 # CONFIGURAÇÃO DE LOGGING PARA DEPURAÇÃO DE NOMES DE INSTITUIÇÕES
@@ -164,7 +165,7 @@ def normalizar_nome_coluna(valor: str) -> str:
     return " ".join(valor.split())
 
 
-def obter_coluna_nome_instituicao(df: pd.DataFrame) -> str | None:
+def obter_coluna_nome_instituicao(df: pd.DataFrame) -> Optional[str]:
     """Encontra a coluna que contém o nome da instituição no DataFrame."""
     candidatos = {
         "NomeInstituicao",
@@ -233,7 +234,7 @@ def _adicionar_ao_cache_nomes(codinst, nome: str):
             logger.debug(f"[CACHE] Adicionado: '{chave}' -> '{nome_str}'")
 
 
-def _buscar_no_cache_nomes(codinst) -> str | None:
+def _buscar_no_cache_nomes(codinst) -> Optional[str]:
     """Busca um nome no cache global a partir do CodInst."""
     if pd.isna(codinst):
         return None
