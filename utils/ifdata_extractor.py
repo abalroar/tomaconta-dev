@@ -94,12 +94,12 @@ def aplicar_aliases(df: pd.DataFrame, dict_aliases: dict) -> pd.DataFrame:
 
 def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
     df_cad = extrair_cadastro(ano_mes)
-    if df_cad.empty:
-        return None
-    
     df_valores = extrair_valores(ano_mes)
     if df_valores.empty:
         return None
+    if df_cad.empty:
+        df_cad = df_valores[["CodInst"]].drop_duplicates().copy()
+        df_cad["NomeInstituicao"] = df_cad["CodInst"]
     
     colunas_desejadas = [
         "Ativo Total",
