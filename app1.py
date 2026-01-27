@@ -1042,7 +1042,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot"],
+    ["Sobre", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -2279,6 +2279,393 @@ elif menu == "Scatter Plot":
         )
 
         st.plotly_chart(fig_scatter, use_container_width=True)
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Deltas":
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+
+        colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
+        periodos_disponiveis = sorted(
+            df['Período'].dropna().unique(),
+            key=lambda x: (x.split('/')[1], x.split('/')[0])
+        )
+
+        # Lista de todos os bancos disponíveis
+        bancos_todos = df['Instituição'].dropna().unique().tolist()
+
+        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+            aliases_set = set(st.session_state['dict_aliases'].values())
+            bancos_com_alias = []
+            bancos_sem_alias = []
+
+            for banco in bancos_todos:
+                if banco in aliases_set:
+                    bancos_com_alias.append(banco)
+                else:
+                    bancos_sem_alias.append(banco)
+
+            def sort_key(nome):
+                primeiro_char = nome[0].lower() if nome else 'z'
+                if primeiro_char.isdigit():
+                    return (1, nome.lower())
+                return (0, nome.lower())
+
+            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
+            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
+            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
+        else:
+            todos_bancos = sorted(bancos_todos)
+
+        # ===== LINHA 1: Seleção de variáveis =====
+        st.markdown("**variáveis para análise de deltas**")
+        variaveis_disponiveis = [
+            'Ativo Total',
+            'Captações',
+            'Patrimônio Líquido',
+            'Carteira de Crédito',
+            'Carteira/Ativo (%)',
+            'Índice de Basileia',
+            'Crédito/PL',
+            'Crédito/Captações (%)',
+            'Market Share Carteira',
+            'Lucro Líquido',
+            'ROE An. (%)'
+        ]
+        variaveis_selecionadas_delta = st.multiselect(
+            "selecionar variáveis",
+            variaveis_disponiveis,
+            default=['Carteira de Crédito'],
+            key="variaveis_deltas"
+        )
+
+        # ===== LINHA 2: Seleção de períodos =====
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            periodo_inicial_delta = st.selectbox(
+                "período inicial",
+                periodos_disponiveis,
+                index=max(0, len(periodos_disponiveis) - 2),
+                key="periodo_inicial_delta"
+            )
+        with col_p2:
+            periodo_subsequente_delta = st.selectbox(
+                "período subsequente",
+                periodos_disponiveis,
+                index=len(periodos_disponiveis) - 1,
+                key="periodo_subsequente_delta"
+            )
+
+        # Validação de períodos
+        idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
+        idx_sub = periodos_disponiveis.index(periodo_subsequente_delta)
+        periodo_valido = idx_sub > idx_ini
+
+        if not periodo_valido:
+            st.warning("o período subsequente deve ser posterior ao período inicial")
+
+        # ===== LINHA 3: Modo de seleção de instituições =====
+        col_modo, col_config = st.columns([1, 3])
+
+        with col_modo:
+            modo_selecao = st.radio(
+                "modo de seleção",
+                ["Top N", "Peer", "Personalizado"],
+                index=0,
+                key="modo_selecao_deltas"
+            )
+
+        bancos_selecionados_delta = []
+
+        with col_config:
+            if modo_selecao == "Top N":
+                col_slider, col_var = st.columns(2)
+                with col_slider:
+                    top_n_delta = st.slider("quantidade de bancos", 5, 50, 15, key="top_n_delta")
+                with col_var:
+                    var_ordenacao = st.selectbox(
+                        "ordenar por",
+                        colunas_numericas,
+                        index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
+                        key="var_ordenacao_delta"
+                    )
+                # Obtém top N bancos do período mais recente
+                df_recente = df[df['Período'] == periodo_subsequente_delta].copy()
+                df_recente_valid = df_recente.dropna(subset=[var_ordenacao])
+                bancos_top_n = df_recente_valid.nlargest(top_n_delta, var_ordenacao)['Instituição'].tolist()
+                bancos_selecionados_delta = bancos_top_n
+
+            elif modo_selecao == "Peer":
+                peers_disponiveis = []
+                if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+                    peers_disponiveis = st.session_state['colunas_classificacao']
+
+                if peers_disponiveis:
+                    peer_selecionado_delta = st.selectbox(
+                        "selecionar peer group",
+                        peers_disponiveis,
+                        key="peer_deltas"
+                    )
+                    # Obtém bancos do peer
+                    df_aliases = st.session_state['df_aliases']
+                    coluna_peer = df_aliases[peer_selecionado_delta]
+                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+                    bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
+                    bancos_selecionados_delta = [b for b in bancos_do_peer if b in todos_bancos]
+                else:
+                    st.info("nenhum peer group disponível")
+
+            else:  # Personalizado
+                col_peer_custom, col_add_remove = st.columns(2)
+
+                with col_peer_custom:
+                    peers_disponiveis = []
+                    if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+                        peers_disponiveis = st.session_state['colunas_classificacao']
+
+                    opcoes_peer_custom = ['Nenhum'] + peers_disponiveis
+                    peer_base = st.selectbox(
+                        "peer base (opcional)",
+                        opcoes_peer_custom,
+                        index=0,
+                        key="peer_base_deltas"
+                    )
+
+                bancos_base = []
+                if peer_base != 'Nenhum' and 'df_aliases' in st.session_state:
+                    df_aliases = st.session_state['df_aliases']
+                    coluna_peer = df_aliases[peer_base]
+                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+                    bancos_base = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
+                    bancos_base = [b for b in bancos_base if b in todos_bancos]
+
+                with col_add_remove:
+                    bancos_custom = st.multiselect(
+                        "adicionar/remover bancos",
+                        todos_bancos,
+                        default=bancos_base,
+                        key="bancos_custom_deltas"
+                    )
+                bancos_selecionados_delta = bancos_custom
+
+        # ===== GRÁFICOS DE DELTAS =====
+        if periodo_valido and variaveis_selecionadas_delta and bancos_selecionados_delta:
+            # Filtra dados para os dois períodos
+            df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
+            df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
+
+            # Session state para bancos ocultos
+            if 'bancos_ocultos_delta' not in st.session_state:
+                st.session_state['bancos_ocultos_delta'] = set()
+
+            # Botão para resetar bancos ocultos
+            col_reset, col_info = st.columns([1, 4])
+            with col_reset:
+                if st.button("mostrar todos", key="reset_ocultos_delta"):
+                    st.session_state['bancos_ocultos_delta'] = set()
+                    st.rerun()
+            with col_info:
+                if st.session_state['bancos_ocultos_delta']:
+                    st.caption(f"bancos ocultos: {', '.join(st.session_state['bancos_ocultos_delta'])}")
+
+            for variavel in variaveis_selecionadas_delta:
+                if variavel not in df.columns:
+                    st.warning(f"variável '{variavel}' não encontrada nos dados")
+                    continue
+
+                format_info = get_axis_format(variavel)
+
+                # Prepara dados para o gráfico
+                dados_grafico = []
+                for instituicao in bancos_selecionados_delta:
+                    if instituicao in st.session_state['bancos_ocultos_delta']:
+                        continue
+
+                    valor_ini = df_inicial[df_inicial['Instituição'] == instituicao][variavel].values
+                    valor_sub = df_subsequente[df_subsequente['Instituição'] == instituicao][variavel].values
+
+                    if len(valor_ini) > 0 and len(valor_sub) > 0:
+                        v_ini = valor_ini[0]
+                        v_sub = valor_sub[0]
+
+                        if pd.notna(v_ini) and pd.notna(v_sub):
+                            # Calcula delta
+                            if variavel in VARS_PERCENTUAL:
+                                # Para percentuais: diferença em pontos percentuais
+                                delta_absoluto = (v_sub - v_ini) * 100  # já em pp
+                                delta_texto = f"{delta_absoluto:+.2f}pp"
+                            else:
+                                # Para valores monetários e outros
+                                delta_absoluto = v_sub - v_ini
+                                if variavel in VARS_MOEDAS:
+                                    delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                                else:
+                                    delta_texto = f"{delta_absoluto:+.2f}"
+
+                            # Variação percentual
+                            if v_ini != 0:
+                                variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                variacao_texto = f"{variacao_pct:+.1f}%"
+                            else:
+                                variacao_texto = "N/A"
+
+                            dados_grafico.append({
+                                'instituicao': instituicao,
+                                'valor_ini': v_ini,
+                                'valor_sub': v_sub,
+                                'delta': v_sub - v_ini,
+                                'delta_texto': delta_texto,
+                                'variacao_texto': variacao_texto
+                            })
+
+                if not dados_grafico:
+                    st.info(f"sem dados disponíveis para '{variavel}' nos períodos selecionados")
+                    continue
+
+                # Ordena por valor do período subsequente (maior para menor)
+                dados_grafico = sorted(dados_grafico, key=lambda x: x['valor_sub'], reverse=True)
+
+                # Cria o gráfico estilo lollipop
+                fig_delta = go.Figure()
+
+                for i, dado in enumerate(dados_grafico):
+                    inst = dado['instituicao']
+                    y_ini = dado['valor_ini'] * format_info['multiplicador']
+                    y_sub = dado['valor_sub'] * format_info['multiplicador']
+                    delta_positivo = dado['delta'] > 0
+
+                    # Cor da bolinha do período subsequente
+                    cor_sub = '#2E7D32' if delta_positivo else '#C62828'  # verde ou vermelho
+
+                    # Linha conectando os dois pontos
+                    fig_delta.add_trace(go.Scatter(
+                        x=[inst, inst],
+                        y=[y_ini, y_sub],
+                        mode='lines',
+                        line=dict(color='#9E9E9E', width=2),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+
+                    # Bolinha do período inicial (preta/cinza escuro)
+                    fig_delta.add_trace(go.Scatter(
+                        x=[inst],
+                        y=[y_ini],
+                        mode='markers',
+                        marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
+                        name=periodo_inicial_delta if i == 0 else None,
+                        showlegend=(i == 0),
+                        legendgroup='inicial',
+                        hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                    ))
+
+                    # Bolinha do período subsequente (verde/vermelho)
+                    fig_delta.add_trace(go.Scatter(
+                        x=[inst],
+                        y=[y_sub],
+                        mode='markers',
+                        marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
+                        name=periodo_subsequente_delta if i == 0 else None,
+                        showlegend=(i == 0),
+                        legendgroup='subsequente',
+                        customdata=[[dado['delta_texto'], dado['variacao_texto']]],
+                        hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<extra></extra>'
+                    ))
+
+                # Título do gráfico
+                titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
+
+                fig_delta.update_layout(
+                    title=dict(
+                        text=titulo_delta,
+                        font=dict(size=16, family='IBM Plex Sans')
+                    ),
+                    height=max(400, len(dados_grafico) * 25 + 150),
+                    plot_bgcolor='#f8f9fa',
+                    paper_bgcolor='white',
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="left",
+                        x=0
+                    ),
+                    xaxis=dict(
+                        showgrid=False,
+                        tickangle=45 if len(dados_grafico) > 10 else 0,
+                        tickfont=dict(size=10)
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridcolor='#e0e0e0',
+                        tickformat=format_info['tickformat'],
+                        ticksuffix=format_info['ticksuffix'],
+                        title=variavel
+                    ),
+                    font=dict(family='IBM Plex Sans'),
+                    margin=dict(l=60, r=20, t=80, b=100)
+                )
+
+                st.markdown(f"### {variavel}")
+
+                # Cria colunas para gráfico e lista de ocultar
+                col_grafico, col_ocultar = st.columns([5, 1])
+
+                with col_grafico:
+                    st.plotly_chart(fig_delta, use_container_width=True, config={'displayModeBar': False})
+
+                with col_ocultar:
+                    st.markdown("**ocultar:**")
+                    for dado in dados_grafico:
+                        inst = dado['instituicao']
+                        if st.button(f"❌ {inst[:10]}...", key=f"ocultar_{variavel}_{inst}", help=f"Ocultar {inst}"):
+                            st.session_state['bancos_ocultos_delta'].add(inst)
+                            st.rerun()
+
+                # Tabela resumo
+                with st.expander("ver dados"):
+                    df_resumo = pd.DataFrame(dados_grafico)
+                    df_resumo = df_resumo.rename(columns={
+                        'instituicao': 'Instituição',
+                        'valor_ini': periodo_inicial_delta,
+                        'valor_sub': periodo_subsequente_delta,
+                        'delta_texto': 'Delta',
+                        'variacao_texto': 'Variação %'
+                    })
+                    df_resumo = df_resumo[['Instituição', periodo_inicial_delta, periodo_subsequente_delta, 'Delta', 'Variação %']]
+
+                    # Formata valores para exibição
+                    df_display = df_resumo.copy()
+                    df_display[periodo_inicial_delta] = df_display[periodo_inicial_delta].apply(lambda x: formatar_valor(x, variavel))
+                    df_display[periodo_subsequente_delta] = df_display[periodo_subsequente_delta].apply(lambda x: formatar_valor(x, variavel))
+
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+                    # Botão de exportar Excel
+                    buffer_excel = BytesIO()
+                    with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                        df_resumo.to_excel(writer, index=False, sheet_name='deltas')
+                    buffer_excel.seek(0)
+
+                    nome_variavel = variavel.replace(' ', '_').replace('/', '_')
+                    st.download_button(
+                        label="Exportar Excel",
+                        data=buffer_excel,
+                        file_name=f"Deltas_{nome_variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"exportar_excel_delta_{nome_variavel}"
+                    )
+
+        elif not periodo_valido:
+            pass  # Já exibiu warning acima
+        elif not variaveis_selecionadas_delta:
+            st.info("selecione ao menos uma variável para análise")
+        else:
+            st.info("selecione instituições para comparar")
+
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
