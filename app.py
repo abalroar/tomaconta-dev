@@ -384,21 +384,21 @@ def upload_cache_github(gh_token=None):
                 return False, f"release '{tag}' não encontrada no github"
 
             release_data = r.json()
-            release_id = release_data['id']
             upload_url = release_data['upload_url'].replace('{?name,label}', '')
 
-            # Deletar asset antigo se existir
+            # Deletar assets antigos se existirem
             for asset in release_data.get('assets', []):
-                if asset['name'] == 'dados_cache.pkl':
+                if asset['name'] in ['dados_cache.pkl', 'cache_info.txt']:
                     delete_url = f"https://api.github.com/repos/{repo}/releases/assets/{asset['id']}"
                     requests.delete(delete_url, headers=headers, timeout=30)
 
-            # Upload novo asset
+            upload_headers = {
+                'Authorization': f'token {gh_token}',
+                'Content-Type': 'application/octet-stream'
+            }
+
+            # Upload do cache principal
             with open(cache_path, 'rb') as f:
-                upload_headers = {
-                    'Authorization': f'token {gh_token}',
-                    'Content-Type': 'application/octet-stream'
-                }
                 r = requests.post(
                     f"{upload_url}?name=dados_cache.pkl",
                     headers=upload_headers,
@@ -406,7 +406,19 @@ def upload_cache_github(gh_token=None):
                     timeout=300
                 )
                 if r.status_code not in [200, 201]:
-                    return False, f"erro ao fazer upload: {r.status_code}"
+                    return False, f"erro ao fazer upload do cache: {r.status_code}"
+
+            # Upload do cache_info.txt se existir
+            if cache_info_path.exists():
+                with open(cache_info_path, 'rb') as f:
+                    r = requests.post(
+                        f"{upload_url}?name=cache_info.txt",
+                        headers=upload_headers,
+                        data=f,
+                        timeout=30
+                    )
+                    if r.status_code not in [200, 201]:
+                        return False, f"erro ao fazer upload do cache_info: {r.status_code}"
 
             return True, "cache enviado para github releases com sucesso!"
 
@@ -942,20 +954,20 @@ with st.sidebar:
         fonte = st.session_state.get('cache_fonte', 'desconhecida')
 
         if cache_info['existe']:
-            st.caption(f"📁 **caminho:** `{cache_info['caminho']}`")
-            st.caption(f"📅 **modificado:** {cache_info['data_formatada']}")
-            st.caption(f"📦 **tamanho:** {cache_info['tamanho_formatado']}")
-            st.caption(f"🔗 **fonte:** {fonte}")
+            st.caption(f"**caminho:** `{cache_info['caminho']}`")
+            st.caption(f"**modificado:** {cache_info['data_formatada']}")
+            st.caption(f"**tamanho:** {cache_info['tamanho_formatado']}")
+            st.caption(f"**fonte:** {fonte}")
 
             # Mostrar info do cache_info.txt se existir
             info_cache = ler_info_cache()
             if info_cache:
-                st.caption(f"ℹ️ {info_cache.replace(chr(10), ' • ')}")
+                st.caption(f"{info_cache.replace(chr(10), ' | ')}")
         else:
             st.warning("cache não encontrado no disco")
 
         # Botão para forçar recarregamento do cache local
-        if st.button("🔄 recarregar cache do disco", use_container_width=True):
+        if st.button("recarregar cache do disco", use_container_width=True):
             if forcar_recarregar_cache():
                 st.success("cache recarregado do disco com sucesso!")
                 st.rerun()
@@ -977,7 +989,7 @@ with st.sidebar:
                 mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
 
             if 'dict_aliases' in st.session_state:
-                if st.button("🚀 extrair dados do BCB", type="primary", use_container_width=True):
+                if st.button("extrair dados do BCB", type="primary", use_container_width=True):
                     periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
                     progress_bar = st.progress(0)
                     status = st.empty()
@@ -997,9 +1009,9 @@ with st.sidebar:
 
                     progress_bar.empty()
                     status.empty()
-                    st.success(f"✅ {len(dados)} períodos extraídos e salvos!")
-                    st.info(f"📁 cache salvo em: {cache_salvo['caminho']}")
-                    st.info(f"📦 tamanho: {cache_salvo['tamanho_formatado']}")
+                    st.success(f"{len(dados)} períodos extraídos e salvos!")
+                    st.info(f"cache salvo em: {cache_salvo['caminho']}")
+                    st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
                     st.rerun()
 
                 st.markdown("---")
@@ -1009,13 +1021,13 @@ with st.sidebar:
                 gh_token = st.text_input("github token (opcional)", type="password", key="gh_token",
                                         help="token com permissão 'repo'. deixe em branco se gh CLI estiver autenticado")
 
-                if st.button("☁️ enviar cache para github", use_container_width=True):
+                if st.button("enviar cache para github", use_container_width=True):
                     with st.spinner("enviando cache para github releases..."):
                         sucesso, mensagem = upload_cache_github(gh_token if gh_token else None)
                         if sucesso:
-                            st.success(f"✅ {mensagem}")
+                            st.success(mensagem)
                         else:
-                            st.error(f"❌ {mensagem}")
+                            st.error(mensagem)
             else:
                 st.warning("carregue os aliases primeiro")
         elif senha_input:
