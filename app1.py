@@ -310,18 +310,16 @@ def forcar_recarregar_cache():
     """Força o recarregamento do cache do disco, ignorando session_state."""
     dados = carregar_cache()
     if dados:
-        if 'dict_aliases_norm' in st.session_state:
+        if 'dict_aliases' in st.session_state:
             mapa_codigos = None
-            if precisa_mapear_codigos(dados):
-                periodos_disponiveis = sorted(dados.keys())
-                if periodos_disponiveis:
-                    mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
+            periodos_disponiveis = sorted(dados.keys())
+            if periodos_disponiveis:
+                mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
             dados = aplicar_aliases_em_periodos(
                 dados,
-                st.session_state['dict_aliases_norm'],
+                st.session_state['dict_aliases'],
                 mapa_codigos=mapa_codigos,
             )
-            st.session_state['aliases_aplicados'] = True
         st.session_state['dados_periodos'] = dados
         st.session_state['cache_fonte'] = 'local (recarregado)'
         return True
@@ -452,40 +450,7 @@ def normalizar_nome_instituicao(nome):
         return ""
     return " ".join(str(nome).split()).upper()
 
-def construir_dict_aliases_normalizado(df_aliases):
-    if df_aliases is None or df_aliases.empty:
-        return {}
-    dict_aliases = {}
-    for _, row in df_aliases.iterrows():
-        instituicao = row.get('Instituição')
-        alias = row.get('Alias Banco')
-        if pd.notna(instituicao) and pd.notna(alias):
-            dict_aliases[normalizar_nome_instituicao(instituicao)] = alias
-    return dict_aliases
-
-def parece_codigo_instituicao(valor):
-    if pd.isna(valor):
-        return False
-    valor_str = str(valor).strip().upper()
-    return bool(re.match(r"^C?\d+$", valor_str))
-
-def precisa_mapear_codigos(dados_periodos, amostra_limite=200):
-    total = 0
-    codigos = 0
-    for df in dados_periodos.values():
-        if 'Instituição' not in df.columns:
-            continue
-        for valor in df['Instituição'].dropna().head(amostra_limite).tolist():
-            total += 1
-            if parece_codigo_instituicao(valor):
-                codigos += 1
-            if total >= amostra_limite:
-                break
-        if total >= amostra_limite:
-            break
-    return total > 0 and (codigos / total) >= 0.5
-
-def aplicar_aliases_em_periodos(dados_periodos, dict_aliases_norm, mapa_codigos=None):
+def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None):
     if not dados_periodos:
         return dados_periodos
     dados_corrigidos = {}
@@ -497,17 +462,15 @@ def aplicar_aliases_em_periodos(dados_periodos, dict_aliases_norm, mapa_codigos=
 
         df_corrigido = df.copy()
 
-        def resolver_nome(nome):
-            if pd.isna(nome):
-                return nome
-            nome_str = str(nome).strip()
-            chave_codigo = nome_str.upper()
-            if mapa_codigos and chave_codigo in mapa_codigos:
-                nome_str = mapa_codigos[chave_codigo]
-            chave_alias = normalizar_nome_instituicao(nome_str)
-            return dict_aliases_norm.get(chave_alias, nome_str)
+        if mapa_codigos:
+            df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(
+                lambda nome: mapa_codigos.get(str(nome).strip(), nome) if pd.notna(nome) else nome
+            )
 
-        df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(resolver_nome)
+        df_corrigido['Instituição'] = df_corrigido['Instituição'].apply(
+            lambda nome: dict_aliases.get(nome, nome) if pd.notna(nome) else nome
+        )
+
         dados_corrigidos[periodo] = df_corrigido
 
     return dados_corrigidos
@@ -920,18 +883,16 @@ if 'dados_periodos' not in st.session_state:
     sucesso, fonte = baixar_cache_inicial()
     dados_cache = carregar_cache()
     if dados_cache:
-        if 'dict_aliases_norm' in st.session_state:
+        if 'dict_aliases' in st.session_state:
             mapa_codigos = None
-            if precisa_mapear_codigos(dados_cache):
-                periodos_disponiveis = sorted(dados_cache.keys())
-                if periodos_disponiveis:
-                    mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
+            periodos_disponiveis = sorted(dados_cache.keys())
+            if periodos_disponiveis:
+                mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
             dados_cache = aplicar_aliases_em_periodos(
                 dados_cache,
-                st.session_state['dict_aliases_norm'],
+                st.session_state['dict_aliases'],
                 mapa_codigos=mapa_codigos,
             )
-            st.session_state['aliases_aplicados'] = True
         st.session_state['dados_periodos'] = dados_cache
         if 'cache_fonte' not in st.session_state:
             st.session_state['cache_fonte'] = fonte
