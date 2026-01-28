@@ -1938,12 +1938,32 @@ elif menu == "Infos de Capital":
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
         df_capital = pd.concat(st.session_state['dados_capital'].values(), ignore_index=True)
 
-        # Verificar colunas necessárias para Índice de Basileia
-        colunas_basileia = ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
-        colunas_faltantes = [col for col in colunas_basileia if col not in df_capital.columns]
+        # Mapeamento flexível de colunas (nome esperado -> alternativas)
+        mapa_colunas_capital = {
+            'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
+            'Capital Complementar': ['Capital Complementar', 'Capital Complementar (b)'],
+            'Capital Nível II': ['Capital Nível II', 'Capital Nível II (d)'],
+            'RWA Total': ['RWA Total', 'Ativos Ponderados pelo Risco (RWA) (j)', 'RWA']
+        }
+
+        # Encontrar colunas disponíveis
+        colunas_encontradas = {}
+        colunas_faltantes = []
+        for nome_padrao, alternativas in mapa_colunas_capital.items():
+            encontrada = None
+            for alt in alternativas:
+                if alt in df_capital.columns:
+                    encontrada = alt
+                    break
+            if encontrada:
+                colunas_encontradas[nome_padrao] = encontrada
+            else:
+                colunas_faltantes.append(nome_padrao)
 
         if colunas_faltantes:
             st.warning(f"Colunas necessárias ausentes no cache de capital: {', '.join(colunas_faltantes)}")
+            with st.expander("Colunas disponíveis no cache"):
+                st.write(sorted([c for c in df_capital.columns if c not in ['Instituição', 'CodInst', 'Período']]))
         else:
             periodos_capital = ordenar_periodos(df_capital['Período'].dropna().unique(), reverso=True)
 
@@ -1969,6 +1989,12 @@ elif menu == "Infos de Capital":
                 # Filtrar dados do período
                 df_periodo_cap = df_capital[df_capital['Período'] == periodo_capital].copy()
 
+                # Usar colunas mapeadas
+                col_capital_principal = colunas_encontradas['Capital Principal']
+                col_capital_complementar = colunas_encontradas['Capital Complementar']
+                col_capital_nivel2 = colunas_encontradas['Capital Nível II']
+                col_rwa_total = colunas_encontradas['RWA Total']
+
                 # Calcular CET1, AT1, T2 como percentuais do RWA Total
                 # CET1 = Capital Principal / RWA Total * 100
                 # AT1 = Capital Complementar / RWA Total * 100
@@ -1976,23 +2002,23 @@ elif menu == "Infos de Capital":
 
                 # Tratar RWA Total zero ou ausente
                 df_periodo_cap['RWA_valido'] = (
-                    df_periodo_cap['RWA Total'].notna() &
-                    (df_periodo_cap['RWA Total'] != 0)
+                    df_periodo_cap[col_rwa_total].notna() &
+                    (df_periodo_cap[col_rwa_total] != 0)
                 )
 
                 df_periodo_cap['CET1 (%)'] = np.where(
                     df_periodo_cap['RWA_valido'],
-                    (df_periodo_cap['Capital Principal'] / df_periodo_cap['RWA Total']) * 100,
+                    (df_periodo_cap[col_capital_principal] / df_periodo_cap[col_rwa_total]) * 100,
                     np.nan
                 )
                 df_periodo_cap['AT1 (%)'] = np.where(
                     df_periodo_cap['RWA_valido'],
-                    (df_periodo_cap['Capital Complementar'] / df_periodo_cap['RWA Total']) * 100,
+                    (df_periodo_cap[col_capital_complementar] / df_periodo_cap[col_rwa_total]) * 100,
                     np.nan
                 )
                 df_periodo_cap['T2 (%)'] = np.where(
                     df_periodo_cap['RWA_valido'],
-                    (df_periodo_cap['Capital Nível II'] / df_periodo_cap['RWA Total']) * 100,
+                    (df_periodo_cap[col_capital_nivel2] / df_periodo_cap[col_rwa_total]) * 100,
                     np.nan
                 )
 
