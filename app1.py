@@ -244,7 +244,7 @@ VARS_PERCENTUAL = [
     'ROE An. (%)',
     'Índice de Basileia',
     'Crédito/Captações (%)',
-    'Carteira/Ativo (%)',
+    'Crédito/Ativo (%)',
     'Market Share Carteira',
     'Índice de Imobilização',
 ]
@@ -348,6 +348,82 @@ def carregar_cache():
             return pickle.load(f)
     return None
 
+def recalcular_metricas_derivadas(dados_periodos):
+    """Recalcula métricas derivadas para dados carregados do cache.
+
+    Garante que métricas como Crédito/PL, Crédito/Ativo (%), etc. existam
+    mesmo em caches antigos que foram criados antes dessas métricas serem adicionadas.
+    """
+    if not dados_periodos:
+        return dados_periodos
+
+    dados_atualizados = {}
+    for periodo, df in dados_periodos.items():
+        df_atualizado = df.copy()
+
+        # Extrair mês do período para cálculo do fator de anualização
+        try:
+            if 'Período' in df_atualizado.columns:
+                periodo_str = df_atualizado['Período'].iloc[0] if len(df_atualizado) > 0 else None
+                if periodo_str and '/' in str(periodo_str):
+                    mes = int(str(periodo_str).split('/')[0])
+                else:
+                    mes = int(periodo[4:6]) if len(periodo) >= 6 else 12
+            else:
+                mes = int(periodo[4:6]) if len(periodo) >= 6 else 12
+        except (ValueError, IndexError):
+            mes = 12
+
+        # ROE Anualizado
+        if "ROE An. (%)" not in df_atualizado.columns:
+            if "Lucro Líquido" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
+                if mes == 3:
+                    fator = 4
+                elif mes == 6:
+                    fator = 2
+                elif mes == 9:
+                    fator = 12 / 9
+                elif mes == 12:
+                    fator = 1
+                else:
+                    fator = 12 / mes
+                df_atualizado["ROE An. (%)"] = (
+                    (fator * df_atualizado["Lucro Líquido"].fillna(0)) /
+                    df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
+                )
+
+        # Crédito/PL
+        if "Crédito/PL" not in df_atualizado.columns:
+            if "Carteira de Crédito" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
+                df_atualizado["Crédito/PL"] = (
+                    df_atualizado["Carteira de Crédito"].fillna(0) /
+                    df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
+                )
+
+        # Crédito/Captações
+        if "Crédito/Captações (%)" not in df_atualizado.columns:
+            if "Carteira de Crédito" in df_atualizado.columns and "Captações" in df_atualizado.columns:
+                df_atualizado["Crédito/Captações (%)"] = (
+                    df_atualizado["Carteira de Crédito"].fillna(0) /
+                    df_atualizado["Captações"].replace(0, np.nan)
+                )
+
+        # Crédito/Ativo (%) - anteriormente chamado Carteira/Ativo (%)
+        if "Crédito/Ativo (%)" not in df_atualizado.columns:
+            if "Carteira de Crédito" in df_atualizado.columns and "Ativo Total" in df_atualizado.columns:
+                df_atualizado["Crédito/Ativo (%)"] = (
+                    df_atualizado["Carteira de Crédito"].fillna(0) /
+                    df_atualizado["Ativo Total"].replace(0, np.nan)
+                )
+
+        # Migrar nome antigo Carteira/Ativo (%) para Crédito/Ativo (%) se existir
+        if "Carteira/Ativo (%)" in df_atualizado.columns and "Crédito/Ativo (%)" not in df_atualizado.columns:
+            df_atualizado["Crédito/Ativo (%)"] = df_atualizado["Carteira/Ativo (%)"]
+
+        dados_atualizados[periodo] = df_atualizado
+
+    return dados_atualizados
+
 def ler_info_cache():
     if os.path.exists(CACHE_INFO):
         with open(CACHE_INFO, 'r') as f:
@@ -358,6 +434,7 @@ def forcar_recarregar_cache():
     """Força o recarregamento do cache do disco, ignorando session_state."""
     dados = carregar_cache()
     if dados:
+        dados = recalcular_metricas_derivadas(dados)
         if 'dict_aliases' in st.session_state:
             mapa_codigos = None
             periodos_disponiveis = sorted(dados.keys())
@@ -966,6 +1043,7 @@ if 'dados_periodos' not in st.session_state:
     sucesso, fonte = baixar_cache_inicial()
     dados_cache = carregar_cache()
     if dados_cache:
+        dados_cache = recalcular_metricas_derivadas(dados_cache)
         if 'dict_aliases' in st.session_state:
             mapa_codigos = None
             periodos_disponiveis = sorted(dados_cache.keys())
@@ -1868,7 +1946,7 @@ elif menu == "Análise Individual":
                         'Captações',
                         'Patrimônio Líquido',
                         'Carteira de Crédito',
-                        'Carteira/Ativo (%)',
+                        'Crédito/Ativo (%)',
                         'Crédito/PL',
                         'Crédito/Captações (%)',
                         'Market Share Carteira',
@@ -1955,7 +2033,7 @@ elif menu == "Série Histórica":
                         'Captações',
                         'Patrimônio Líquido',
                         'Carteira de Crédito',
-                        'Carteira/Ativo (%)',
+                        'Crédito/Ativo (%)',
                         'Índice de Basileia',
                         'Crédito/PL',
                         'Crédito/Captações (%)',
@@ -2342,7 +2420,7 @@ elif menu == "Deltas":
             'Captações',
             'Patrimônio Líquido',
             'Carteira de Crédito',
-            'Carteira/Ativo (%)',
+            'Crédito/Ativo (%)',
             'Índice de Basileia',
             'Crédito/PL',
             'Crédito/Captações (%)',
