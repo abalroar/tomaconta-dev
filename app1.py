@@ -1187,21 +1187,14 @@ if 'dados_periodos' not in st.session_state:
         dados_cache = recalcular_metricas_derivadas(dados_cache)
         print(_perf_log("recalc_metricas"))
         if 'dict_aliases' in st.session_state:
-            # OTIMIZAÇÃO: Construir mapa de códigos apenas se necessário
-            # (lazy load - salvar no session_state para reusar)
-            _perf_start("mapa_codigos")
-            mapa_codigos = st.session_state.get('mapa_codigos_cache')
-            if mapa_codigos is None:
-                periodos_disponiveis = sorted(dados_cache.keys())
-                if periodos_disponiveis:
-                    mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
-                    st.session_state['mapa_codigos_cache'] = mapa_codigos
-            print(_perf_log("mapa_codigos"))
+            # OTIMIZAÇÃO: NÃO chamar construir_mapa_codinst() aqui
+            # O mapa de códigos só é necessário se os dados tiverem códigos
+            # numéricos ao invés de nomes. O cache já tem nomes válidos.
             _perf_start("aplicar_aliases")
             dados_cache = aplicar_aliases_em_periodos(
                 dados_cache,
                 st.session_state['dict_aliases'],
-                mapa_codigos=mapa_codigos,
+                mapa_codigos=None,  # Evita chamada HTTP à API Olinda
             )
             print(_perf_log("aplicar_aliases"))
         st.session_state['dados_periodos'] = dados_cache
@@ -1214,18 +1207,12 @@ if 'dados_capital' not in st.session_state:
     _perf_start("init_dados_capital")
     dados_capital = carregar_cache_capital()
     if dados_capital:
-        # Aplicar aliases ao cache de capital (reusar mapa de códigos já cacheado)
+        # Aplicar aliases ao cache de capital (sem mapa de códigos)
         if 'dict_aliases' in st.session_state:
-            mapa_codigos = st.session_state.get('mapa_codigos_cache')
-            if mapa_codigos is None:
-                periodos_capital = sorted(dados_capital.keys())
-                if periodos_capital:
-                    mapa_codigos = construir_mapa_codinst(periodos_capital[-1])
-                    st.session_state['mapa_codigos_cache'] = mapa_codigos
             dados_capital = aplicar_aliases_em_periodos(
                 dados_capital,
                 st.session_state['dict_aliases'],
-                mapa_codigos=mapa_codigos,
+                mapa_codigos=None,  # Evita chamada HTTP à API Olinda
             )
         st.session_state['dados_capital'] = dados_capital
     print(_perf_log("init_dados_capital"))
