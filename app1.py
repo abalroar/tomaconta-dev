@@ -272,17 +272,21 @@ CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-c
 SENHA_ADMIN = "m4th3u$987"
 
 VARS_PERCENTUAL = [
-    'ROE An. (%)',
+    'ROE Ac. YTD an. (%)',
     'Índice de Basileia',
     'Crédito/Captações (%)',
     'Crédito/Ativo (%)',
     'Market Share Carteira',
     'Índice de Imobilização',
+    # Variáveis de Capital (Relatório 5)
+    'Índice de Capital Principal',
+    'Índice de Capital Nível I',
+    'Razão de Alavancagem',
 ]
-VARS_RAZAO = ['Crédito/PL']
+VARS_RAZAO = ['Crédito/PL (%)']
 VARS_MOEDAS = [
     'Carteira de Crédito',
-    'Lucro Líquido',
+    'Lucro Líquido Acumulado YTD',
     'Patrimônio Líquido',
     'Captações',
     'Ativo Total',
@@ -290,6 +294,16 @@ VARS_MOEDAS = [
     'Passivo Exigível',
     'Patrimônio de Referência',
     'Patrimônio de Referência para Comparação com o RWA (e)',
+    # Variáveis de Capital (Relatório 5)
+    'Capital Principal',
+    'Capital Complementar',
+    'Capital Nível II',
+    'RWA Total',
+    'RWA Crédito',
+    'RWA Mercado',
+    'RWA Operacional',
+    'Exposição Total',
+    'Adicional de Capital Principal',
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
@@ -453,7 +467,7 @@ def carregar_cache():
 def recalcular_metricas_derivadas(dados_periodos):
     """Recalcula métricas derivadas para dados carregados do cache.
 
-    Garante que métricas como Crédito/PL, Crédito/Ativo (%), etc. existam
+    Garante que métricas como Crédito/PL (%), Crédito/Ativo (%), etc. existam
     mesmo em caches antigos que foram criados antes dessas métricas serem adicionadas.
     """
     if not dados_periodos:
@@ -477,8 +491,8 @@ def recalcular_metricas_derivadas(dados_periodos):
             mes = 12
 
         # ROE Anualizado
-        if "ROE An. (%)" not in df_atualizado.columns:
-            if "Lucro Líquido" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
+        if "ROE Ac. YTD an. (%)" not in df_atualizado.columns:
+            if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
                 if mes == 3:
                     fator = 4
                 elif mes == 6:
@@ -489,15 +503,15 @@ def recalcular_metricas_derivadas(dados_periodos):
                     fator = 1
                 else:
                     fator = 12 / mes
-                df_atualizado["ROE An. (%)"] = (
-                    (fator * df_atualizado["Lucro Líquido"].fillna(0)) /
+                df_atualizado["ROE Ac. YTD an. (%)"] = (
+                    (fator * df_atualizado["Lucro Líquido Acumulado YTD"].fillna(0)) /
                     df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
                 )
 
         # Crédito/PL
-        if "Crédito/PL" not in df_atualizado.columns:
+        if "Crédito/PL (%)" not in df_atualizado.columns:
             if "Carteira de Crédito" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
-                df_atualizado["Crédito/PL"] = (
+                df_atualizado["Crédito/PL (%)"] = (
                     df_atualizado["Carteira de Crédito"].fillna(0) /
                     df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
                 )
@@ -525,6 +539,82 @@ def recalcular_metricas_derivadas(dados_periodos):
         dados_atualizados[periodo] = df_atualizado
 
     return dados_atualizados
+
+# Variáveis de capital que serão mescladas com os dados principais
+VARS_CAPITAL_MERGE = [
+    'Capital Principal',
+    'Capital Complementar',
+    'Capital Nível II',
+    'RWA Total',
+    'RWA Crédito',
+    'RWA Mercado',
+    'RWA Operacional',
+    'Exposição Total',
+    'Índice de Capital Principal',
+    'Índice de Capital Nível I',
+    'Razão de Alavancagem',
+    'Adicional de Capital Principal',
+]
+
+def mesclar_dados_capital(dados_periodos, dados_capital):
+    """Mescla dados de capital (Relatório 5) com os dados principais.
+
+    Permite que as variáveis de capital estejam disponíveis nas abas
+    Resumo, Análise Individual, Série Histórica, Scatter Plot, Deltas e Brincar.
+    """
+    if not dados_periodos or not dados_capital:
+        return dados_periodos
+
+    dados_mesclados = {}
+
+    for periodo, df_principal in dados_periodos.items():
+        df_merged = df_principal.copy()
+
+        # Encontrar período correspondente no cache de capital
+        # O formato pode ser diferente, então precisamos normalizar
+        if periodo in dados_capital:
+            df_capital = dados_capital[periodo]
+        else:
+            # Tentar formatos alternativos (ex: "03/2024" vs "202403")
+            periodo_alt = None
+            for p in dados_capital.keys():
+                # Normalizar ambos para comparação
+                p_norm = p.replace('/', '')
+                periodo_norm = periodo.replace('/', '')
+                if p_norm == periodo_norm or p == periodo:
+                    periodo_alt = p
+                    break
+            if periodo_alt:
+                df_capital = dados_capital[periodo_alt]
+            else:
+                dados_mesclados[periodo] = df_merged
+                continue
+
+        # Fazer merge por nome da instituição
+        if 'Instituição' in df_capital.columns:
+            # Selecionar apenas as colunas de capital que queremos mesclar
+            colunas_para_merge = ['Instituição'] + [c for c in VARS_CAPITAL_MERGE if c in df_capital.columns]
+
+            if len(colunas_para_merge) > 1:  # Tem pelo menos uma variável de capital
+                df_capital_subset = df_capital[colunas_para_merge].drop_duplicates(subset=['Instituição'])
+
+                # Fazer merge preservando os dados principais
+                df_merged = df_merged.merge(
+                    df_capital_subset,
+                    on='Instituição',
+                    how='left',
+                    suffixes=('', '_capital')
+                )
+
+                # Se houver colunas duplicadas, manter a versão do capital (mais atualizada/específica)
+                for col in VARS_CAPITAL_MERGE:
+                    if f'{col}_capital' in df_merged.columns:
+                        df_merged[col] = df_merged[f'{col}_capital']
+                        df_merged = df_merged.drop(columns=[f'{col}_capital'])
+
+        dados_mesclados[periodo] = df_merged
+
+    return dados_mesclados
 
 def ler_info_cache():
     if os.path.exists(CACHE_INFO):
@@ -1198,9 +1288,9 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
 
     metricas_principais = [
         ('Carteira de Crédito', 'Carteira de Crédito'),
-        ('ROE Anualizado', 'ROE An. (%)'),
+        ('ROE Anualizado', 'ROE Ac. YTD an. (%)'),
         ('Índice de Basileia', 'Índice de Basileia'),
-        ('Crédito/PL', 'Crédito/PL'),
+        ('Crédito/PL', 'Crédito/PL (%)'),
     ]
 
     metricas_data = []
@@ -1289,7 +1379,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         row_images = []
         for var in graficos_linha:
             try:
-                use_bar = (var == 'Lucro Líquido')
+                use_bar = (var == 'Lucro Líquido Acumulado YTD')
                 fig = criar_figura_grafico(df_sorted, var, var, use_bar=use_bar)
                 img_buffer = io.BytesIO()
                 fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=200)
@@ -1380,6 +1470,17 @@ if 'dados_capital' not in st.session_state:
             )
         st.session_state['dados_capital'] = dados_capital
     print(_perf_log("init_dados_capital"))
+
+# Mesclar dados de capital com dados principais para disponibilizar nas abas
+if 'dados_periodos' in st.session_state and 'dados_capital' in st.session_state:
+    if not st.session_state.get('_dados_capital_mesclados', False):
+        _perf_start("mesclar_capital")
+        st.session_state['dados_periodos'] = mesclar_dados_capital(
+            st.session_state['dados_periodos'],
+            st.session_state['dados_capital']
+        )
+        st.session_state['_dados_capital_mesclados'] = True
+        print(_perf_log("mesclar_capital"))
 
 print(_perf_log("init_total"))
 
@@ -1779,7 +1880,7 @@ elif menu == "Resumo":
             'Passivo Exigível': ['Passivo Exigível'],
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
-            'Lucro Líquido': ['Lucro Líquido'],
+            'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
             'Patrimônio de Referência': [
                 'Patrimônio de Referência para Comparação com o RWA (e)',
                 'Patrimônio de Referência',
@@ -1788,6 +1889,12 @@ elif menu == "Resumo":
             'Índice de Imobilização': ['Índice de Imobilização'],
             'Número de Agências': ['Número de Agências'],
             'Número de Postos de Atendimento': ['Número de Postos de Atendimento'],
+            # Variáveis de Capital (Relatório 5)
+            'RWA Total': ['RWA Total'],
+            'Capital Principal': ['Capital Principal'],
+            'Índice de Capital Principal': ['Índice de Capital Principal'],
+            'Índice de Capital Nível I': ['Índice de Capital Nível I'],
+            'Razão de Alavancagem': ['Razão de Alavancagem'],
         }
 
         indicadores_disponiveis = {}
@@ -2825,11 +2932,11 @@ elif menu == "Análise Individual":
                     with col1:
                         st.metric("carteira de crédito", formatar_valor(dados_periodo_final.get('Carteira de Crédito'), 'Carteira de Crédito'))
                     with col2:
-                        st.metric("roe anualizado", formatar_valor(dados_periodo_final.get('ROE An. (%)'), 'ROE An. (%)'))
+                        st.metric("roe ac. ytd an.", formatar_valor(dados_periodo_final.get('ROE Ac. YTD an. (%)'), 'ROE Ac. YTD an. (%)'))
                     with col3:
                         st.metric("índice de basileia", formatar_valor(dados_periodo_final.get('Índice de Basileia'), 'Índice de Basileia'))
                     with col4:
-                        st.metric("crédito/pl", formatar_valor(dados_periodo_final.get('Crédito/PL'), 'Crédito/PL'))
+                        st.metric("crédito/pl (%)", formatar_valor(dados_periodo_final.get('Crédito/PL (%)'), 'Crédito/PL (%)'))
 
                     st.markdown("---")
                     st.markdown("### evolução histórica das variáveis")
@@ -2840,11 +2947,17 @@ elif menu == "Análise Individual":
                         'Patrimônio Líquido',
                         'Carteira de Crédito',
                         'Crédito/Ativo (%)',
-                        'Crédito/PL',
+                        'Crédito/PL (%)',
                         'Crédito/Captações (%)',
                         'Market Share Carteira',
-                        'Lucro Líquido',
-                        'ROE An. (%)'
+                        'Lucro Líquido Acumulado YTD',
+                        'ROE Ac. YTD an. (%)',
+                        # Variáveis de Capital (Relatório 5)
+                        'RWA Total',
+                        'Capital Principal',
+                        'Índice de Capital Principal',
+                        'Índice de Capital Nível I',
+                        'Razão de Alavancagem',
                     ]
 
                     # Filtra apenas as variáveis que existem e têm dados
@@ -2856,8 +2969,8 @@ elif menu == "Análise Individual":
                             if i + j < len(variaveis):
                                 var = variaveis[i + j]
                                 with col_obj:
-                                    # Usa gráfico de barras para Lucro Líquido
-                                    tipo_grafico = 'barra' if var == 'Lucro Líquido' else 'linha'
+                                    # Usa gráfico de barras para Lucro Líquido Acumulado YTD
+                                    tipo_grafico = 'barra' if var == 'Lucro Líquido Acumulado YTD' else 'linha'
                                     fig = criar_mini_grafico(df_banco_filtrado, var, var, tipo=tipo_grafico)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
@@ -2928,17 +3041,23 @@ elif menu == "Série Histórica":
                         'Carteira de Crédito',
                         'Crédito/Ativo (%)',
                         'Índice de Basileia',
-                        'Crédito/PL',
+                        'Crédito/PL (%)',
                         'Crédito/Captações (%)',
                         'Market Share Carteira',
-                        'Lucro Líquido',
-                        'ROE An. (%)'
+                        'Lucro Líquido Acumulado YTD',
+                        'ROE Ac. YTD an. (%)',
+                        # Variáveis de Capital (Relatório 5)
+                        'RWA Total',
+                        'Capital Principal',
+                        'Índice de Capital Principal',
+                        'Índice de Capital Nível I',
+                        'Razão de Alavancagem',
                     ]
                     defaults_variaveis = [
                         'Carteira de Crédito',
                         'Patrimônio Líquido',
-                        'Lucro Líquido',
-                        'ROE An. (%)',
+                        'Lucro Líquido Acumulado YTD',
+                        'ROE Ac. YTD an. (%)',
                         'Índice de Basileia'
                     ]
                     defaults_variaveis = [v for v in defaults_variaveis if v in variaveis_disponiveis]
@@ -2990,8 +3109,8 @@ elif menu == "Série Histórica":
                         fig = go.Figure()
                         export_frames = []
                         periodos_filtrados_lucro = periodos_filtrados
-                        if variavel == 'Lucro Líquido':
-                            st.markdown("**período lucro líquido**")
+                        if variavel == 'Lucro Líquido Acumulado YTD':
+                            st.markdown("**período lucro líquido acumulado ytd**")
                             col_lucro_ini, col_lucro_fim = st.columns(2)
                             with col_lucro_ini:
                                 periodo_inicial_lucro = st.selectbox(
@@ -3019,7 +3138,7 @@ elif menu == "Série Histórica":
                                 continue
 
                             df_banco = df_banco[df_banco['Período'].isin(
-                                periodos_filtrados_lucro if variavel == 'Lucro Líquido' else periodos_filtrados
+                                periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else periodos_filtrados
                             )]
                             df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
                             df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
@@ -3028,7 +3147,7 @@ elif menu == "Série Histórica":
                             y_values = df_banco[variavel] * format_info['multiplicador']
                             cor_banco = obter_cor_banco(instituicao) or None
 
-                            if variavel == 'Lucro Líquido':
+                            if variavel == 'Lucro Líquido Acumulado YTD':
                                 fig.add_trace(go.Bar(
                                     x=df_banco['Período'],
                                     y=y_values,
@@ -3061,15 +3180,15 @@ elif menu == "Série Histórica":
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                             xaxis=dict(
                                 showgrid=False,
-                                tickmode='array' if variavel == 'Lucro Líquido' else None,
-                                tickvals=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None,
-                                ticktext=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None,
-                                categoryorder='array' if variavel == 'Lucro Líquido' else None,
-                                categoryarray=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None
+                                tickmode='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                tickvals=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                ticktext=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                categoryorder='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                categoryarray=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None
                             ),
                             yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat=format_info['tickformat'], ticksuffix=format_info['ticksuffix']),
                             font=dict(family='IBM Plex Sans'),
-                            barmode='group' if variavel == 'Lucro Líquido' else None
+                            barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else None
                         )
 
                         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
@@ -3146,7 +3265,7 @@ elif menu == "Scatter Plot":
         with col1:
             var_x = st.selectbox("eixo x", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
         with col2:
-            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
+            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1)
         with col3:
             opcoes_tamanho = ['Tamanho Fixo'] + colunas_numericas
             default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
@@ -3291,7 +3410,7 @@ elif menu == "Scatter Plot":
             var_y_n2 = st.selectbox(
                 "eixo y",
                 colunas_numericas,
-                index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1,
+                index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1,
                 key="var_y_n2"
             )
         with col_p3:
@@ -3573,11 +3692,17 @@ elif menu == "Deltas":
             'Carteira de Crédito',
             'Crédito/Ativo (%)',
             'Índice de Basileia',
-            'Crédito/PL',
+            'Crédito/PL (%)',
             'Crédito/Captações (%)',
             'Market Share Carteira',
-            'Lucro Líquido',
-            'ROE An. (%)'
+            'Lucro Líquido Acumulado YTD',
+            'ROE Ac. YTD an. (%)',
+            # Variáveis de Capital (Relatório 5)
+            'RWA Total',
+            'Capital Principal',
+            'Índice de Capital Principal',
+            'Índice de Capital Nível I',
+            'Razão de Alavancagem',
         ]
         variaveis_selecionadas_delta = st.multiselect(
             "selecionar variáveis",
