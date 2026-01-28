@@ -7,6 +7,27 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
+import time
+
+# === PERFORMANCE TIMER ===
+_perf_timers = {}
+
+def _perf_start(label: str):
+    """Inicia timer de performance para uma etapa."""
+    _perf_timers[label] = time.perf_counter()
+
+def _perf_end(label: str) -> float:
+    """Finaliza timer e retorna tempo em segundos."""
+    if label in _perf_timers:
+        elapsed = time.perf_counter() - _perf_timers[label]
+        del _perf_timers[label]
+        return elapsed
+    return 0.0
+
+def _perf_log(label: str) -> str:
+    """Finaliza timer e retorna mensagem formatada."""
+    elapsed = _perf_end(label)
+    return f"[PERF] {label}: {elapsed:.3f}s"
 from utils.ifdata_extractor import (
     gerar_periodos,
     processar_todos_periodos,
@@ -573,9 +594,15 @@ def upload_cache_github(gh_token=None):
 
     return False, "gh CLI não disponível e nenhum token fornecido"
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def carregar_aliases():
+    """Carrega aliases do Excel com cache de 1 hora."""
+    _perf_start("carregar_aliases")
     if os.path.exists(ALIASES_PATH):
-        return pd.read_excel(ALIASES_PATH)
+        df = pd.read_excel(ALIASES_PATH)
+        print(_perf_log("carregar_aliases"))
+        return df
+    print(_perf_log("carregar_aliases"))
     return None
 
 # FIX PROBLEMA 3: Normalização de nomes de instituições
@@ -585,19 +612,26 @@ def normalizar_nome_instituicao(nome):
         return ""
     return " ".join(str(nome).split()).upper()
 
-def construir_dict_aliases_normalizado(df_aliases):
+@st.cache_data(ttl=3600, show_spinner=False)
+def construir_dict_aliases_normalizado(_df_aliases_hash: str, df_aliases_data: tuple):
     """Constrói dicionário de aliases com nomes normalizados para lookup robusto.
 
+    Usa hash do dataframe para cache (evita recomputar a cada rerun).
     Mapeia tanto o nome original (Instituição) quanto variantes normalizadas
     para o alias amigável (Alias Banco).
     """
+    _perf_start("construir_dict_aliases")
     dict_norm = {}
-    if df_aliases is None or df_aliases.empty:
+    if not df_aliases_data:
+        print(_perf_log("construir_dict_aliases"))
         return dict_norm
 
-    for _, row in df_aliases.iterrows():
-        instituicao = row.get('Instituição')
-        alias = row.get('Alias Banco')
+    # Reconstruir DataFrame a partir da tupla (para cache funcionar)
+    instituicoes, aliases = df_aliases_data
+
+    for i in range(len(instituicoes)):
+        instituicao = instituicoes[i]
+        alias = aliases[i]
 
         if pd.notna(instituicao) and pd.notna(alias):
             # Mapeamento direto
@@ -608,7 +642,20 @@ def construir_dict_aliases_normalizado(df_aliases):
             nome_simples = instituicao.upper().strip()
             dict_norm[nome_simples] = alias
 
+    print(_perf_log("construir_dict_aliases"))
     return dict_norm
+
+
+def _preparar_aliases_para_cache(df_aliases):
+    """Prepara dados do DataFrame para funções cacheadas."""
+    if df_aliases is None or df_aliases.empty:
+        return "", ()
+    # Hash baseado no conteúdo
+    content_hash = str(hash(tuple(df_aliases['Instituição'].fillna('').tolist())))
+    # Dados como tupla (hashável)
+    instituicoes = tuple(df_aliases['Instituição'].tolist())
+    aliases = tuple(df_aliases['Alias Banco'].tolist())
+    return content_hash, (instituicoes, aliases)
 
 def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None):
     if not dados_periodos:
@@ -660,31 +707,27 @@ def normalizar_codigo_cor(cor_valor):
     return None
 
 # FIX PROBLEMA 3: Carregamento correto de cores com normalização
-def carregar_cores_aliases_local(df_aliases):
+@st.cache_data(ttl=3600, show_spinner=False)
+def carregar_cores_aliases_local(_df_hash: str, cores_data: tuple):
     """Lê a cor do Aliases.xlsx e cria um dicionário de cores.
 
+    Usa hash do dataframe para cache (evita recomputar a cada rerun).
     Importante: mapeia tanto o valor da coluna 'Instituição' (nome original vindo do BCB)
     quanto o valor da coluna 'Alias Banco' (nome amigável que aparece no app),
     para que a cor seja aplicada em qualquer tela.
     """
+    _perf_start("carregar_cores_aliases")
     dict_cores = {}
-    if df_aliases is None or df_aliases.empty:
+    if not cores_data:
+        print(_perf_log("carregar_cores_aliases"))
         return dict_cores
 
-    colunas_possiveis = ['Código Cor', 'Cor', 'Color', 'Hex', 'Código']
-    coluna_cor = None
-    for col in colunas_possiveis:
-        if col in df_aliases.columns:
-            coluna_cor = col
-            break
+    instituicoes, aliases, cores = cores_data
 
-    if coluna_cor is None:
-        return dict_cores
-
-    for _, row in df_aliases.iterrows():
-        instituicao = row.get('Instituição')
-        alias = row.get('Alias Banco')
-        cor_valor = row.get(coluna_cor)
+    for i in range(len(instituicoes)):
+        instituicao = instituicoes[i]
+        alias = aliases[i]
+        cor_valor = cores[i]
 
         cor_str = normalizar_codigo_cor(cor_valor)
         if not cor_str:
@@ -693,15 +736,40 @@ def carregar_cores_aliases_local(df_aliases):
         if pd.notna(instituicao):
             dict_cores[normalizar_nome_instituicao(instituicao)] = cor_str
             # Também aceita busca pelo 'Alias Banco' (útil quando a coluna Instituição já vem renomeada)
-            alias_banco = row.get('Alias Banco')
-            if pd.notna(alias_banco):
-                dict_cores[normalizar_nome_instituicao(alias_banco)] = cor_str
+            if pd.notna(alias):
+                dict_cores[normalizar_nome_instituicao(alias)] = cor_str
 
         # Também mapeia pelo alias (é o que aparece na UI)
         if pd.notna(alias):
             dict_cores[normalizar_nome_instituicao(alias)] = cor_str
 
+    print(_perf_log("carregar_cores_aliases"))
     return dict_cores
+
+
+def _preparar_cores_para_cache(df_aliases):
+    """Prepara dados de cores do DataFrame para função cacheada."""
+    if df_aliases is None or df_aliases.empty:
+        return "", ()
+
+    # Encontrar coluna de cor
+    colunas_possiveis = ['Código Cor', 'Cor', 'Color', 'Hex', 'Código']
+    coluna_cor = None
+    for col in colunas_possiveis:
+        if col in df_aliases.columns:
+            coluna_cor = col
+            break
+
+    if coluna_cor is None:
+        return "", ()
+
+    # Hash baseado no conteúdo
+    content_hash = str(hash(tuple(df_aliases['Instituição'].fillna('').tolist())))
+    # Dados como tupla (hashável)
+    instituicoes = tuple(df_aliases['Instituição'].tolist())
+    aliases = tuple(df_aliases['Alias Banco'].tolist())
+    cores = tuple(df_aliases[coluna_cor].tolist())
+    return content_hash, (instituicoes, aliases, cores)
 
 def baixar_cache_inicial():
     """Baixa o cache inicial do GitHub Releases se não existir localmente.
@@ -765,6 +833,59 @@ def get_axis_format(variavel):
         return {'tickformat': ',.0f', 'ticksuffix': '', 'multiplicador': 1}
     else:
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
+
+
+@st.cache_resource(show_spinner=False)
+def _carregar_logo_base64(logo_path: str, target_width: int = 200) -> str:
+    """Carrega e processa o logo uma única vez, retornando base64.
+
+    Usa cache_resource para manter em memória entre reruns.
+    """
+    _perf_start("carregar_logo")
+    if not os.path.exists(logo_path):
+        print(_perf_log("carregar_logo"))
+        return ""
+
+    logo_image = PILImage.open(logo_path)
+    if logo_image.width < target_width:
+        ratio = target_width / logo_image.width
+        new_height = int(logo_image.height * ratio)
+        logo_image = logo_image.resize((target_width, new_height), PILImage.LANCZOS)
+    buffer = BytesIO()
+    logo_image.save(buffer, format="PNG", optimize=True)
+    logo_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    print(_perf_log("carregar_logo"))
+    return logo_base64
+
+
+@st.cache_data(show_spinner=False)
+def _get_dados_concatenados(periodos_hash: str, dados_keys: tuple) -> pd.DataFrame:
+    """Concatena todos os DataFrames de períodos uma única vez.
+
+    Evita pd.concat() repetido em cada página/rerun.
+    Usa hash dos períodos para invalidar cache quando dados mudam.
+    """
+    _perf_start("concat_dados")
+    if 'dados_periodos' not in st.session_state:
+        print(_perf_log("concat_dados"))
+        return pd.DataFrame()
+
+    df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+    print(_perf_log("concat_dados"))
+    return df
+
+
+def get_dados_concatenados() -> pd.DataFrame:
+    """Retorna DataFrame concatenado de todos os períodos (com cache)."""
+    if 'dados_periodos' not in st.session_state or not st.session_state['dados_periodos']:
+        return pd.DataFrame()
+
+    # Hash baseado nas chaves dos períodos para invalidação de cache
+    periodos_keys = tuple(sorted(st.session_state['dados_periodos'].keys()))
+    periodos_hash = str(hash(periodos_keys))
+
+    return _get_dados_concatenados(periodos_hash, periodos_keys)
+
 
 # FIX PROBLEMA 3: Busca de cor com normalização
 def obter_cor_banco(instituicao):
@@ -1040,50 +1161,76 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         st.error(f"Erro ao gerar PDF: {e}")
         return None
 
+# === INICIALIZAÇÃO COM CACHE E PERFORMANCE LOGS ===
+_perf_start("init_total")
+
 if 'df_aliases' not in st.session_state:
+    _perf_start("init_aliases")
     df_aliases = carregar_aliases()
     if df_aliases is not None:
         st.session_state['df_aliases'] = df_aliases
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
-        st.session_state['dict_aliases_norm'] = construir_dict_aliases_normalizado(df_aliases)
-        st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(df_aliases)
+        # Usar funções cacheadas com dados preparados
+        alias_hash, alias_data = _preparar_aliases_para_cache(df_aliases)
+        st.session_state['dict_aliases_norm'] = construir_dict_aliases_normalizado(alias_hash, alias_data)
+        cores_hash, cores_data = _preparar_cores_para_cache(df_aliases)
+        st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(cores_hash, cores_data)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
+    print(_perf_log("init_aliases"))
 
 if 'dados_periodos' not in st.session_state:
+    _perf_start("init_dados_periodos")
     sucesso, fonte = baixar_cache_inicial()
     dados_cache = carregar_cache()
     if dados_cache:
+        _perf_start("recalc_metricas")
         dados_cache = recalcular_metricas_derivadas(dados_cache)
+        print(_perf_log("recalc_metricas"))
         if 'dict_aliases' in st.session_state:
-            mapa_codigos = None
-            periodos_disponiveis = sorted(dados_cache.keys())
-            if periodos_disponiveis:
-                mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
+            # OTIMIZAÇÃO: Construir mapa de códigos apenas se necessário
+            # (lazy load - salvar no session_state para reusar)
+            _perf_start("mapa_codigos")
+            mapa_codigos = st.session_state.get('mapa_codigos_cache')
+            if mapa_codigos is None:
+                periodos_disponiveis = sorted(dados_cache.keys())
+                if periodos_disponiveis:
+                    mapa_codigos = construir_mapa_codinst(periodos_disponiveis[-1])
+                    st.session_state['mapa_codigos_cache'] = mapa_codigos
+            print(_perf_log("mapa_codigos"))
+            _perf_start("aplicar_aliases")
             dados_cache = aplicar_aliases_em_periodos(
                 dados_cache,
                 st.session_state['dict_aliases'],
                 mapa_codigos=mapa_codigos,
             )
+            print(_perf_log("aplicar_aliases"))
         st.session_state['dados_periodos'] = dados_cache
         if 'cache_fonte' not in st.session_state:
             st.session_state['cache_fonte'] = fonte
+    print(_perf_log("init_dados_periodos"))
 
 # Carregar cache de capital (isolado) se disponível
 if 'dados_capital' not in st.session_state:
+    _perf_start("init_dados_capital")
     dados_capital = carregar_cache_capital()
     if dados_capital:
-        # Aplicar aliases ao cache de capital
+        # Aplicar aliases ao cache de capital (reusar mapa de códigos já cacheado)
         if 'dict_aliases' in st.session_state:
-            mapa_codigos = None
-            periodos_capital = sorted(dados_capital.keys())
-            if periodos_capital:
-                mapa_codigos = construir_mapa_codinst(periodos_capital[-1])
+            mapa_codigos = st.session_state.get('mapa_codigos_cache')
+            if mapa_codigos is None:
+                periodos_capital = sorted(dados_capital.keys())
+                if periodos_capital:
+                    mapa_codigos = construir_mapa_codinst(periodos_capital[-1])
+                    st.session_state['mapa_codigos_cache'] = mapa_codigos
             dados_capital = aplicar_aliases_em_periodos(
                 dados_capital,
                 st.session_state['dict_aliases'],
                 mapa_codigos=mapa_codigos,
             )
         st.session_state['dados_capital'] = dados_capital
+    print(_perf_log("init_dados_capital"))
+
+print(_perf_log("init_total"))
 
 # Menu horizontal no topo
 if 'menu_atual' not in st.session_state:
@@ -1125,16 +1272,9 @@ st.markdown("""
 # Header usando colunas Streamlit para garantir centralização
 _, col_header, _ = st.columns([1, 3, 1])
 with col_header:
-    if os.path.exists(LOGO_PATH):
-        logo_image = PILImage.open(LOGO_PATH)
-        target_width = 200
-        if logo_image.width < target_width:
-            ratio = target_width / logo_image.width
-            new_height = int(logo_image.height * ratio)
-            logo_image = logo_image.resize((target_width, new_height), PILImage.LANCZOS)
-        buffer = BytesIO()
-        logo_image.save(buffer, format="PNG", optimize=True)
-        logo_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    # OTIMIZAÇÃO: Usar função cacheada para processamento do logo
+    logo_base64 = _carregar_logo_base64(LOGO_PATH, target_width=200)
+    if logo_base64:
         st.markdown(
             f"""
             <div class="header-logo">
@@ -1479,7 +1619,7 @@ elif menu == "Resumo":
     st.caption("compare múltiplas instituições em um único trimestre, com ranking e média do grupo selecionado.")
 
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
         indicadores_config = {
             'Ativo Total': ['Ativo Total'],
@@ -2362,7 +2502,7 @@ elif menu == "Infos de Capital":
 
 elif menu == "Análise Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -2509,7 +2649,7 @@ elif menu == "Análise Individual":
 
 elif menu == "Série Histórica":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -2744,7 +2884,7 @@ elif menu == "Série Histórica":
 
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos = ordenar_periodos(df['Período'].unique(), reverso=True)
@@ -2913,7 +3053,7 @@ elif menu == "Scatter Plot":
 
 elif menu == "Deltas":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
@@ -3380,7 +3520,7 @@ elif menu == "Deltas":
 
 elif menu == "Brincar":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = pd.concat(st.session_state['dados_periodos'].values(), ignore_index=True)
+        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
