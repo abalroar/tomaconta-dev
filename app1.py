@@ -276,7 +276,6 @@ VARS_PERCENTUAL = [
     'Índice de Basileia',
     'Crédito/Captações (%)',
     'Crédito/Ativo (%)',
-    'Market Share Carteira',
     'Índice de Imobilização',
     # Variáveis de Capital (Relatório 5)
     'Índice de Capital Principal',
@@ -2751,7 +2750,6 @@ elif menu == "Análise Individual":
                         'Crédito/Ativo (%)',
                         'Crédito/PL (%)',
                         'Crédito/Captações (%)',
-                        'Market Share Carteira',
                         'Lucro Líquido Acumulado YTD',
                         'ROE Ac. YTD an. (%)',
                         # Variáveis de Capital (Relatório 5)
@@ -2845,7 +2843,6 @@ elif menu == "Série Histórica":
                         'Índice de Basileia',
                         'Crédito/PL (%)',
                         'Crédito/Captações (%)',
-                        'Market Share Carteira',
                         'Lucro Líquido Acumulado YTD',
                         'ROE Ac. YTD an. (%)',
                         # Variáveis de Capital (Relatório 5)
@@ -3496,7 +3493,6 @@ elif menu == "Deltas":
             'Índice de Basileia',
             'Crédito/PL (%)',
             'Crédito/Captações (%)',
-            'Market Share Carteira',
             'Lucro Líquido Acumulado YTD',
             'ROE Ac. YTD an. (%)',
             # Variáveis de Capital (Relatório 5)
