@@ -45,24 +45,26 @@ DATA_DIR = APP_DIR / "data"
 CAPITAL_CACHE_FILE = DATA_DIR / "capital_cache.pkl"
 CAPITAL_CACHE_INFO = DATA_DIR / "capital_cache_info.txt"
 
-# Mapeamento de campos: Nome Original -> Nome Exibido
-# Mantemos os nomes originais em uma coluna separada para auditoria
+# Mapeamento de campos: Nome Original (normalizado) -> Nome Exibido
+# Os nomes originais da API têm quebras de linha que são normalizadas antes do match
+# Exemplo: "Capital Complementar \n(b)" -> normalizado: "Capital Complementar (b)"
 CAMPOS_CAPITAL = {
+    # Nomes normalizados (após remoção de \n) com fórmulas completas
     "Capital Principal para Comparação com RWA (a)": "Capital Principal",
     "Capital Complementar (b)": "Capital Complementar",
-    "Patrimônio de Referência Nível I para Comparação com RWA (c)": "Patrimônio de Referência",
+    "Patrimônio de Referência Nível I para Comparação com RWA (c) = (a) + (b)": "Patrimônio de Referência",
     "Capital Nível II (d)": "Capital Nível II",
     "RWA para Risco de Crédito (f)": "RWA Crédito",
-    "RWA para Risco de Mercado (g)": "RWA Mercado",
+    "RWA para Risco de Mercado (g) = (g1) + (g2) + (g3) + (g4) + (g5) + (g6)": "RWA Mercado",
     "RWA para Risco Operacional (h)": "RWA Operacional",
-    "Ativos Ponderados pelo Risco (RWA) (j)": "RWA Total",
+    "Ativos Ponderados pelo Risco (RWA) (j) = (f) + (g) + (h) + (i)": "RWA Total",
     "Exposição Total (k)": "Exposição Total",
-    "Índice de Capital Principal (l)": "Índice de Capital Principal",
-    "Índice de Capital Nível I (m)": "Índice de Capital Nível I",
-    "Índice de Basileia (n)": "Índice de Basileia",
+    "Índice de Capital Principal (l) = (a) / (j)": "Índice de Capital Principal",
+    "Índice de Capital Nível I (m) = (c) / (j)": "Índice de Capital Nível I",
+    "Índice de Basileia (n) = (e) / (j)": "Índice de Basileia",
     "Adicional de Capital Principal": "Adicional de Capital Principal",
     "IRRBB": "IRRBB",
-    "Razão de Alavancagem (o)": "Razão de Alavancagem",
+    "Razão de Alavancagem (o) = (c) / (k)": "Razão de Alavancagem",
     "Índice de Imobilização (p)": "Índice de Imobilização",
 }
 
@@ -196,10 +198,11 @@ def extrair_valores_capital(ano_mes: str) -> pd.DataFrame:
 
 
 def normalizar_nome_coluna(valor: str) -> str:
-    """Normaliza nome de coluna removendo espaços extras."""
+    """Normaliza nome de coluna removendo quebras de linha e espaços extras."""
     if not isinstance(valor, str):
         return valor
-    return " ".join(valor.split())
+    # Remover quebras de linha e normalizar espaços
+    return " ".join(valor.replace('\n', ' ').replace('\r', ' ').split())
 
 
 def obter_coluna_nome_instituicao(df: pd.DataFrame) -> Optional[str]:

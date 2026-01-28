@@ -1943,7 +1943,6 @@ elif menu == "Infos de Capital":
             'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
             'Capital Complementar': ['Capital Complementar', 'Capital Complementar (b)'],
             'Capital Nível II': ['Capital Nível II', 'Capital Nível II (d)'],
-            'RWA Total': ['RWA Total', 'Ativos Ponderados pelo Risco (RWA) (j)', 'RWA']
         }
 
         # Encontrar colunas disponíveis
@@ -1960,11 +1959,36 @@ elif menu == "Infos de Capital":
             else:
                 colunas_faltantes.append(nome_padrao)
 
+        # Verificar RWA Total - pode ser coluna direta ou calculado a partir dos componentes
+        rwa_total_alternativas = ['RWA Total', 'Ativos Ponderados pelo Risco (RWA) (j)', 'RWA']
+        rwa_total_col = None
+        for alt in rwa_total_alternativas:
+            if alt in df_capital.columns:
+                rwa_total_col = alt
+                break
+
+        # Se RWA Total não existe, calcular a partir dos componentes
+        rwa_calculado = False
+        if not rwa_total_col:
+            componentes_rwa = ['RWA Crédito', 'RWA Mercado', 'RWA Operacional']
+            componentes_disponiveis = [c for c in componentes_rwa if c in df_capital.columns]
+            if componentes_disponiveis:
+                df_capital['RWA Total (calculado)'] = df_capital[componentes_disponiveis].sum(axis=1, skipna=True)
+                rwa_total_col = 'RWA Total (calculado)'
+                rwa_calculado = True
+            else:
+                colunas_faltantes.append('RWA Total')
+
+        if rwa_total_col:
+            colunas_encontradas['RWA Total'] = rwa_total_col
+
         if colunas_faltantes:
             st.warning(f"Colunas necessárias ausentes no cache de capital: {', '.join(colunas_faltantes)}")
             with st.expander("Colunas disponíveis no cache"):
                 st.write(sorted([c for c in df_capital.columns if c not in ['Instituição', 'CodInst', 'Período']]))
         else:
+            if rwa_calculado:
+                st.info("RWA Total calculado como soma de RWA Crédito + RWA Operacional (RWA Mercado não disponível).")
             periodos_capital = ordenar_periodos(df_capital['Período'].dropna().unique(), reverso=True)
 
             # Seletor de tipo de gráfico
