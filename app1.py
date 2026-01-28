@@ -3247,7 +3247,8 @@ elif menu == "Scatter Plot":
                 hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x:{format_x["tickformat"]}}}{format_x["ticksuffix"]}<br>{var_y}: %{{y:{format_y["tickformat"]}}}{format_y["ticksuffix"]}<extra></extra>'
             ))
 
-        # Título dinâmico
+        # Título dinâmico - Scatter Plot n=1
+        st.markdown("#### Scatter Plot n=1")
         if bancos_selecionados:
             titulo_scatter = f'{var_y} vs {var_x} - {periodo_scatter} ({len(df_scatter)} bancos)'
         else:
@@ -3268,6 +3269,263 @@ elif menu == "Scatter Plot":
         )
 
         st.plotly_chart(fig_scatter, use_container_width=True)
+
+        # ============================================================
+        # SCATTER PLOT n=2 - Comparação entre dois períodos
+        # ============================================================
+        st.markdown("---")
+        st.markdown("#### Scatter Plot n=2")
+        st.caption("Visualize a movimentação dos bancos entre dois períodos")
+
+        # Seletores para os dois períodos
+        col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+
+        with col_p1:
+            var_x_n2 = st.selectbox(
+                "eixo x",
+                colunas_numericas,
+                index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0,
+                key="var_x_n2"
+            )
+        with col_p2:
+            var_y_n2 = st.selectbox(
+                "eixo y",
+                colunas_numericas,
+                index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1,
+                key="var_y_n2"
+            )
+        with col_p3:
+            # Período inicial (mais antigo por padrão)
+            idx_inicial = min(1, len(periodos) - 1) if len(periodos) > 1 else 0
+            periodo_inicial = st.selectbox(
+                "período inicial",
+                periodos,
+                index=idx_inicial,
+                key="periodo_inicial_n2"
+            )
+        with col_p4:
+            # Período subsequente (mais recente por padrão)
+            periodo_subseq = st.selectbox(
+                "período subsequente",
+                periodos,
+                index=0,
+                key="periodo_subseq_n2"
+            )
+
+        # Segunda linha: Top N e tamanho
+        col_n2_t1, col_n2_t2, col_n2_t3 = st.columns([1, 1, 2])
+
+        with col_n2_t1:
+            top_n_scatter_n2 = st.slider("top n", 5, 50, 15, key="top_n_n2")
+        with col_n2_t2:
+            var_top_n_n2 = st.selectbox(
+                "top n por",
+                colunas_numericas,
+                index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
+                key="var_top_n_n2"
+            )
+        with col_n2_t3:
+            opcoes_tamanho_n2 = ['Tamanho Fixo'] + colunas_numericas
+            default_idx_n2 = opcoes_tamanho_n2.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho_n2 else 1
+            var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=default_idx_n2, key="var_size_n2")
+
+        # Terceira linha: Peers e Seleção de bancos
+        col_n2_f1, col_n2_f2 = st.columns([1, 3])
+
+        with col_n2_f1:
+            peer_selecionado_n2 = st.selectbox(
+                "filtrar por peer",
+                opcoes_peer,
+                index=0,
+                key="peer_n2"
+            )
+
+        # Bancos do peer selecionado para n=2
+        bancos_do_peer_n2 = []
+        if peer_selecionado_n2 != 'Nenhum' and 'df_aliases' in st.session_state:
+            df_aliases = st.session_state['df_aliases']
+            coluna_peer_n2 = df_aliases[peer_selecionado_n2]
+            mask_peer_n2 = (
+                coluna_peer_n2.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+            )
+            bancos_do_peer_n2 = df_aliases.loc[mask_peer_n2, 'Alias Banco'].tolist()
+
+        with col_n2_f2:
+            default_bancos_n2 = bancos_do_peer_n2 if bancos_do_peer_n2 else []
+            bancos_selecionados_n2 = st.multiselect(
+                "selecionar bancos",
+                todos_bancos,
+                default=default_bancos_n2,
+                key="bancos_multiselect_n2"
+            )
+
+        # Validação: períodos devem ser diferentes
+        if periodo_inicial == periodo_subseq:
+            st.warning("Selecione dois períodos diferentes para visualizar a movimentação.")
+        else:
+            # Filtra dados para os dois períodos
+            df_p1 = df[df['Período'] == periodo_inicial].copy()
+            df_p2 = df[df['Período'] == periodo_subseq].copy()
+
+            # Aplica filtro de peer
+            if peer_selecionado_n2 != 'Nenhum':
+                df_p1 = df_p1[df_p1['Instituição'].isin(bancos_do_peer_n2)]
+                df_p2 = df_p2[df_p2['Instituição'].isin(bancos_do_peer_n2)]
+
+            # Aplica seleção de bancos ou top N
+            if bancos_selecionados_n2:
+                df_p1 = df_p1[df_p1['Instituição'].isin(bancos_selecionados_n2)]
+                df_p2 = df_p2[df_p2['Instituição'].isin(bancos_selecionados_n2)]
+            else:
+                # Usa top N do período subsequente (mais recente)
+                df_p2_valid = df_p2.dropna(subset=[var_top_n_n2])
+                top_bancos = df_p2_valid.nlargest(top_n_scatter_n2, var_top_n_n2)['Instituição'].tolist()
+                df_p1 = df_p1[df_p1['Instituição'].isin(top_bancos)]
+                df_p2 = df_p2[df_p2['Instituição'].isin(top_bancos)]
+
+            # Encontra bancos presentes em ambos os períodos
+            bancos_comuns = set(df_p1['Instituição'].unique()) & set(df_p2['Instituição'].unique())
+
+            if len(bancos_comuns) == 0:
+                st.warning("Nenhum banco encontrado em ambos os períodos selecionados.")
+            else:
+                # Formatos dos eixos
+                format_x_n2 = get_axis_format(var_x_n2)
+                format_y_n2 = get_axis_format(var_y_n2)
+
+                # Prepara dados com valores de exibição
+                df_p1['x_display'] = df_p1[var_x_n2] * format_x_n2['multiplicador']
+                df_p1['y_display'] = df_p1[var_y_n2] * format_y_n2['multiplicador']
+                df_p2['x_display'] = df_p2[var_x_n2] * format_x_n2['multiplicador']
+                df_p2['y_display'] = df_p2[var_y_n2] * format_y_n2['multiplicador']
+
+                # Tamanho dos pontos
+                if var_size_n2 != 'Tamanho Fixo':
+                    format_size_n2 = get_axis_format(var_size_n2)
+                    df_p1['size_display'] = df_p1[var_size_n2] * format_size_n2['multiplicador']
+                    df_p2['size_display'] = df_p2[var_size_n2] * format_size_n2['multiplicador']
+                    max_size = max(df_p1['size_display'].max(), df_p2['size_display'].max())
+
+                fig_scatter_n2 = go.Figure()
+                cores_plotly = px.colors.qualitative.Plotly
+                idx_cor_n2 = 0
+
+                for instituicao in sorted(bancos_comuns):
+                    # Dados do período inicial
+                    row_p1 = df_p1[df_p1['Instituição'] == instituicao]
+                    # Dados do período subsequente
+                    row_p2 = df_p2[df_p2['Instituição'] == instituicao]
+
+                    if row_p1.empty or row_p2.empty:
+                        continue
+
+                    x1 = row_p1['x_display'].values[0]
+                    y1 = row_p1['y_display'].values[0]
+                    x2 = row_p2['x_display'].values[0]
+                    y2 = row_p2['y_display'].values[0]
+
+                    # Cor do banco
+                    cor = obter_cor_banco(instituicao)
+                    if not cor:
+                        cor = cores_plotly[idx_cor_n2 % len(cores_plotly)]
+                        idx_cor_n2 += 1
+
+                    # Tamanho dos marcadores
+                    if var_size_n2 == 'Tamanho Fixo':
+                        marker_size_p1 = 20
+                        marker_size_p2 = 20
+                    else:
+                        marker_size_p1 = row_p1['size_display'].values[0] / max_size * 80 if max_size > 0 else 20
+                        marker_size_p2 = row_p2['size_display'].values[0] / max_size * 80 if max_size > 0 else 20
+
+                    # Adiciona linha conectando os dois pontos (seta)
+                    fig_scatter_n2.add_trace(go.Scatter(
+                        x=[x1, x2],
+                        y=[y1, y2],
+                        mode='lines',
+                        line=dict(color=cor, width=2),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+
+                    # Ponto do período inicial (círculo vazio/anel)
+                    fig_scatter_n2.add_trace(go.Scatter(
+                        x=[x1],
+                        y=[y1],
+                        mode='markers',
+                        name=f'{instituicao} ({periodo_inicial})',
+                        marker=dict(
+                            size=marker_size_p1,
+                            color='white',
+                            opacity=1.0,
+                            line=dict(width=3, color=cor)
+                        ),
+                        hovertemplate=f'<b>{instituicao}</b> ({periodo_inicial})<br>{var_x_n2}: %{{x:{format_x_n2["tickformat"]}}}{format_x_n2["ticksuffix"]}<br>{var_y_n2}: %{{y:{format_y_n2["tickformat"]}}}{format_y_n2["ticksuffix"]}<extra></extra>',
+                        legendgroup=instituicao,
+                        showlegend=False
+                    ))
+
+                    # Ponto do período subsequente (círculo cheio com seta)
+                    fig_scatter_n2.add_trace(go.Scatter(
+                        x=[x2],
+                        y=[y2],
+                        mode='markers',
+                        name=instituicao,
+                        marker=dict(
+                            size=marker_size_p2,
+                            color=cor,
+                            opacity=1.0,
+                            line=dict(width=1, color='white'),
+                            symbol='circle'
+                        ),
+                        hovertemplate=f'<b>{instituicao}</b> ({periodo_subseq})<br>{var_x_n2}: %{{x:{format_x_n2["tickformat"]}}}{format_x_n2["ticksuffix"]}<br>{var_y_n2}: %{{y:{format_y_n2["tickformat"]}}}{format_y_n2["ticksuffix"]}<extra></extra>',
+                        legendgroup=instituicao,
+                        showlegend=True
+                    ))
+
+                    # Adiciona seta (annotation) para indicar direção
+                    fig_scatter_n2.add_annotation(
+                        x=x2,
+                        y=y2,
+                        ax=x1,
+                        ay=y1,
+                        xref='x',
+                        yref='y',
+                        axref='x',
+                        ayref='y',
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowsize=1.5,
+                        arrowwidth=2,
+                        arrowcolor=cor,
+                        opacity=0.7
+                    )
+
+                # Título do gráfico n=2
+                if bancos_selecionados_n2:
+                    titulo_scatter_n2 = f'{var_y_n2} vs {var_x_n2} - {periodo_inicial} → {periodo_subseq} ({len(bancos_comuns)} bancos)'
+                else:
+                    titulo_scatter_n2 = f'{var_y_n2} vs {var_x_n2} - {periodo_inicial} → {periodo_subseq} (top {top_n_scatter_n2} por {var_top_n_n2})'
+
+                fig_scatter_n2.update_layout(
+                    title=titulo_scatter_n2,
+                    xaxis_title=var_x_n2,
+                    yaxis_title=var_y_n2,
+                    height=650,
+                    plot_bgcolor='#f8f9fa',
+                    paper_bgcolor='white',
+                    showlegend=True,
+                    legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                    xaxis=dict(tickformat=format_x_n2['tickformat'], ticksuffix=format_x_n2['ticksuffix']),
+                    yaxis=dict(tickformat=format_y_n2['tickformat'], ticksuffix=format_y_n2['ticksuffix']),
+                    font=dict(family='IBM Plex Sans')
+                )
+
+                st.plotly_chart(fig_scatter_n2, use_container_width=True)
+
+                # Legenda explicativa
+                st.caption("○ Círculo vazio = período inicial | ● Círculo cheio = período subsequente | → Seta indica direção da movimentação")
+
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
