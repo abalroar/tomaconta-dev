@@ -46,28 +46,37 @@ CAPITAL_CACHE_FILE = DATA_DIR / "capital_cache.pkl"
 CAPITAL_CACHE_INFO = DATA_DIR / "capital_cache_info.txt"
 
 # Mapeamento de campos: Nome Original -> Nome Exibido
+# NOTA: Os nomes na API têm quebras de linha (\n) que precisam ser normalizados
 # Mantemos os nomes originais em uma coluna separada para auditoria
 CAMPOS_CAPITAL = {
+    # Nomes exatos da API (com quebras de linha normalizadas para espaço)
     "Capital Principal para Comparação com RWA (a)": "Capital Principal",
     "Capital Complementar (b)": "Capital Complementar",
-    "Patrimônio de Referência Nível I para Comparação com RWA (c)": "Patrimônio de Referência",
+    "Patrimônio de Referência Nível I para Comparação com RWA (c) = (a) + (b)": "Patrimônio de Referência",
     "Capital Nível II (d)": "Capital Nível II",
     "RWA para Risco de Crédito (f)": "RWA Crédito",
-    "RWA para Risco de Mercado (g)": "RWA Mercado",
+    "RWA para Risco de Mercado (g) = (g1) + (g2) + (g3) + (g4) + (g5) + (g6)": "RWA Mercado",
     "RWA para Risco Operacional (h)": "RWA Operacional",
-    "Ativos Ponderados pelo Risco (RWA) (j)": "RWA Total",
+    "Ativos Ponderados pelo Risco (RWA) (j) = (f) + (g) + (h) + (i)": "RWA Total",
     "Exposição Total (k)": "Exposição Total",
-    "Índice de Capital Principal (l)": "Índice de Capital Principal",
-    "Índice de Capital Nível I (m)": "Índice de Capital Nível I",
-    "Índice de Basileia (n)": "Índice de Basileia",
+    "Índice de Capital Principal (l) = (a) / (j)": "Índice de Capital Principal",
+    "Índice de Capital Nível I (m) = (c) / (j)": "Índice de Capital Nível I",
+    "Índice de Basileia (n) = (e) / (j)": "Índice de Basileia",
     "Adicional de Capital Principal": "Adicional de Capital Principal",
     "IRRBB": "IRRBB",
-    "Razão de Alavancagem (o)": "Razão de Alavancagem",
+    "Razão de Alavancagem (o) = (c) / (k)": "Razão de Alavancagem",
     "Índice de Imobilização (p)": "Índice de Imobilização",
 }
 
-# Lista de colunas originais para extração
+# Lista de colunas originais para extração (normalizadas)
+# Criamos uma versão normalizada para comparação com os dados da API
 COLUNAS_CAPITAL_ORIGINAIS = list(CAMPOS_CAPITAL.keys())
+
+# Mapeamento normalizado: nome_normalizado -> nome_exibido
+# Usado para match com os nomes da API após normalização
+CAMPOS_CAPITAL_NORMALIZADO = {
+    " ".join(k.split()): v for k, v in CAMPOS_CAPITAL.items()
+}
 
 
 # =============================================================================
@@ -247,20 +256,24 @@ def processar_periodo_capital(ano_mes: str, dict_aliases: dict = None) -> Option
         logger.warning(f"Sem valores de capital para período {ano_mes}")
         return None
 
-    # Normalizar nomes de colunas
+    # Normalizar nomes de colunas (remove quebras de linha e espaços extras)
     if "NomeColuna" in df_valores.columns:
         df_valores["NomeColuna"] = df_valores["NomeColuna"].map(normalizar_nome_coluna)
 
     # 2. Filtrar apenas colunas de capital desejadas
-    df_filt = df_valores[df_valores["NomeColuna"].isin(COLUNAS_CAPITAL_ORIGINAIS)].copy()
+    # Usar o mapeamento normalizado para comparação
+    colunas_desejadas_normalizadas = set(CAMPOS_CAPITAL_NORMALIZADO.keys())
+    df_filt = df_valores[df_valores["NomeColuna"].isin(colunas_desejadas_normalizadas)].copy()
 
     if df_filt.empty:
         logger.warning(f"Nenhuma coluna de capital encontrada para {ano_mes}")
         # Log das colunas disponíveis para debug
         if "NomeColuna" in df_valores.columns:
-            colunas_disponiveis = df_valores["NomeColuna"].unique().tolist()[:20]
-            logger.debug(f"Colunas disponíveis (amostra): {colunas_disponiveis}")
+            colunas_disponiveis = df_valores["NomeColuna"].unique().tolist()
+            logger.info(f"Colunas disponíveis ({len(colunas_disponiveis)}): {colunas_disponiveis[:10]}...")
         return None
+
+    logger.info(f"Colunas de capital encontradas: {df_filt['NomeColuna'].nunique()}")
 
     # 3. Pivotar por instituição
     df_pivot = df_filt.pivot_table(
@@ -307,12 +320,11 @@ def processar_periodo_capital(ano_mes: str, dict_aliases: dict = None) -> Option
     df_out["Instituição"] = df_pivot["Instituição"]
     df_out["CodInst"] = df_pivot["CodInst"]
 
-    # Adicionar colunas com nomes exibidos (e guardar nome original como metadado)
-    for col_original, col_exibido in CAMPOS_CAPITAL.items():
-        if col_original in df_pivot.columns:
-            df_out[col_exibido] = df_pivot[col_original]
-            # Opcional: criar coluna de auditoria com nome original
-            # df_out[f"_original_{col_exibido}"] = col_original
+    # Adicionar colunas com nomes exibidos
+    # Usar mapeamento normalizado porque as colunas do pivot estão normalizadas
+    for col_normalizada, col_exibido in CAMPOS_CAPITAL_NORMALIZADO.items():
+        if col_normalizada in df_pivot.columns:
+            df_out[col_exibido] = df_pivot[col_normalizada]
 
     # 7. Aplicar aliases se fornecido
     if dict_aliases:
