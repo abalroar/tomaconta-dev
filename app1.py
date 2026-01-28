@@ -293,6 +293,72 @@ VARS_MOEDAS = [
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
+# Tipos de média disponíveis
+TIPOS_MEDIA = {
+    'Média Simples': 'simples',
+    'Média por Ativo Total': 'ativo_total',
+    'Média por Carteira de Crédito': 'carteira_credito'
+}
+
+def calcular_media_ponderada(df, coluna_valor, tipo_media='simples', coluna_peso=None):
+    """Calcula média simples ou ponderada de uma coluna.
+
+    Args:
+        df: DataFrame com os dados
+        coluna_valor: Nome da coluna cujos valores serão promediados
+        tipo_media: 'simples', 'ativo_total' ou 'carteira_credito'
+        coluna_peso: Opcional, sobrescreve a coluna de peso padrão
+
+    Returns:
+        float: Média calculada
+    """
+    if df.empty or coluna_valor not in df.columns:
+        return 0
+
+    valores = df[coluna_valor].dropna()
+    if valores.empty:
+        return 0
+
+    if tipo_media == 'simples':
+        return valores.mean()
+
+    # Determinar coluna de peso baseado no tipo de média
+    if coluna_peso is None:
+        if tipo_media == 'ativo_total':
+            coluna_peso = 'Ativo Total'
+        elif tipo_media == 'carteira_credito':
+            coluna_peso = 'Carteira de Crédito'
+        else:
+            return valores.mean()
+
+    if coluna_peso not in df.columns:
+        return valores.mean()
+
+    # Filtrar apenas registros com peso e valor válidos
+    mask = df[coluna_valor].notna() & df[coluna_peso].notna() & (df[coluna_peso] > 0)
+    df_valid = df[mask]
+
+    if df_valid.empty:
+        return valores.mean()
+
+    # Calcular média ponderada: sum(valor * peso) / sum(peso)
+    soma_ponderada = (df_valid[coluna_valor] * df_valid[coluna_peso]).sum()
+    soma_pesos = df_valid[coluna_peso].sum()
+
+    if soma_pesos == 0:
+        return valores.mean()
+
+    return soma_ponderada / soma_pesos
+
+def get_label_media(tipo_media):
+    """Retorna o label descritivo do tipo de média."""
+    labels = {
+        'simples': 'Média',
+        'ativo_total': 'Média (pond. Ativo Total)',
+        'carteira_credito': 'Média (pond. Carteira Créd.)'
+    }
+    return labels.get(tipo_media, 'Média')
+
 def get_cache_info_detalhado():
     """Retorna informações detalhadas sobre o arquivo de cache."""
     info = {
@@ -1740,7 +1806,7 @@ elif menu == "Resumo":
                 ]
             }
 
-            col_periodo, col_indicador, col_escala, col_tipo = st.columns([1.2, 2, 1.1, 1.3])
+            col_periodo, col_indicador, col_escala, col_tipo, col_media = st.columns([1.2, 2, 1.1, 1.3, 1.8])
             with col_periodo:
                 periodo_resumo = st.selectbox(
                     "período (trimestre)",
@@ -1774,6 +1840,14 @@ elif menu == "Resumo":
                     )
                 else:
                     tipo_grafico = "Ranking"
+            with col_media:
+                tipo_media_label = st.selectbox(
+                    "tipo de média",
+                    list(TIPOS_MEDIA.keys()),
+                    index=0,
+                    key="tipo_media_resumo"
+                )
+                tipo_media_resumo = TIPOS_MEDIA[tipo_media_label]
 
             col_peers, col_bancos = st.columns([1.2, 2.8])
 
@@ -1920,7 +1994,8 @@ elif menu == "Resumo":
                 st.info("selecione instituições ou ajuste os filtros para visualizar o resumo.")
             else:
                 df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
-                media_display = df_selecionado['valor_display'].mean()
+                media_display = calcular_media_ponderada(df_selecionado, 'valor_display', tipo_media_resumo)
+                label_media = get_label_media(tipo_media_resumo)
 
                 if modo_ordenacao == "Ordenar por valor":
                     ordenar_asc = direcao_top == "Bottom"
@@ -1977,12 +2052,19 @@ elif menu == "Resumo":
                         st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
 
                         df_componentes['ranking'] = df_componentes['total'].rank(method='first', ascending=False).astype(int)
-                        media_grupo_raw = df_componentes['total'].mean()
+                        # Merge com df_selecionado para ter acesso às colunas de peso
+                        df_componentes_merge = df_componentes.merge(
+                            df_selecionado[['Instituição', 'Ativo Total', 'Carteira de Crédito']].drop_duplicates(),
+                            on='Instituição',
+                            how='left'
+                        ) if all(col in df_selecionado.columns for col in ['Ativo Total', 'Carteira de Crédito']) else df_componentes.copy()
+                        media_grupo_raw = calcular_media_ponderada(df_componentes_merge, 'total', tipo_media_resumo)
                         df_export_base = df_componentes.copy()
                         df_export_base['Período'] = periodo_resumo
                         df_export_base['Indicador'] = indicador_label
                         df_export_base['Valor'] = df_export_base['total']
                         df_export_base['Média do Grupo'] = media_grupo_raw
+                        df_export_base['Tipo de Média'] = tipo_media_label
                         df_export_base['Diferença vs Média'] = df_export_base['Valor'] - media_grupo_raw
                         df_export_base = df_export_base[[
                             'Período',
@@ -1991,6 +2073,7 @@ elif menu == "Resumo":
                             'Valor',
                             'ranking',
                             'Média do Grupo',
+                            'Tipo de Média',
                             'Diferença vs Média'
                         ]].rename(columns={'ranking': 'Ranking'})
 
@@ -2081,7 +2164,7 @@ elif menu == "Resumo":
                             x=[media_display] * len(df_selecionado),
                             y=df_selecionado['Instituição'],
                             mode='lines',
-                            name='Média',
+                            name=label_media,
                             line=dict(color='#1f77b4', dash='dash')
                         ))
                     else:
@@ -2089,7 +2172,7 @@ elif menu == "Resumo":
                             x=df_selecionado['Instituição'],
                             y=[media_display] * len(df_selecionado),
                             mode='lines',
-                            name='Média',
+                            name=label_media,
                             line=dict(color='#1f77b4', dash='dash')
                         ))
 
@@ -2118,12 +2201,13 @@ elif menu == "Resumo":
 
                     st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
 
-                    media_grupo_raw = df_selecionado[indicador_col].mean()
+                    media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, tipo_media_resumo)
                     df_export = df_selecionado.copy()
                     df_export['Período'] = periodo_resumo
                     df_export['Indicador'] = indicador_label
                     df_export['Valor'] = df_export[indicador_col]
                     df_export['Média do Grupo'] = media_grupo_raw
+                    df_export['Tipo de Média'] = tipo_media_label
                     df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
                     df_export = df_export[[
                         'Período',
@@ -2132,6 +2216,7 @@ elif menu == "Resumo":
                         'Valor',
                         'ranking',
                         'Média do Grupo',
+                        'Tipo de Média',
                         'Diferença vs Média'
                     ]].rename(columns={'ranking': 'Ranking'})
 
@@ -2194,7 +2279,7 @@ elif menu == "Infos de Capital":
 
             # Seletor de tipo de gráfico
             tipos_graficos = ["Índice de Basileia Total"]
-            col_tipo_graf, col_periodo_cap = st.columns([2, 1.5])
+            col_tipo_graf, col_periodo_cap, col_media_cap = st.columns([2, 1.5, 1.8])
 
             with col_tipo_graf:
                 tipo_grafico_capital = st.selectbox(
@@ -2209,6 +2294,14 @@ elif menu == "Infos de Capital":
                     index=0,
                     key="periodo_capital"
                 )
+            with col_media_cap:
+                tipo_media_cap_label = st.selectbox(
+                    "tipo de média",
+                    list(TIPOS_MEDIA.keys()),
+                    index=0,
+                    key="tipo_media_capital"
+                )
+                tipo_media_capital = TIPOS_MEDIA[tipo_media_cap_label]
 
             if tipo_grafico_capital == "Índice de Basileia Total":
                 # Filtrar dados do período
@@ -2253,6 +2346,16 @@ elif menu == "Infos de Capital":
                     df_periodo_cap['AT1 (%)'] +
                     df_periodo_cap['T2 (%)']
                 )
+
+                # Merge com dados principais para obter Ativo Total e Carteira de Crédito (para ponderação)
+                if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+                    df_dados_periodo = st.session_state['dados_periodos'].get(periodo_capital)
+                    if df_dados_periodo is not None:
+                        colunas_peso = ['Instituição', 'Ativo Total', 'Carteira de Crédito']
+                        colunas_disponiveis = [c for c in colunas_peso if c in df_dados_periodo.columns]
+                        if len(colunas_disponiveis) > 1:  # Pelo menos Instituição + uma coluna de peso
+                            df_peso = df_dados_periodo[colunas_disponiveis].drop_duplicates(subset=['Instituição'])
+                            df_periodo_cap = df_periodo_cap.merge(df_peso, on='Instituição', how='left')
 
                 # --- Seleção de Bancos (mesmo padrão do Resumo) ---
                 col_peers_cap, col_bancos_cap = st.columns([1.2, 2.8])
@@ -2402,11 +2505,12 @@ elif menu == "Infos de Capital":
                         )
                         df_selecionado_cap = df_selecionado_cap.sort_values('ordem')
 
-                    # Calcular médias
-                    media_basileia = df_selecionado_cap['Índice de Basileia Total (%)'].mean()
-                    media_cet1 = df_selecionado_cap['CET1 (%)'].mean()
-                    media_at1 = df_selecionado_cap['AT1 (%)'].mean()
-                    media_t2 = df_selecionado_cap['T2 (%)'].mean()
+                    # Calcular médias (simples ou ponderadas)
+                    media_basileia = calcular_media_ponderada(df_selecionado_cap, 'Índice de Basileia Total (%)', tipo_media_capital)
+                    media_cet1 = calcular_media_ponderada(df_selecionado_cap, 'CET1 (%)', tipo_media_capital)
+                    media_at1 = calcular_media_ponderada(df_selecionado_cap, 'AT1 (%)', tipo_media_capital)
+                    media_t2 = calcular_media_ponderada(df_selecionado_cap, 'T2 (%)', tipo_media_capital)
+                    label_media_cap = get_label_media(tipo_media_capital)
 
                     # Calcular ranking
                     df_selecionado_cap['Ranking'] = df_selecionado_cap['Índice de Basileia Total (%)'].rank(
@@ -2461,9 +2565,9 @@ elif menu == "Infos de Capital":
                         x=df_selecionado_cap['Instituição'],
                         y=[media_basileia] * n_bancos_cap,
                         mode='lines',
-                        name=f'Média ({media_basileia:.2f}%)',
+                        name=f'{label_media_cap} ({media_basileia:.2f}%)',
                         line=dict(color='#3498db', dash='dash', width=2),
-                        hovertemplate=f"Média: {media_basileia:.2f}%<extra></extra>"
+                        hovertemplate=f"{label_media_cap}: {media_basileia:.2f}%<extra></extra>"
                     ))
 
                     # Adicionar linha horizontal do Mínimo Regulatório (10,5%)
@@ -2502,6 +2606,7 @@ elif menu == "Infos de Capital":
                     df_export_capital.insert(0, 'Período', periodo_capital)
 
                     # Adicionar médias e mínimo regulatório para referência
+                    df_export_capital['Tipo de Média'] = tipo_media_cap_label
                     df_export_capital['Média CET1 (%)'] = round(media_cet1, 2)
                     df_export_capital['Média AT1 (%)'] = round(media_at1, 2)
                     df_export_capital['Média T2 (%)'] = round(media_t2, 2)
