@@ -683,6 +683,99 @@ def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None)
     return dados_corrigidos
 
 
+def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=None):
+    """Resolve nomes de instituições que estão como códigos [IF xxxxx] no cache de capital.
+
+    Usa múltiplas estratégias de lookup:
+    1. Busca direta no dict_aliases (nome original -> alias)
+    2. Busca por CodInst no df_aliases se disponível
+    3. Mantém o nome original se não encontrar correspondência
+
+    Args:
+        df_capital: DataFrame com dados de capital
+        dict_aliases: Dicionário nome original -> alias
+        df_aliases: DataFrame do Aliases.xlsx com mapeamentos
+
+    Returns:
+        DataFrame com nomes de instituições resolvidos
+    """
+    import re
+
+    if df_capital is None or df_capital.empty:
+        return df_capital
+
+    if 'Instituição' not in df_capital.columns:
+        return df_capital
+
+    df_result = df_capital.copy()
+
+    # Construir mapa CodInst -> Nome a partir do df_aliases se disponível
+    mapa_codinst_nome = {}
+    if df_aliases is not None and not df_aliases.empty:
+        # Verificar se há coluna de código no aliases
+        colunas_codigo = ['CodInst', 'Código', 'Cod', 'CNPJ']
+        col_codigo = None
+        for col in colunas_codigo:
+            if col in df_aliases.columns:
+                col_codigo = col
+                break
+
+        if col_codigo and 'Alias Banco' in df_aliases.columns:
+            for _, row in df_aliases.iterrows():
+                cod = row.get(col_codigo)
+                alias = row.get('Alias Banco')
+                if pd.notna(cod) and pd.notna(alias):
+                    mapa_codinst_nome[str(cod).strip()] = alias
+
+    def resolver_nome(nome, codinst=None):
+        """Resolve um nome de instituição."""
+        if pd.isna(nome):
+            return nome
+
+        nome_str = str(nome).strip()
+
+        # 1. Busca direta no dict_aliases
+        if dict_aliases and nome_str in dict_aliases:
+            return dict_aliases[nome_str]
+
+        # 2. Verificar se é um placeholder [IF xxxxx]
+        match = re.match(r'\[IF\s+(\d+)\]', nome_str)
+        if match:
+            cod_extraido = match.group(1)
+
+            # Tentar resolver pelo código extraído
+            if mapa_codinst_nome and cod_extraido in mapa_codinst_nome:
+                return mapa_codinst_nome[cod_extraido]
+
+            # Se temos CodInst na linha, usar para lookup
+            if codinst is not None and pd.notna(codinst):
+                cod_str = str(int(codinst)) if isinstance(codinst, float) else str(codinst)
+                if mapa_codinst_nome and cod_str in mapa_codinst_nome:
+                    return mapa_codinst_nome[cod_str]
+
+        # 3. Se temos CodInst, tentar lookup direto
+        if codinst is not None and pd.notna(codinst):
+            cod_str = str(int(codinst)) if isinstance(codinst, float) else str(codinst)
+            if mapa_codinst_nome and cod_str in mapa_codinst_nome:
+                return mapa_codinst_nome[cod_str]
+
+        # 4. Manter nome original se não encontrou correspondência
+        return nome_str
+
+    # Aplicar resolução de nomes
+    if 'CodInst' in df_result.columns:
+        df_result['Instituição'] = df_result.apply(
+            lambda row: resolver_nome(row['Instituição'], row.get('CodInst')),
+            axis=1
+        )
+    else:
+        df_result['Instituição'] = df_result['Instituição'].apply(
+            lambda nome: resolver_nome(nome)
+        )
+
+    return df_result
+
+
 
 def normalizar_codigo_cor(cor_valor):
     if pd.isna(cor_valor):
@@ -2065,6 +2158,11 @@ elif menu == "Infos de Capital":
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
         df_capital = pd.concat(st.session_state['dados_capital'].values(), ignore_index=True)
 
+        # Resolver nomes de instituições que estão como códigos [IF xxxxx]
+        dict_aliases = st.session_state.get('dict_aliases', {})
+        df_aliases = st.session_state.get('df_aliases', None)
+        df_capital = resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases)
+
         # Mapeamento flexível de colunas (nome esperado -> alternativas)
         mapa_colunas_capital = {
             'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
@@ -2364,8 +2462,19 @@ elif menu == "Infos de Capital":
                         y=[media_basileia] * n_bancos_cap,
                         mode='lines',
                         name=f'Média ({media_basileia:.2f}%)',
-                        line=dict(color='#e74c3c', dash='dash', width=2),
+                        line=dict(color='#3498db', dash='dash', width=2),
                         hovertemplate=f"Média: {media_basileia:.2f}%<extra></extra>"
+                    ))
+
+                    # Adicionar linha horizontal do Mínimo Regulatório (10,5%)
+                    MINIMO_REGULATORIO = 10.5
+                    fig_capital.add_trace(go.Scatter(
+                        x=df_selecionado_cap['Instituição'],
+                        y=[MINIMO_REGULATORIO] * n_bancos_cap,
+                        mode='lines',
+                        name=f'Mínimo Regulatório ({MINIMO_REGULATORIO:.1f}%)',
+                        line=dict(color='#e74c3c', dash='solid', width=2),
+                        hovertemplate=f"Mínimo Regulatório: {MINIMO_REGULATORIO:.1f}%<extra></extra>"
                     ))
 
                     fig_capital.update_layout(
@@ -2392,11 +2501,19 @@ elif menu == "Infos de Capital":
                     ]].copy()
                     df_export_capital.insert(0, 'Período', periodo_capital)
 
-                    # Adicionar médias
-                    df_export_capital['Média CET1 (%)'] = media_cet1
-                    df_export_capital['Média AT1 (%)'] = media_at1
-                    df_export_capital['Média T2 (%)'] = media_t2
-                    df_export_capital['Média Basileia (%)'] = media_basileia
+                    # Adicionar médias e mínimo regulatório para referência
+                    df_export_capital['Média CET1 (%)'] = round(media_cet1, 2)
+                    df_export_capital['Média AT1 (%)'] = round(media_at1, 2)
+                    df_export_capital['Média T2 (%)'] = round(media_t2, 2)
+                    df_export_capital['Média Basileia (%)'] = round(media_basileia, 2)
+                    df_export_capital['Mínimo Regulatório (%)'] = MINIMO_REGULATORIO
+
+                    # Formatar valores percentuais com 2 casas decimais
+                    colunas_pct_export = ['CET1 (%)', 'AT1 (%)', 'T2 (%)', 'Índice de Basileia Total (%)', 'Diferença vs Média (%)']
+                    for col in colunas_pct_export:
+                        df_export_capital[col] = df_export_capital[col].apply(
+                            lambda x: round(x, 2) if pd.notna(x) else None
+                        )
 
                     col_excel, col_csv = st.columns(2)
 
