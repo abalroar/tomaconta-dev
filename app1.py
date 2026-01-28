@@ -15,6 +15,16 @@ from utils.ifdata_extractor import (
     get_log_file_path,
     parece_codigo_instituicao,
 )
+# Import isolado para extração de capital (cache separado, sem impacto no fluxo principal)
+from utils.capital_extractor import (
+    gerar_periodos_capital,
+    processar_todos_periodos_capital,
+    salvar_cache_capital,
+    carregar_cache_capital,
+    get_capital_cache_info,
+    ler_info_cache_capital,
+    get_campos_capital_info,
+)
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -1265,6 +1275,82 @@ with st.sidebar:
                             st.success(mensagem)
                         else:
                             st.error(mensagem)
+
+                # =============================================================
+                # SEÇÃO ISOLADA: EXTRAÇÃO DE DADOS DE CAPITAL
+                # Cache separado (capital_cache.pkl), sem impacto no fluxo principal
+                # =============================================================
+                st.markdown("---")
+                st.markdown("**extrair capital (relatório 5)**")
+                st.caption("extrai informações de capital (índices, RWA, alavancagem) - cache separado")
+
+                # Mostrar status do cache de capital
+                capital_cache_info = get_capital_cache_info()
+                if capital_cache_info['existe']:
+                    st.caption(f"📊 cache capital: {capital_cache_info['n_periodos']} períodos | {capital_cache_info['tamanho_formatado']}")
+                    st.caption(f"📅 atualizado: {capital_cache_info['data_formatada']}")
+                else:
+                    st.caption("📊 cache capital: não existe ainda")
+
+                col_cap1, col_cap2 = st.columns(2)
+                with col_cap1:
+                    ano_cap_i = st.selectbox("ano inicial", range(2015, 2028), index=8, key="ano_cap_i")
+                    mes_cap_i = st.selectbox("trim. inicial", ['03', '06', '09', '12'], key="mes_cap_i")
+                with col_cap2:
+                    ano_cap_f = st.selectbox("ano final", range(2015, 2028), index=10, key="ano_cap_f")
+                    mes_cap_f = st.selectbox("trim. final", ['03', '06', '09', '12'], index=2, key="mes_cap_f")
+
+                if st.button("extrair dados de capital", type="secondary", use_container_width=True, key="btn_extrair_capital"):
+                    periodos_cap = gerar_periodos_capital(ano_cap_i, mes_cap_i, ano_cap_f, mes_cap_f)
+                    progress_bar_cap = st.progress(0)
+                    status_cap = st.empty()
+                    save_status_cap = st.empty()
+
+                    def update_cap(i, total, p):
+                        progress_bar_cap.progress((i + 1) / total)
+                        status_cap.text(f"extraindo capital {p[4:6]}/{p[:4]} ({i + 1}/{total})")
+
+                    def save_progress_cap(dados_parciais, info):
+                        save_status_cap.text(f"💾 salvando {len(dados_parciais)} períodos de capital...")
+                        salvar_cache_capital(dados_parciais, info, incremental=True)
+                        save_status_cap.text(f"✓ {len(dados_parciais)} períodos de capital salvos")
+
+                    st.info(f"🔄 iniciando extração de capital: {len(periodos_cap)} períodos")
+
+                    # Usar dict_aliases se disponível
+                    aliases_para_capital = st.session_state.get('dict_aliases', {})
+
+                    dados_capital = processar_todos_periodos_capital(
+                        periodos_cap,
+                        dict_aliases=aliases_para_capital,
+                        progress_callback=update_cap,
+                        save_callback=save_progress_cap,
+                        save_interval=5
+                    )
+
+                    if not dados_capital:
+                        progress_bar_cap.empty()
+                        status_cap.empty()
+                        save_status_cap.empty()
+                        st.error("falha ao extrair dados de capital: nenhum período retornou dados válidos.")
+                    else:
+                        periodo_info_cap = f"capital {periodos_cap[0][4:6]}/{periodos_cap[0][:4]} até {periodos_cap[-1][4:6]}/{periodos_cap[-1][:4]}"
+                        cache_capital_salvo = salvar_cache_capital(dados_capital, periodo_info_cap, incremental=True)
+
+                        progress_bar_cap.empty()
+                        status_cap.empty()
+                        save_status_cap.empty()
+
+                        st.success(f"✓ {len(dados_capital)} períodos de capital extraídos!")
+                        st.info(f"cache capital salvo em: {cache_capital_salvo['caminho']}")
+                        st.info(f"tamanho: {cache_capital_salvo['tamanho_formatado']} | total: {cache_capital_salvo['n_periodos']} períodos")
+
+                        # Mostrar campos extraídos
+                        with st.expander("campos extraídos"):
+                            campos = get_campos_capital_info()
+                            for original, exibido in campos.items():
+                                st.caption(f"• {exibido} ← _{original}_")
+
             else:
                 st.warning("carregue os aliases primeiro")
         elif senha_input:

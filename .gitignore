@@ -4,9 +4,13 @@ __pycache__/
 *$py.class
 *.so
 
-# Cache de dados
+# Cache de dados (principal)
 data/dados_cache.pkl
 data/cache_info.txt
+
+# Cache de dados de capital (isolado)
+data/capital_cache.pkl
+data/capital_cache_info.txt
 
 # Logs de extração
 data/logs/
