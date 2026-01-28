@@ -903,7 +903,7 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         )
 
     if "Carteira de Crédito" in df_out.columns and "Ativo Total" in df_out.columns:
-        df_out["Carteira/Ativo (%)"] = (
+        df_out["Crédito/Ativo (%)"] = (
             df_out["Carteira de Crédito"].fillna(0) /
             df_out["Ativo Total"].replace(0, np.nan)
         )
