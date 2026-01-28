@@ -1068,6 +1068,23 @@ if 'dados_periodos' not in st.session_state:
         if 'cache_fonte' not in st.session_state:
             st.session_state['cache_fonte'] = fonte
 
+# Carregar cache de capital (isolado) se disponível
+if 'dados_capital' not in st.session_state:
+    dados_capital = carregar_cache_capital()
+    if dados_capital:
+        # Aplicar aliases ao cache de capital
+        if 'dict_aliases' in st.session_state:
+            mapa_codigos = None
+            periodos_capital = sorted(dados_capital.keys())
+            if periodos_capital:
+                mapa_codigos = construir_mapa_codinst(periodos_capital[-1])
+            dados_capital = aplicar_aliases_em_periodos(
+                dados_capital,
+                st.session_state['dict_aliases'],
+                mapa_codigos=mapa_codigos,
+            )
+        st.session_state['dados_capital'] = dados_capital
+
 # Menu horizontal no topo
 if 'menu_atual' not in st.session_state:
     st.session_state['menu_atual'] = "Sobre"
@@ -1140,7 +1157,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas", "Brincar"],
+    ["Sobre", "Resumo", "Infos de Capital", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas", "Brincar"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -1913,6 +1930,409 @@ elif menu == "Resumo":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Infos de Capital":
+    st.markdown("## infos de capital")
+    st.caption("análise de indicadores de capital usando dados do Relatório 5 (IFData/Olinda).")
+
+    if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
+        df_capital = pd.concat(st.session_state['dados_capital'].values(), ignore_index=True)
+
+        # Verificar colunas necessárias para Índice de Basileia
+        colunas_basileia = ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
+        colunas_faltantes = [col for col in colunas_basileia if col not in df_capital.columns]
+
+        if colunas_faltantes:
+            st.warning(f"Colunas necessárias ausentes no cache de capital: {', '.join(colunas_faltantes)}")
+        else:
+            periodos_capital = ordenar_periodos(df_capital['Período'].dropna().unique(), reverso=True)
+
+            # Seletor de tipo de gráfico
+            tipos_graficos = ["Índice de Basileia Total"]
+            col_tipo_graf, col_periodo_cap = st.columns([2, 1.5])
+
+            with col_tipo_graf:
+                tipo_grafico_capital = st.selectbox(
+                    "tipo de gráfico",
+                    tipos_graficos,
+                    key="tipo_grafico_capital"
+                )
+            with col_periodo_cap:
+                periodo_capital = st.selectbox(
+                    "período (trimestre)",
+                    periodos_capital,
+                    index=0,
+                    key="periodo_capital"
+                )
+
+            if tipo_grafico_capital == "Índice de Basileia Total":
+                # Filtrar dados do período
+                df_periodo_cap = df_capital[df_capital['Período'] == periodo_capital].copy()
+
+                # Calcular CET1, AT1, T2 como percentuais do RWA Total
+                # CET1 = Capital Principal / RWA Total * 100
+                # AT1 = Capital Complementar / RWA Total * 100
+                # T2 = Capital Nível II / RWA Total * 100
+
+                # Tratar RWA Total zero ou ausente
+                df_periodo_cap['RWA_valido'] = (
+                    df_periodo_cap['RWA Total'].notna() &
+                    (df_periodo_cap['RWA Total'] != 0)
+                )
+
+                df_periodo_cap['CET1 (%)'] = np.where(
+                    df_periodo_cap['RWA_valido'],
+                    (df_periodo_cap['Capital Principal'] / df_periodo_cap['RWA Total']) * 100,
+                    np.nan
+                )
+                df_periodo_cap['AT1 (%)'] = np.where(
+                    df_periodo_cap['RWA_valido'],
+                    (df_periodo_cap['Capital Complementar'] / df_periodo_cap['RWA Total']) * 100,
+                    np.nan
+                )
+                df_periodo_cap['T2 (%)'] = np.where(
+                    df_periodo_cap['RWA_valido'],
+                    (df_periodo_cap['Capital Nível II'] / df_periodo_cap['RWA Total']) * 100,
+                    np.nan
+                )
+
+                # Índice de Basileia Total = CET1 + AT1 + T2
+                df_periodo_cap['Índice de Basileia Total (%)'] = (
+                    df_periodo_cap['CET1 (%)'] +
+                    df_periodo_cap['AT1 (%)'] +
+                    df_periodo_cap['T2 (%)']
+                )
+
+                # --- Seleção de Bancos (mesmo padrão do Resumo) ---
+                col_peers_cap, col_bancos_cap = st.columns([1.2, 2.8])
+
+                peers_disponiveis_cap = []
+                if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
+                    peers_disponiveis_cap = st.session_state['colunas_classificacao']
+
+                with col_peers_cap:
+                    peers_selecionados_cap = st.multiselect(
+                        "grupos de peers",
+                        peers_disponiveis_cap,
+                        key="peers_capital"
+                    )
+
+                    usar_top_universo_cap = False
+                    top_universo_n_cap = 30
+                    if not peers_selecionados_cap:
+                        usar_top_universo_cap = st.checkbox(
+                            "selecionar automaticamente top N do universo",
+                            value=True,
+                            key="top_universo_toggle_capital"
+                        )
+                        top_universo_n_cap = st.selectbox(
+                            "top N (universo)",
+                            [10, 20, 30, 40],
+                            index=2,
+                            key="top_universo_n_capital"
+                        )
+
+                bancos_do_peer_cap = []
+                if peers_selecionados_cap and 'df_aliases' in st.session_state:
+                    df_aliases = st.session_state['df_aliases']
+                    peer_vals = df_aliases[peers_selecionados_cap].fillna(0).apply(
+                        lambda col: col.astype(str).str.strip().isin(["1", "1.0"])
+                    )
+                    mask_peer = peer_vals.any(axis=1)
+                    bancos_do_peer_cap = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
+
+                df_periodo_universo_cap = df_periodo_cap.copy()
+
+                if peers_selecionados_cap and bancos_do_peer_cap:
+                    df_periodo_cap = df_periodo_cap[df_periodo_cap['Instituição'].isin(bancos_do_peer_cap)]
+
+                bancos_todos_cap = df_periodo_cap['Instituição'].dropna().unique().tolist()
+
+                # Ordenar bancos: aliases primeiro, depois por nome
+                if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
+                    aliases_set = set(st.session_state['dict_aliases'].values())
+
+                    bancos_com_alias = []
+                    bancos_sem_alias = []
+
+                    for banco in bancos_todos_cap:
+                        if banco in aliases_set:
+                            bancos_com_alias.append(banco)
+                        else:
+                            bancos_sem_alias.append(banco)
+
+                    def sort_key_cap(nome):
+                        primeiro_char = nome[0].lower() if nome else 'z'
+                        if primeiro_char.isdigit():
+                            return (1, nome.lower())
+                        return (0, nome.lower())
+
+                    bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key_cap)
+                    bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key_cap)
+                    bancos_todos_cap = bancos_com_alias_sorted + bancos_sem_alias_sorted
+                else:
+                    bancos_todos_cap = sorted(bancos_todos_cap)
+
+                # Definir bancos default
+                bancos_default_cap = bancos_do_peer_cap[:10] if bancos_do_peer_cap else []
+                if usar_top_universo_cap:
+                    df_universo_valid_cap = df_periodo_universo_cap.dropna(subset=['Índice de Basileia Total (%)']).copy()
+                    if not df_universo_valid_cap.empty:
+                        df_universo_top_cap = df_universo_valid_cap.sort_values(
+                            'Índice de Basileia Total (%)', ascending=False
+                        ).head(top_universo_n_cap)
+                        bancos_default_cap = df_universo_top_cap['Instituição'].tolist()
+
+                bancos_default_cap = [banco for banco in bancos_default_cap if banco in bancos_todos_cap]
+
+                with col_bancos_cap:
+                    bancos_selecionados_cap = st.multiselect(
+                        "selecionar instituições (até 40)",
+                        bancos_todos_cap,
+                        default=bancos_default_cap,
+                        key="bancos_capital"
+                    )
+
+                # Controles Top N
+                col_top_cap, col_ordem_cap, col_sort_cap = st.columns([1.4, 1.4, 1.8])
+                with col_top_cap:
+                    usar_top_n_cap = st.toggle("usar top/bottom n", value=True, key="usar_top_capital")
+                    top_n_capital = st.selectbox("n", [10, 15, 20], index=0, key="top_n_capital")
+                with col_ordem_cap:
+                    direcao_top_cap = st.radio(
+                        "top/bottom",
+                        ["Top", "Bottom"],
+                        horizontal=True,
+                        key="top_bottom_capital"
+                    )
+                with col_sort_cap:
+                    modo_ordenacao_cap = st.radio(
+                        "ordenação",
+                        ["Ordenar por valor", "Manter ordem de seleção"],
+                        horizontal=True,
+                        key="ordenacao_capital"
+                    )
+
+                # Limitar a 40 bancos
+                max_bancos_cap = 40
+                if bancos_selecionados_cap and len(bancos_selecionados_cap) > max_bancos_cap:
+                    st.warning(f"limite de {max_bancos_cap} instituições excedido; exibindo as primeiras {max_bancos_cap}.")
+                    bancos_selecionados_cap = bancos_selecionados_cap[:max_bancos_cap]
+
+                # Aplicar filtros Top N
+                if usar_top_n_cap or not bancos_selecionados_cap:
+                    df_periodo_valid_cap = df_periodo_cap.dropna(subset=['Índice de Basileia Total (%)']).copy()
+                    if df_periodo_valid_cap.empty:
+                        st.info("não há dados suficientes para o período selecionado.")
+                        df_selecionado_cap = pd.DataFrame()
+                    else:
+                        ascending = direcao_top_cap == "Bottom"
+                        df_selecionado_cap = df_periodo_valid_cap.sort_values(
+                            'Índice de Basileia Total (%)', ascending=ascending
+                        ).head(top_n_capital)
+                else:
+                    df_selecionado_cap = df_periodo_cap[df_periodo_cap['Instituição'].isin(bancos_selecionados_cap)].copy()
+
+                df_selecionado_cap = df_selecionado_cap.dropna(subset=['Índice de Basileia Total (%)'])
+
+                if df_selecionado_cap.empty:
+                    st.info("selecione instituições ou ajuste os filtros para visualizar os dados de capital.")
+                else:
+                    # Ordenação final
+                    if modo_ordenacao_cap == "Ordenar por valor":
+                        ordenar_asc = direcao_top_cap == "Bottom"
+                        df_selecionado_cap = df_selecionado_cap.sort_values(
+                            'Índice de Basileia Total (%)', ascending=ordenar_asc
+                        )
+                    elif bancos_selecionados_cap:
+                        ordem = bancos_selecionados_cap
+                        df_selecionado_cap['ordem'] = pd.Categorical(
+                            df_selecionado_cap['Instituição'], categories=ordem, ordered=True
+                        )
+                        df_selecionado_cap = df_selecionado_cap.sort_values('ordem')
+
+                    # Calcular médias
+                    media_basileia = df_selecionado_cap['Índice de Basileia Total (%)'].mean()
+                    media_cet1 = df_selecionado_cap['CET1 (%)'].mean()
+                    media_at1 = df_selecionado_cap['AT1 (%)'].mean()
+                    media_t2 = df_selecionado_cap['T2 (%)'].mean()
+
+                    # Calcular ranking
+                    df_selecionado_cap['Ranking'] = df_selecionado_cap['Índice de Basileia Total (%)'].rank(
+                        method='first', ascending=False
+                    ).astype(int)
+
+                    # Diferença vs média
+                    df_selecionado_cap['Diferença vs Média (%)'] = (
+                        df_selecionado_cap['Índice de Basileia Total (%)'] - media_basileia
+                    )
+
+                    # --- Gráfico de Barras Empilhadas ---
+                    n_bancos_cap = len(df_selecionado_cap)
+
+                    # Cores para os componentes
+                    cores_componentes = {
+                        'CET1 (%)': '#1f77b4',  # Azul
+                        'AT1 (%)': '#ff7f0e',   # Laranja
+                        'T2 (%)': '#2ca02c'     # Verde
+                    }
+
+                    fig_capital = go.Figure()
+
+                    # Adicionar barras empilhadas para CET1, AT1, T2
+                    for componente, cor in cores_componentes.items():
+                        nome_display = componente.replace(' (%)', '')
+                        fig_capital.add_trace(go.Bar(
+                            x=df_selecionado_cap['Instituição'],
+                            y=df_selecionado_cap[componente],
+                            name=nome_display,
+                            marker_color=cor,
+                            hovertemplate=(
+                                "<b>%{x}</b><br>"
+                                f"{nome_display}: %{{y:.2f}}%<extra></extra>"
+                            )
+                        ))
+
+                    # Adicionar data labels com o Índice de Basileia Total no topo das barras
+                    fig_capital.add_trace(go.Scatter(
+                        x=df_selecionado_cap['Instituição'],
+                        y=df_selecionado_cap['Índice de Basileia Total (%)'],
+                        mode='text',
+                        text=df_selecionado_cap['Índice de Basileia Total (%)'].apply(lambda x: f"{x:.2f}%"),
+                        textposition='top center',
+                        textfont=dict(size=10, color='#333'),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+
+                    # Adicionar linha de média
+                    fig_capital.add_trace(go.Scatter(
+                        x=df_selecionado_cap['Instituição'],
+                        y=[media_basileia] * n_bancos_cap,
+                        mode='lines',
+                        name=f'Média ({media_basileia:.2f}%)',
+                        line=dict(color='#e74c3c', dash='dash', width=2),
+                        hovertemplate=f"Média: {media_basileia:.2f}%<extra></extra>"
+                    ))
+
+                    fig_capital.update_layout(
+                        title=f"Índice de Basileia Total - {periodo_capital} ({n_bancos_cap} instituições)",
+                        xaxis_title="instituições",
+                        yaxis_title="índice (%)",
+                        plot_bgcolor='#f8f9fa',
+                        paper_bgcolor='white',
+                        height=max(650, n_bancos_cap * 24),
+                        barmode='stack',
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                        xaxis=dict(tickangle=-45),
+                        yaxis=dict(tickformat='.2f', ticksuffix='%'),
+                        font=dict(family='IBM Plex Sans')
+                    )
+
+                    st.plotly_chart(fig_capital, use_container_width=True, config={'displayModeBar': False})
+
+                    # --- Exportação Excel/CSV ---
+                    df_export_capital = df_selecionado_cap[[
+                        'Instituição', 'CET1 (%)', 'AT1 (%)', 'T2 (%)',
+                        'Índice de Basileia Total (%)', 'Ranking', 'Diferença vs Média (%)'
+                    ]].copy()
+                    df_export_capital.insert(0, 'Período', periodo_capital)
+
+                    # Adicionar médias
+                    df_export_capital['Média CET1 (%)'] = media_cet1
+                    df_export_capital['Média AT1 (%)'] = media_at1
+                    df_export_capital['Média T2 (%)'] = media_t2
+                    df_export_capital['Média Basileia (%)'] = media_basileia
+
+                    col_excel, col_csv = st.columns(2)
+
+                    with col_excel:
+                        buffer_excel_cap = BytesIO()
+                        with pd.ExcelWriter(buffer_excel_cap, engine='xlsxwriter') as writer:
+                            df_export_capital.to_excel(writer, index=False, sheet_name='indice_basileia')
+                        buffer_excel_cap.seek(0)
+
+                        st.download_button(
+                            label="Exportar Excel",
+                            data=buffer_excel_cap,
+                            file_name=f"indice_basileia_{periodo_capital.replace('/', '-')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="exportar_capital_excel"
+                        )
+
+                    with col_csv:
+                        csv_data_cap = df_export_capital.to_csv(index=False)
+                        st.download_button(
+                            label="Exportar CSV",
+                            data=csv_data_cap,
+                            file_name=f"indice_basileia_{periodo_capital.replace('/', '-')}.csv",
+                            mime="text/csv",
+                            key="exportar_capital_csv"
+                        )
+
+                    # --- Tabela com os dados ---
+                    st.markdown("### dados detalhados")
+
+                    # Preparar tabela para exibição
+                    df_tabela = df_selecionado_cap[[
+                        'Instituição', 'CET1 (%)', 'AT1 (%)', 'T2 (%)',
+                        'Índice de Basileia Total (%)', 'Ranking', 'Diferença vs Média (%)'
+                    ]].copy()
+                    df_tabela.insert(0, 'Período', periodo_capital)
+
+                    # Formatar colunas percentuais
+                    colunas_pct = ['CET1 (%)', 'AT1 (%)', 'T2 (%)', 'Índice de Basileia Total (%)', 'Diferença vs Média (%)']
+
+                    # Identificar linhas com RWA inválido (para tooltip)
+                    df_tabela_orig = df_selecionado_cap.copy()
+                    df_tabela['RWA Status'] = df_tabela_orig['RWA_valido'].apply(
+                        lambda x: '✓' if x else 'RWA zero/ausente'
+                    )
+
+                    # Função para formatar com 2 casas decimais
+                    def format_pct(x):
+                        if pd.isna(x):
+                            return "N/A"
+                        return f"{x:.2f}%"
+
+                    for col in colunas_pct:
+                        df_tabela[col] = df_tabela[col].apply(format_pct)
+
+                    st.dataframe(
+                        df_tabela,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            'Período': st.column_config.TextColumn('Período'),
+                            'Instituição': st.column_config.TextColumn('Instituição'),
+                            'CET1 (%)': st.column_config.TextColumn('CET1 (%)'),
+                            'AT1 (%)': st.column_config.TextColumn('AT1 (%)'),
+                            'T2 (%)': st.column_config.TextColumn('T2 (%)'),
+                            'Índice de Basileia Total (%)': st.column_config.TextColumn('Índice de Basileia Total (%)'),
+                            'Ranking': st.column_config.NumberColumn('Ranking'),
+                            'Diferença vs Média (%)': st.column_config.TextColumn('Dif. vs Média (%)'),
+                            'RWA Status': st.column_config.TextColumn(
+                                'RWA Status',
+                                help='Indica se o RWA Total é válido. Se zero ou ausente, os cálculos de índices ficam como N/A.'
+                            )
+                        }
+                    )
+
+                    # Exibir médias do grupo
+                    st.caption(
+                        f"**médias do grupo exibido:** "
+                        f"CET1: {media_cet1:.2f}% | "
+                        f"AT1: {media_at1:.2f}% | "
+                        f"T2: {media_t2:.2f}% | "
+                        f"Índice de Basileia Total: {media_basileia:.2f}%"
+                    )
+
+    else:
+        st.info("cache de capital não disponível.")
+        st.markdown(
+            "para usar esta aba, extraia os dados de capital na seção 'controle avançado' → 'extrair capital (relatório 5)' na sidebar."
+        )
 
 elif menu == "Análise Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
