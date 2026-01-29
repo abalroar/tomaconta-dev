@@ -1675,12 +1675,19 @@ with st.sidebar:
                 st.markdown("**publicar cache no github**")
                 st.caption("envia o cache local para github releases para que outros usuários possam usar")
 
+                # Tentar usar token do Streamlit Secrets primeiro
+                token_from_secrets = st.secrets.get("GITHUB_TOKEN", None) if hasattr(st, 'secrets') else None
+                if token_from_secrets:
+                    st.caption("✓ usando GITHUB_TOKEN dos Secrets")
+
                 gh_token = st.text_input("github token (opcional)", type="password", key="gh_token",
-                                        help="token com permissão 'repo'. deixe em branco se gh CLI estiver autenticado")
+                                        help="token com permissão 'repo'. deixe em branco para usar Secrets ou gh CLI")
 
                 if st.button("enviar cache para github", use_container_width=True):
+                    # Prioridade: input manual → Secrets → gh CLI
+                    token_final = gh_token if gh_token else token_from_secrets
                     with st.spinner("enviando cache para github releases..."):
-                        sucesso, mensagem = upload_cache_github(gh_token if gh_token else None)
+                        sucesso, mensagem = upload_cache_github(token_final)
                         if sucesso:
                             st.success(mensagem)
                         else:
@@ -1773,8 +1780,10 @@ with st.sidebar:
                         st.info(f"tamanho: {cache_capital_salvo['tamanho_formatado']} | total: {cache_capital_salvo['n_periodos']} períodos")
 
                         # Upload para GitHub Releases para persistência
+                        # Usa token do Streamlit Secrets se disponível
+                        github_token = st.secrets.get("GITHUB_TOKEN", None) if hasattr(st, 'secrets') else None
                         with st.spinner("enviando cache de capital para github releases..."):
-                            sucesso_upload, msg_upload = upload_cache_capital_github()
+                            sucesso_upload, msg_upload = upload_cache_capital_github(token=github_token)
                             if sucesso_upload:
                                 st.success(f"☁️ {msg_upload}")
                             else:
