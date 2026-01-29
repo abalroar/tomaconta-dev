@@ -3082,8 +3082,7 @@ elif menu == "Scatter Plot":
             var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1)
         with col3:
             opcoes_tamanho = ['Tamanho Fixo'] + colunas_numericas
-            default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
-            var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
+            var_size = st.selectbox("tamanho", opcoes_tamanho, index=0)
         with col4:
             periodo_scatter = st.selectbox("período", periodos, index=0)
 
@@ -3091,7 +3090,7 @@ elif menu == "Scatter Plot":
         col_t1, col_t2, col_t3 = st.columns([1, 1, 2])
 
         with col_t1:
-            top_n_scatter = st.slider("top n", 5, 50, 15)
+            top_n_scatter = st.slider("top n", 5, 50, 5)
         with col_t2:
             var_top_n = st.selectbox("top n por", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
 
@@ -3249,7 +3248,7 @@ elif menu == "Scatter Plot":
         col_n2_t1, col_n2_t2, col_n2_t3 = st.columns([1, 1, 2])
 
         with col_n2_t1:
-            top_n_scatter_n2 = st.slider("top n", 5, 50, 15, key="top_n_n2")
+            top_n_scatter_n2 = st.slider("top n", 5, 50, 5, key="top_n_n2")
         with col_n2_t2:
             var_top_n_n2 = st.selectbox(
                 "top n por",
@@ -3259,8 +3258,7 @@ elif menu == "Scatter Plot":
             )
         with col_n2_t3:
             opcoes_tamanho_n2 = ['Tamanho Fixo'] + colunas_numericas
-            default_idx_n2 = opcoes_tamanho_n2.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho_n2 else 1
-            var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=default_idx_n2, key="var_size_n2")
+            var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=0, key="var_size_n2")
 
         # Terceira linha: Peers e Seleção de bancos
         col_n2_f1, col_n2_f2 = st.columns([1, 3])
