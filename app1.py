@@ -1577,7 +1577,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Resumo", "Infos de Capital", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas", "Brincar", "Atualização Base"],
+    ["Sobre", "Atualização Base", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas", "Infos de Capital", "Brincar"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
