@@ -2825,7 +2825,8 @@ elif menu == "Capital Regulatório":
             'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
             'Capital Complementar': ['Capital Complementar', 'Capital Complementar (b)'],
             'Capital Nível II': ['Capital Nível II', 'Capital Nível II (d)'],
-            'RWA Total': ['RWA Total', 'Ativos Ponderados pelo Risco (RWA) (j)', 'RWA']
+            'RWA Total': ['RWA Total', 'Ativos Ponderados pelo Risco (RWA) (j) = (f) + (g) + (h) + (i)', 'Ativos Ponderados pelo Risco (RWA) (j)', 'RWA'],
+            'Índice de Basileia Capital': ['Índice de Basileia Capital', 'Índice de Basileia (n) = (e) / (j)', 'Índice de Basileia'],
         }
 
         # Encontrar colunas disponíveis
@@ -2842,12 +2843,26 @@ elif menu == "Capital Regulatório":
             else:
                 colunas_faltantes.append(nome_padrao)
 
+        # Verificar colunas essenciais para gráfico de composição (CET1/AT1/T2)
+        colunas_composicao = ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
+        faltantes_composicao = [c for c in colunas_composicao if c in colunas_faltantes]
+
+        # Verificar se temos Índice de Basileia pré-calculado como fallback
+        tem_indice_basileia_precalc = 'Índice de Basileia Capital' in colunas_encontradas
+
         if colunas_faltantes:
-            st.warning(f"Colunas necessárias ausentes no cache de capital: {', '.join(colunas_faltantes)}")
+            # Mostrar aviso mas não bloquear
+            if faltantes_composicao and not tem_indice_basileia_precalc:
+                st.warning(f"Colunas ausentes no cache de capital: {', '.join(colunas_faltantes)}. Algumas visualizações podem estar indisponíveis.")
+            else:
+                st.info(f"Colunas ausentes: {', '.join(colunas_faltantes)}. Usando índices pré-calculados quando disponíveis.")
             with st.expander("Colunas disponíveis no cache"):
                 st.write(sorted([c for c in df_capital.columns if c not in ['Instituição', 'CodInst', 'Período']]))
-        else:
-            periodos_capital = ordenar_periodos(df_capital['Período'].dropna().unique(), reverso=True)
+
+        # Continuar mesmo com colunas faltantes
+        periodos_capital = ordenar_periodos(df_capital['Período'].dropna().unique(), reverso=True)
+
+        if len(periodos_capital) > 0:
 
             # Seletor de tipo de gráfico
             tipos_graficos = ["Índice de Basileia Total"]
@@ -2879,45 +2894,71 @@ elif menu == "Capital Regulatório":
                 # Filtrar dados do período
                 df_periodo_cap = df_capital[df_capital['Período'] == periodo_capital].copy()
 
-                # Usar colunas mapeadas
-                col_capital_principal = colunas_encontradas['Capital Principal']
-                col_capital_complementar = colunas_encontradas['Capital Complementar']
-                col_capital_nivel2 = colunas_encontradas['Capital Nível II']
-                col_rwa_total = colunas_encontradas['RWA Total']
-
-                # Calcular CET1, AT1, T2 como percentuais do RWA Total
-                # CET1 = Capital Principal / RWA Total * 100
-                # AT1 = Capital Complementar / RWA Total * 100
-                # T2 = Capital Nível II / RWA Total * 100
-
-                # Tratar RWA Total zero ou ausente
-                df_periodo_cap['RWA_valido'] = (
-                    df_periodo_cap[col_rwa_total].notna() &
-                    (df_periodo_cap[col_rwa_total] != 0)
+                # Verificar se podemos calcular composição (CET1/AT1/T2) ou usar índice pré-calculado
+                pode_calcular_composicao = all(
+                    col in colunas_encontradas
+                    for col in ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
                 )
 
-                df_periodo_cap['CET1 (%)'] = np.where(
-                    df_periodo_cap['RWA_valido'],
-                    (df_periodo_cap[col_capital_principal] / df_periodo_cap[col_rwa_total]) * 100,
-                    np.nan
-                )
-                df_periodo_cap['AT1 (%)'] = np.where(
-                    df_periodo_cap['RWA_valido'],
-                    (df_periodo_cap[col_capital_complementar] / df_periodo_cap[col_rwa_total]) * 100,
-                    np.nan
-                )
-                df_periodo_cap['T2 (%)'] = np.where(
-                    df_periodo_cap['RWA_valido'],
-                    (df_periodo_cap[col_capital_nivel2] / df_periodo_cap[col_rwa_total]) * 100,
-                    np.nan
-                )
+                if pode_calcular_composicao:
+                    # Usar colunas mapeadas
+                    col_capital_principal = colunas_encontradas['Capital Principal']
+                    col_capital_complementar = colunas_encontradas['Capital Complementar']
+                    col_capital_nivel2 = colunas_encontradas['Capital Nível II']
+                    col_rwa_total = colunas_encontradas['RWA Total']
 
-                # Índice de Basileia Total = CET1 + AT1 + T2
-                df_periodo_cap['Índice de Basileia Total (%)'] = (
-                    df_periodo_cap['CET1 (%)'] +
-                    df_periodo_cap['AT1 (%)'] +
-                    df_periodo_cap['T2 (%)']
-                )
+                    # Calcular CET1, AT1, T2 como percentuais do RWA Total
+                    # CET1 = Capital Principal / RWA Total * 100
+                    # AT1 = Capital Complementar / RWA Total * 100
+                    # T2 = Capital Nível II / RWA Total * 100
+
+                    # Tratar RWA Total zero ou ausente
+                    df_periodo_cap['RWA_valido'] = (
+                        df_periodo_cap[col_rwa_total].notna() &
+                        (df_periodo_cap[col_rwa_total] != 0)
+                    )
+
+                    df_periodo_cap['CET1 (%)'] = np.where(
+                        df_periodo_cap['RWA_valido'],
+                        (df_periodo_cap[col_capital_principal] / df_periodo_cap[col_rwa_total]) * 100,
+                        np.nan
+                    )
+                    df_periodo_cap['AT1 (%)'] = np.where(
+                        df_periodo_cap['RWA_valido'],
+                        (df_periodo_cap[col_capital_complementar] / df_periodo_cap[col_rwa_total]) * 100,
+                        np.nan
+                    )
+                    df_periodo_cap['T2 (%)'] = np.where(
+                        df_periodo_cap['RWA_valido'],
+                        (df_periodo_cap[col_capital_nivel2] / df_periodo_cap[col_rwa_total]) * 100,
+                        np.nan
+                    )
+
+                    # Índice de Basileia Total = CET1 + AT1 + T2
+                    df_periodo_cap['Índice de Basileia Total (%)'] = (
+                        df_periodo_cap['CET1 (%)'] +
+                        df_periodo_cap['AT1 (%)'] +
+                        df_periodo_cap['T2 (%)']
+                    )
+                elif 'Índice de Basileia Capital' in colunas_encontradas:
+                    # Usar índice pré-calculado da API
+                    col_indice_basileia = colunas_encontradas['Índice de Basileia Capital']
+                    # Converter de decimal (0-1) para percentual se necessário
+                    valores_ib = df_periodo_cap[col_indice_basileia]
+                    if valores_ib.max() <= 1:  # Valores em decimal
+                        df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib * 100
+                    else:
+                        df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib
+
+                    # Marcar que não temos composição
+                    df_periodo_cap['RWA_valido'] = True  # Assumir válido para exibição
+                    df_periodo_cap['CET1 (%)'] = np.nan
+                    df_periodo_cap['AT1 (%)'] = np.nan
+                    df_periodo_cap['T2 (%)'] = np.nan
+                    st.caption("ℹ️ Usando Índice de Basileia pré-calculado (composição CET1/AT1/T2 não disponível)")
+                else:
+                    st.error("Não foi possível calcular o Índice de Basileia. Verifique se o cache possui as colunas necessárias.")
+                    st.stop()
 
                 # Merge com dados principais para obter variáveis de ponderação
                 if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
