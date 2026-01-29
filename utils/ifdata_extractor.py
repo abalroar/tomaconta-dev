@@ -784,6 +784,8 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         )
 
     # 4. Extrair métricas financeiras
+    # IMPORTANTE: "Lucro Líquido" é o nome da coluna na API do BC,
+    # depois é renomeado para "Lucro Líquido Acumulado YTD" no passo 6.
     colunas_desejadas = [
         "Ativo Total",
         "Carteira de Crédito",
@@ -792,7 +794,7 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         "Passivo Exigível",
         "Captações",
         "Patrimônio Líquido",
-        "Lucro Líquido Acumulado YTD",
+        "Lucro Líquido",
         "Patrimônio de Referência",
         "Patrimônio de Referência para Comparação com o RWA (e)",
         "Índice de Basileia",
