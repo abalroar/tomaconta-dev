@@ -2042,6 +2042,18 @@ with st.sidebar:
                 if capital_cache_info['existe']:
                     st.caption(f"📊 cache capital: {capital_cache_info['n_periodos']} períodos | {capital_cache_info['tamanho_formatado']}")
                     st.caption(f"📅 atualizado: {capital_cache_info['data_formatada']}")
+
+                    # Botão para baixar o cache localmente (backup)
+                    cache_capital_path = Path(CAPITAL_CACHE_FILE)
+                    with open(cache_capital_path, "rb") as f:
+                        st.download_button(
+                            label="📥 baixar cache de capital (backup local)",
+                            data=f,
+                            file_name="capital_cache.pkl",
+                            mime="application/octet-stream",
+                            use_container_width=True,
+                            help="Baixe uma cópia do cache antes que o Streamlit reinicie"
+                        )
                 else:
                     st.caption("📊 cache capital: não existe ainda")
 
