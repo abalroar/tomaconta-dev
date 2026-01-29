@@ -1136,6 +1136,7 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
     """Faz upload do cache de capital para GitHub Releases.
 
     Similar ao upload_cache_github(), mas para o cache de capital.
+    Inclui verificação real de sucesso após upload.
     """
     repo = "abalroar/tomaconta"
     tag = "v1.0-cache"
@@ -1144,9 +1145,11 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
     info_path = Path(CAPITAL_CACHE_INFO)
 
     if not cache_path.exists():
-        return False, "arquivo capital_cache.pkl não encontrado"
+        return False, "arquivo capital_cache.pkl não encontrado localmente"
 
-    # Tentar usar gh CLI primeiro
+    cache_size = cache_path.stat().st_size
+
+    # Tentar usar gh CLI primeiro (geralmente não disponível no Streamlit Cloud)
     try:
         result = subprocess.run(['gh', '--version'], capture_output=True, timeout=5)
         gh_available = result.returncode == 0
@@ -1166,7 +1169,7 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
             )
 
             # Upload novos arquivos
-            subprocess.run(
+            result = subprocess.run(
                 ['gh', 'release', 'upload', tag, str(cache_path), '--clobber', '-R', repo],
                 check=True, capture_output=True, timeout=300
             )
@@ -1176,14 +1179,21 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
                     check=True, capture_output=True, timeout=60
                 )
 
-            return True, "cache de capital enviado para github releases com sucesso!"
+            return True, f"cache de capital ({cache_size / 1024 / 1024:.1f} MB) enviado via gh CLI!"
 
         except subprocess.CalledProcessError as e:
-            return False, f"erro ao usar gh CLI: {e}"
+            # Se gh CLI falhar, tentar com token
+            if token:
+                pass  # Continua para fallback com token
+            else:
+                return False, f"erro ao usar gh CLI: {e.stderr.decode() if e.stderr else str(e)}"
         except Exception as e:
-            return False, f"erro inesperado: {e}"
+            if token:
+                pass  # Continua para fallback com token
+            else:
+                return False, f"erro inesperado com gh CLI: {e}"
 
-    # Fallback: usar API do GitHub com token
+    # Usar API do GitHub com token
     if token:
         try:
             headers = {
@@ -1191,11 +1201,19 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
                 'Accept': 'application/vnd.github.v3+json'
             }
 
+            # Verificar se token é válido
+            user_url = "https://api.github.com/user"
+            r_user = requests.get(user_url, headers=headers, timeout=10)
+            if r_user.status_code != 200:
+                return False, f"token inválido ou expirado (status {r_user.status_code})"
+
             # Obter release
             release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
             r = requests.get(release_url, headers=headers, timeout=30)
-            if r.status_code != 200:
-                return False, f"release {tag} não encontrada"
+            if r.status_code == 404:
+                return False, f"release '{tag}' não encontrada no repo '{repo}'. Crie a release primeiro."
+            elif r.status_code != 200:
+                return False, f"erro ao acessar release: {r.status_code} - {r.text[:100]}"
 
             release_data = r.json()
             upload_url = release_data['upload_url'].replace('{?name,label}', '')
@@ -1204,7 +1222,9 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
             for asset in release_data.get('assets', []):
                 if asset['name'] in ['capital_cache.pkl', 'capital_cache_info.txt']:
                     delete_url = f"https://api.github.com/repos/{repo}/releases/assets/{asset['id']}"
-                    requests.delete(delete_url, headers=headers, timeout=30)
+                    r_del = requests.delete(delete_url, headers=headers, timeout=30)
+                    if r_del.status_code not in [204, 404]:
+                        print(f"[CAPITAL] Aviso: não conseguiu deletar asset antigo: {r_del.status_code}")
 
             # Upload capital_cache.pkl
             with open(cache_path, 'rb') as f:
@@ -1217,7 +1237,7 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
                     timeout=300
                 )
                 if r.status_code not in [200, 201]:
-                    return False, f"falha no upload do cache de capital: {r.status_code}"
+                    return False, f"falha no upload: {r.status_code} - {r.text[:100]}"
 
             # Upload info se existir
             if info_path.exists():
@@ -1229,12 +1249,70 @@ def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
                         timeout=60
                     )
 
-            return True, "cache de capital enviado para github releases com sucesso!"
+            # VERIFICAÇÃO REAL: Confirmar que o asset existe após upload
+            r_verify = requests.get(release_url, headers=headers, timeout=30)
+            if r_verify.status_code == 200:
+                assets = r_verify.json().get('assets', [])
+                asset_names = [a['name'] for a in assets]
+                if 'capital_cache.pkl' in asset_names:
+                    uploaded_size = next((a['size'] for a in assets if a['name'] == 'capital_cache.pkl'), 0)
+                    return True, f"cache de capital ({uploaded_size / 1024 / 1024:.1f} MB) enviado e verificado!"
+                else:
+                    return False, "upload reportou sucesso mas asset não encontrado na release"
 
+            return True, f"cache de capital ({cache_size / 1024 / 1024:.1f} MB) enviado!"
+
+        except requests.exceptions.Timeout:
+            return False, "timeout durante upload (arquivo muito grande ou conexão lenta)"
         except Exception as e:
             return False, f"erro ao usar API do github: {str(e)}"
 
-    return False, "gh CLI não disponível e nenhum token fornecido"
+    return False, "token não fornecido. Insira um token com permissão 'repo' para o repositório abalroar/tomaconta"
+
+
+def verificar_caches_github() -> dict:
+    """Verifica quais caches existem no GitHub Releases.
+
+    Retorna dict com status de cada cache no GitHub (sem autenticação, apenas leitura pública).
+    """
+    repo = "abalroar/tomaconta"
+    tag = "v1.0-cache"
+    result = {
+        'release_existe': False,
+        'cache_principal': {'existe': False, 'tamanho': 0, 'tamanho_fmt': 'N/A'},
+        'cache_capital': {'existe': False, 'tamanho': 0, 'tamanho_fmt': 'N/A'},
+        'erro': None
+    }
+
+    try:
+        release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+        r = requests.get(release_url, timeout=10)
+
+        if r.status_code == 404:
+            result['erro'] = f"Release '{tag}' não encontrada"
+            return result
+        elif r.status_code != 200:
+            result['erro'] = f"Erro ao acessar release: {r.status_code}"
+            return result
+
+        result['release_existe'] = True
+        release_data = r.json()
+
+        for asset in release_data.get('assets', []):
+            size = asset.get('size', 0)
+            size_fmt = f"{size / 1024 / 1024:.1f} MB" if size > 1024*1024 else f"{size / 1024:.1f} KB"
+
+            if asset['name'] == 'dados_cache.pkl':
+                result['cache_principal'] = {'existe': True, 'tamanho': size, 'tamanho_fmt': size_fmt}
+            elif asset['name'] == 'capital_cache.pkl':
+                result['cache_capital'] = {'existe': True, 'tamanho': size, 'tamanho_fmt': size_fmt}
+
+    except requests.exceptions.Timeout:
+        result['erro'] = "Timeout ao verificar GitHub"
+    except Exception as e:
+        result['erro'] = str(e)
+
+    return result
 
 
 def ordenar_periodos(periodos, reverso=False):
@@ -1872,8 +1950,48 @@ with st.sidebar:
                         st.rerun()
 
                 st.markdown("---")
-                st.markdown("**publicar cache no github**")
-                st.caption("envia o cache local para github releases para que outros usuários possam usar")
+                st.markdown("**status dos caches**")
+
+                # Verificar status no GitHub
+                with st.spinner("verificando github..."):
+                    gh_status = verificar_caches_github()
+
+                col_status1, col_status2 = st.columns(2)
+
+                with col_status1:
+                    st.caption("**Cache Principal (dados_cache.pkl)**")
+                    # Local
+                    cache_info_local = get_cache_info()
+                    if cache_info_local['existe']:
+                        st.caption(f"📁 Local: ✅ {cache_info_local['tamanho_formatado']}")
+                    else:
+                        st.caption("📁 Local: ❌ não existe")
+                    # GitHub
+                    if gh_status['cache_principal']['existe']:
+                        st.caption(f"☁️ GitHub: ✅ {gh_status['cache_principal']['tamanho_fmt']}")
+                    else:
+                        st.caption("☁️ GitHub: ❌ não existe")
+
+                with col_status2:
+                    st.caption("**Cache Capital (capital_cache.pkl)**")
+                    # Local
+                    capital_info_local = get_capital_cache_info()
+                    if capital_info_local['existe']:
+                        st.caption(f"📁 Local: ✅ {capital_info_local['tamanho_formatado']} ({capital_info_local['n_periodos']} períodos)")
+                    else:
+                        st.caption("📁 Local: ❌ não existe")
+                    # GitHub
+                    if gh_status['cache_capital']['existe']:
+                        st.caption(f"☁️ GitHub: ✅ {gh_status['cache_capital']['tamanho_fmt']}")
+                    else:
+                        st.caption("☁️ GitHub: ⚠️ **NÃO EXISTE** - envie abaixo!")
+
+                if gh_status['erro']:
+                    st.warning(f"⚠️ Erro ao verificar GitHub: {gh_status['erro']}")
+
+                st.markdown("---")
+                st.markdown("**publicar caches no github**")
+                st.caption("envia os caches locais para github releases para persistência")
 
                 # Tentar usar token do Streamlit Secrets primeiro
                 token_from_secrets = st.secrets.get("GITHUB_TOKEN", None) if hasattr(st, 'secrets') else None
@@ -1883,15 +2001,33 @@ with st.sidebar:
                 gh_token = st.text_input("github token (opcional)", type="password", key="gh_token",
                                         help="token com permissão 'repo'. deixe em branco para usar Secrets ou gh CLI")
 
-                if st.button("enviar cache para github", use_container_width=True):
-                    # Prioridade: input manual → Secrets → gh CLI
-                    token_final = gh_token if gh_token else token_from_secrets
-                    with st.spinner("enviando cache para github releases..."):
-                        sucesso, mensagem = upload_cache_github(token_final)
-                        if sucesso:
-                            st.success(mensagem)
-                        else:
-                            st.error(mensagem)
+                col_upload1, col_upload2 = st.columns(2)
+
+                with col_upload1:
+                    if st.button("📦 enviar cache PRINCIPAL", use_container_width=True, help="Envia dados_cache.pkl"):
+                        # Prioridade: input manual → Secrets → gh CLI
+                        token_final = gh_token if gh_token else token_from_secrets
+                        with st.spinner("enviando cache principal para github releases..."):
+                            sucesso, mensagem = upload_cache_github(token_final)
+                            if sucesso:
+                                st.success(f"✅ Cache PRINCIPAL: {mensagem}")
+                            else:
+                                st.error(f"❌ Cache PRINCIPAL: {mensagem}")
+
+                with col_upload2:
+                    # Botão para enviar cache de capital separadamente
+                    capital_info = get_capital_cache_info()
+                    btn_disabled = not capital_info['existe']
+                    btn_help = "Envia capital_cache.pkl" if capital_info['existe'] else "Cache de capital não existe localmente"
+
+                    if st.button("💰 enviar cache CAPITAL", use_container_width=True, disabled=btn_disabled, help=btn_help):
+                        token_final = gh_token if gh_token else token_from_secrets
+                        with st.spinner("enviando cache de capital para github releases..."):
+                            sucesso, mensagem = upload_cache_capital_github(token=token_final)
+                            if sucesso:
+                                st.success(f"✅ Cache CAPITAL: {mensagem}")
+                            else:
+                                st.error(f"❌ Cache CAPITAL: {mensagem}")
 
                 # =============================================================
                 # SEÇÃO ISOLADA: EXTRAÇÃO DE DADOS DE CAPITAL
