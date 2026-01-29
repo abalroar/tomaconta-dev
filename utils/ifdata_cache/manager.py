@@ -494,12 +494,16 @@ class CacheManager:
         df_novos = pd.concat(dados_novos, ignore_index=True)
 
         if modo == "incremental" and dados_existentes is not None:
+            # Encontrar coluna de período (verificar ambas as grafias)
+            col_periodo_novos = "Período" if "Período" in df_novos.columns else "Periodo"
+            col_periodo_exist = "Período" if "Período" in dados_existentes.columns else "Periodo"
+
             # Identificar períodos novos
-            periodos_novos = set(df_novos["Periodo"].unique())
-            periodos_existentes = set(dados_existentes["Periodo"].unique())
+            periodos_novos = set(df_novos[col_periodo_novos].unique())
+            periodos_existentes = set(dados_existentes[col_periodo_exist].unique())
 
             # Remover períodos que serão substituídos
-            df_manter = dados_existentes[~dados_existentes["Periodo"].isin(periodos_novos)]
+            df_manter = dados_existentes[~dados_existentes[col_periodo_exist].isin(periodos_novos)]
 
             # Concatenar
             df_final = pd.concat([df_manter, df_novos], ignore_index=True)
