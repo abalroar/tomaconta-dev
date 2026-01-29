@@ -1577,7 +1577,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Atualização Base", "Resumo", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas", "Infos de Capital", "Brincar"],
+    ["Sobre", "Atualização Base", "Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Crie sua métrica!"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -1696,7 +1696,7 @@ if menu == "Sobre":
     st.markdown("---")
     st.caption("desenvolvido em 2026 por matheus prates, cfa | ferramenta open-source para análise do sistema financeiro brasileiro")
 
-elif menu == "Resumo":
+elif menu == "Painel":
     st.markdown("## resumo comparativo por período")
     st.caption("compare múltiplas instituições em um único trimestre, com ranking e média do grupo selecionado.")
 
@@ -2183,7 +2183,7 @@ elif menu == "Resumo":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Infos de Capital":
+elif menu == "Capital Regulatório":
     st.markdown("## infos de capital")
     st.caption("análise de indicadores de capital usando dados do Relatório 5 (IFData/Olinda).")
 
@@ -2658,7 +2658,7 @@ elif menu == "Infos de Capital":
             "para usar esta aba, extraia os dados de capital na seção 'controle avançado' → 'extrair capital (relatório 5)' na sidebar."
         )
 
-elif menu == "Análise Individual":
+elif menu == "Histórico Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -2810,7 +2810,7 @@ elif menu == "Análise Individual":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Série Histórica":
+elif menu == "Histórico Peers":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -3477,7 +3477,7 @@ elif menu == "Scatter Plot":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Deltas":
+elif menu == "Deltas (Antes e Depois)":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -3949,7 +3949,7 @@ elif menu == "Deltas":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Brincar":
+elif menu == "Crie sua métrica!":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
