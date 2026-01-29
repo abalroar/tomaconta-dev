@@ -2,15 +2,82 @@
 manager.py - Gerenciador central de caches
 
 Coordena multiplos tipos de cache e fornece interface unificada.
+
+Caches disponíveis:
+- principal: Resumo geral (Relatório 1) - variáveis selecionadas
+- capital: Informações de Capital (Relatório 5) - variáveis selecionadas
+- ativo: Composição do Ativo (Relatório 2) - todas as variáveis
+- passivo: Composição do Passivo (Relatório 3) - todas as variáveis
+- dre: Demonstração de Resultado (Relatório 4) - todas as variáveis
+- carteira_pf: Carteira de Crédito PF (Relatório 11) - todas as variáveis
+- carteira_pj: Carteira de Crédito PJ (Relatório 13) - todas as variáveis
+- carteira_instrumentos: Carteira - Instrumentos Financeiros (Relatório 14) - todas as variáveis
 """
 
 import logging
+import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+import pandas as pd
 
 from .base import BaseCache, CacheResult
 
 logger = logging.getLogger("ifdata_cache")
+
+
+# Informações dos caches para UI
+CACHES_INFO = {
+    "principal": {
+        "nome_exibicao": "Resumo (Relatório 1)",
+        "descricao": "Dados gerais das instituições - variáveis selecionadas",
+        "relatorio": 1,
+        "todas_variaveis": False,
+    },
+    "capital": {
+        "nome_exibicao": "Capital Regulatório (Relatório 5)",
+        "descricao": "Informações de capital - variáveis selecionadas",
+        "relatorio": 5,
+        "todas_variaveis": False,
+    },
+    "ativo": {
+        "nome_exibicao": "Ativo (Relatório 2)",
+        "descricao": "Composição detalhada do ativo - TODAS as variáveis",
+        "relatorio": 2,
+        "todas_variaveis": True,
+    },
+    "passivo": {
+        "nome_exibicao": "Passivo (Relatório 3)",
+        "descricao": "Composição detalhada do passivo - TODAS as variáveis",
+        "relatorio": 3,
+        "todas_variaveis": True,
+    },
+    "dre": {
+        "nome_exibicao": "DRE (Relatório 4)",
+        "descricao": "Demonstração de Resultado - TODAS as variáveis",
+        "relatorio": 4,
+        "todas_variaveis": True,
+    },
+    "carteira_pf": {
+        "nome_exibicao": "Carteira PF (Relatório 11)",
+        "descricao": "Carteira de crédito PF - modalidade e prazo",
+        "relatorio": 11,
+        "todas_variaveis": True,
+    },
+    "carteira_pj": {
+        "nome_exibicao": "Carteira PJ (Relatório 13)",
+        "descricao": "Carteira de crédito PJ - modalidade e prazo",
+        "relatorio": 13,
+        "todas_variaveis": True,
+    },
+    "carteira_instrumentos": {
+        "nome_exibicao": "Carteira Instrumentos (Relatório 14)",
+        "descricao": "Carteira de crédito - por instrumentos financeiros",
+        "relatorio": 14,
+        "todas_variaveis": True,
+    },
+}
 
 
 class CacheManager:
@@ -34,9 +101,26 @@ class CacheManager:
         # Importar aqui para evitar dependencia circular
         from .principal import PrincipalCache
         from .capital import CapitalCache
+        from .relatorios_completos import (
+            AtivoCache,
+            PassivoCache,
+            DRECache,
+            CarteiraPFCache,
+            CarteiraPJCache,
+            CarteiraInstrumentosCache,
+        )
 
+        # Caches principais (variáveis selecionadas)
         self.registrar(PrincipalCache(self.base_dir))
         self.registrar(CapitalCache(self.base_dir))
+
+        # Caches de relatórios completos (todas as variáveis)
+        self.registrar(AtivoCache(self.base_dir))
+        self.registrar(PassivoCache(self.base_dir))
+        self.registrar(DRECache(self.base_dir))
+        self.registrar(CarteiraPFCache(self.base_dir))
+        self.registrar(CarteiraPJCache(self.base_dir))
+        self.registrar(CarteiraInstrumentosCache(self.base_dir))
 
     def registrar(self, cache: BaseCache):
         """Registra um novo tipo de cache.
@@ -229,3 +313,278 @@ class CacheManager:
         if cache is None:
             return False, f"Tipo desconhecido: {tipo}"
         return cache.cache_valido()
+
+    # =========================================================================
+    # NOVOS METODOS PARA EXTRACAO AVANÇADA
+    # =========================================================================
+
+    def get_caches_info(self) -> Dict[str, Dict]:
+        """Retorna informações sobre todos os caches disponíveis para UI."""
+        return CACHES_INFO.copy()
+
+    def get_cache_info_completa(self, tipo: str) -> Dict[str, Any]:
+        """Retorna informações completas sobre um cache específico."""
+        info_base = CACHES_INFO.get(tipo, {})
+        info_cache = self.info(tipo)
+
+        return {
+            **info_base,
+            **info_cache,
+            "tipo": tipo,
+        }
+
+    def extrair_periodos_com_salvamento(
+        self,
+        tipo: str,
+        periodos: List[str],
+        modo: str = "incremental",
+        intervalo_salvamento: int = 4,
+        callback_progresso: Optional[Callable[[int, int, str], None]] = None,
+        callback_salvamento: Optional[Callable[[str], None]] = None,
+        dict_aliases: Optional[Dict[str, str]] = None,
+        **kwargs
+    ) -> CacheResult:
+        """Extrai dados de múltiplos períodos com salvamento parcial.
+
+        Args:
+            tipo: Nome do tipo de cache
+            periodos: Lista de períodos "YYYYMM"
+            modo: "incremental" (merge com existente) ou "overwrite" (substituir)
+            intervalo_salvamento: Salvar a cada N períodos (default: 4)
+            callback_progresso: Função(i, total, periodo) chamada a cada período
+            callback_salvamento: Função(info) chamada a cada salvamento
+            dict_aliases: Dicionário de aliases para instituições
+            **kwargs: Argumentos extras para extração
+
+        Returns:
+            CacheResult com todos os dados
+        """
+        cache = self._caches.get(tipo)
+        if cache is None:
+            return CacheResult(
+                sucesso=False,
+                mensagem=f"Tipo de cache desconhecido: {tipo}. Disponíveis: {self.listar_caches()}",
+                fonte="nenhum"
+            )
+
+        logger.info(f"[CACHE:{tipo.upper()}] Iniciando extração de {len(periodos)} períodos, modo={modo}")
+
+        # Carregar dados existentes se modo incremental
+        dados_existentes = None
+        if modo == "incremental" and cache.existe():
+            resultado_existente = cache.carregar_local()
+            if resultado_existente.sucesso:
+                dados_existentes = resultado_existente.dados
+                logger.info(f"[CACHE:{tipo.upper()}] Carregados {len(dados_existentes)} registros existentes")
+
+        dados_extraidos = []
+        erros = []
+        periodos_desde_save = 0
+
+        for i, periodo in enumerate(periodos):
+            # Callback de progresso
+            if callback_progresso:
+                callback_progresso(i, len(periodos), periodo)
+
+            try:
+                # Extrair período
+                resultado = cache.extrair_periodo(periodo, dict_aliases=dict_aliases, **kwargs)
+
+                if resultado.sucesso and resultado.dados is not None:
+                    dados_extraidos.append(resultado.dados)
+                    periodos_desde_save += 1
+
+                    # Salvamento parcial
+                    if periodos_desde_save >= intervalo_salvamento:
+                        self._salvar_parcial(
+                            cache=cache,
+                            dados_novos=dados_extraidos,
+                            dados_existentes=dados_existentes,
+                            modo=modo,
+                            info=f"Salvamento parcial até {periodo[4:6]}/{periodo[:4]}"
+                        )
+                        periodos_desde_save = 0
+
+                        if callback_salvamento:
+                            callback_salvamento(f"Salvos {len(dados_extraidos)} períodos")
+                else:
+                    erros.append(f"{periodo}: {resultado.mensagem}")
+                    logger.warning(f"[CACHE:{tipo.upper()}] Falha em {periodo}: {resultado.mensagem}")
+
+                # Rate limiting
+                time.sleep(1.5)
+
+            except Exception as e:
+                erros.append(f"{periodo}: {str(e)}")
+                logger.error(f"[CACHE:{tipo.upper()}] Erro em {periodo}: {e}")
+
+                # Salvamento de emergência
+                if dados_extraidos:
+                    try:
+                        self._salvar_parcial(
+                            cache=cache,
+                            dados_novos=dados_extraidos,
+                            dados_existentes=dados_existentes,
+                            modo=modo,
+                            info=f"Salvamento emergência após erro em {periodo}"
+                        )
+                        logger.info(f"[CACHE:{tipo.upper()}] Salvamento de emergência realizado")
+                    except Exception as save_error:
+                        erros.append(f"Erro no salvamento de emergência: {save_error}")
+
+        # Resultado final
+        if not dados_extraidos:
+            return CacheResult(
+                sucesso=False,
+                mensagem=f"Nenhum período extraído com sucesso. Erros: {'; '.join(erros[:3])}",
+                metadata={"erros": erros},
+                fonte="nenhum"
+            )
+
+        # Concatenar todos os dados extraídos
+        df_extraido = pd.concat(dados_extraidos, ignore_index=True)
+
+        # Salvamento final
+        resultado_save = self._salvar_parcial(
+            cache=cache,
+            dados_novos=dados_extraidos,
+            dados_existentes=dados_existentes,
+            modo=modo,
+            info=f"Salvamento final: {periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
+        )
+
+        if callback_salvamento:
+            callback_salvamento(f"Salvos {len(dados_extraidos)} períodos (final)")
+
+        # Calcular total de registros
+        df_final = resultado_save.dados if resultado_save.dados is not None else df_extraido
+
+        logger.info(f"[CACHE:{tipo.upper()}] Extração concluída: {len(dados_extraidos)}/{len(periodos)} períodos, {len(df_final)} registros")
+
+        return CacheResult(
+            sucesso=True,
+            mensagem=f"Extraídos {len(dados_extraidos)}/{len(periodos)} períodos, {len(df_final)} registros",
+            dados=df_final,
+            metadata={
+                "periodos_extraidos": len(dados_extraidos),
+                "periodos_total": len(periodos),
+                "total_registros": len(df_final),
+                "erros": erros,
+                "modo": modo
+            },
+            fonte="api"
+        )
+
+    def _salvar_parcial(
+        self,
+        cache: BaseCache,
+        dados_novos: List[pd.DataFrame],
+        dados_existentes: Optional[pd.DataFrame],
+        modo: str,
+        info: str
+    ) -> CacheResult:
+        """Salva dados parciais com merge se necessário."""
+        if not dados_novos:
+            return CacheResult(
+                sucesso=False,
+                mensagem="Sem dados para salvar",
+                fonte="nenhum"
+            )
+
+        df_novos = pd.concat(dados_novos, ignore_index=True)
+
+        if modo == "incremental" and dados_existentes is not None:
+            # Identificar períodos novos
+            periodos_novos = set(df_novos["Periodo"].unique())
+            periodos_existentes = set(dados_existentes["Periodo"].unique())
+
+            # Remover períodos que serão substituídos
+            df_manter = dados_existentes[~dados_existentes["Periodo"].isin(periodos_novos)]
+
+            # Concatenar
+            df_final = pd.concat([df_manter, df_novos], ignore_index=True)
+            logger.info(f"[CACHE] Merge: {len(periodos_existentes)} existentes, {len(periodos_novos)} novos/atualizados")
+        else:
+            df_final = df_novos
+
+        # Salvar
+        return cache.salvar_local(df_final, fonte="api", info_extra={"operacao": info})
+
+    def get_dados_para_download(self, tipo: str) -> Optional[bytes]:
+        """Retorna dados do cache em formato para download (parquet)."""
+        cache = self._caches.get(tipo)
+        if cache is None:
+            return None
+
+        resultado = cache.carregar_local()
+        if not resultado.sucesso or resultado.dados is None:
+            return None
+
+        # Converter para bytes (parquet)
+        import io
+        buffer = io.BytesIO()
+        resultado.dados.to_parquet(buffer, index=False)
+        return buffer.getvalue()
+
+    def get_dados_para_download_csv(self, tipo: str) -> Optional[bytes]:
+        """Retorna dados do cache em formato CSV para download."""
+        cache = self._caches.get(tipo)
+        if cache is None:
+            return None
+
+        resultado = cache.carregar_local()
+        if not resultado.sucesso or resultado.dados is None:
+            return None
+
+        # Converter para CSV
+        return resultado.dados.to_csv(index=False).encode('utf-8')
+
+
+# =============================================================================
+# FUNCOES DE CONVENIENCIA (NIVEL DE MODULO)
+# =============================================================================
+
+def criar_manager() -> CacheManager:
+    """Cria e retorna uma instância do CacheManager."""
+    return CacheManager()
+
+
+def gerar_periodos_trimestrais(
+    ano_inicial: int,
+    mes_inicial: str,
+    ano_final: int,
+    mes_final: str
+) -> List[str]:
+    """Gera lista de períodos trimestrais.
+
+    Args:
+        ano_inicial: Ano inicial
+        mes_inicial: Mês inicial ('03', '06', '09', '12')
+        ano_final: Ano final
+        mes_final: Mês final ('03', '06', '09', '12')
+
+    Returns:
+        Lista de períodos no formato YYYYMM
+    """
+    periodos = []
+    ano_atual = ano_inicial
+    mes_atual = mes_inicial
+
+    while True:
+        periodo = f"{ano_atual}{mes_atual}"
+        periodos.append(periodo)
+
+        if ano_atual == ano_final and mes_atual == mes_final:
+            break
+
+        if mes_atual == '03':
+            mes_atual = '06'
+        elif mes_atual == '06':
+            mes_atual = '09'
+        elif mes_atual == '09':
+            mes_atual = '12'
+        elif mes_atual == '12':
+            mes_atual = '03'
+            ano_atual += 1
+
+    return periodos

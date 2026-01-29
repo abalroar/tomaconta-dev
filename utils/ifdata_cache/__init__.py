@@ -2,9 +2,14 @@
 ifdata_cache - Sistema unificado de cache para dados do IFData/BCB
 
 Arquitetura extensivel que suporta multiplos tipos de cache:
-- principal: Dados gerais das instituicoes (Relatorios 1-4)
-- capital: Dados de capital regulatorio (Relatorio 5)
-- (extensivel para outros relatorios)
+- principal: Dados gerais das instituicoes (Relatório 1) - variáveis selecionadas
+- capital: Dados de capital regulatorio (Relatório 5) - variáveis selecionadas
+- ativo: Composição do Ativo (Relatório 2) - todas as variáveis
+- passivo: Composição do Passivo (Relatório 3) - todas as variáveis
+- dre: Demonstração de Resultado (Relatório 4) - todas as variáveis
+- carteira_pf: Carteira de Crédito PF (Relatório 11) - todas as variáveis
+- carteira_pj: Carteira de Crédito PJ (Relatório 13) - todas as variáveis
+- carteira_instrumentos: Carteira - Instrumentos Financeiros (Relatório 14) - todas as variáveis
 
 Uso basico:
     from utils.ifdata_cache import CacheManager
@@ -20,8 +25,22 @@ Uso basico:
     # Carregar dados principais
     resultado = manager.carregar("principal")
 
+    # Carregar novos relatórios (todas as variáveis)
+    resultado = manager.carregar("ativo")
+    resultado = manager.carregar("dre")
+    resultado = manager.carregar("carteira_pf")
+
+    # Extrair com salvamento parcial
+    resultado = manager.extrair_periodos_com_salvamento(
+        tipo="ativo",
+        periodos=["202303", "202306", "202309", "202312"],
+        modo="incremental",  # ou "overwrite"
+        intervalo_salvamento=4,
+    )
+
     # Listar caches disponiveis
     print(manager.listar_caches())
+    print(manager.get_caches_info())
 """
 
 from .base import (
@@ -30,10 +49,40 @@ from .base import (
     BaseCache,
 )
 
-from .manager import CacheManager
+from .manager import (
+    CacheManager,
+    CACHES_INFO,
+    criar_manager,
+    gerar_periodos_trimestrais,
+)
 
 from .principal import PrincipalCache
-from .capital import CapitalCache, CAMPOS_CAPITAL, gerar_periodos_trimestrais
+from .capital import CapitalCache, CAMPOS_CAPITAL
+
+# Novos caches de relatórios completos
+from .relatorios_completos import (
+    AtivoCache,
+    PassivoCache,
+    DRECache,
+    CarteiraPFCache,
+    CarteiraPJCache,
+    CarteiraInstrumentosCache,
+    listar_relatorios_completos,
+)
+
+# Extrator unificado
+from .unified_extractor import (
+    extrair_cadastro,
+    extrair_valores,
+    processar_periodo,
+    processar_multiplos_periodos,
+    gerar_periodos_trimestrais as gerar_periodos,
+    get_info_relatorio,
+    listar_relatorios_disponiveis,
+    RELATORIOS_INFO,
+    VARIAVEIS_RESUMO,
+    VARIAVEIS_CAPITAL,
+)
 
 # Funcoes de compatibilidade com sistema antigo
 from .compat import (
@@ -92,17 +141,38 @@ __all__ = [
     "CacheResult",
     "BaseCache",
     "CacheManager",
-    # Implementacoes
+    "CACHES_INFO",
+    # Implementacoes - principais
     "PrincipalCache",
     "CapitalCache",
     "CAMPOS_CAPITAL",
-    "gerar_periodos_trimestrais",
+    # Implementacoes - relatórios completos
+    "AtivoCache",
+    "PassivoCache",
+    "DRECache",
+    "CarteiraPFCache",
+    "CarteiraPJCache",
+    "CarteiraInstrumentosCache",
+    "listar_relatorios_completos",
+    # Extrator unificado
+    "extrair_cadastro",
+    "extrair_valores",
+    "processar_periodo",
+    "processar_multiplos_periodos",
+    "get_info_relatorio",
+    "listar_relatorios_disponiveis",
+    "RELATORIOS_INFO",
+    "VARIAVEIS_RESUMO",
+    "VARIAVEIS_CAPITAL",
     # Funcoes de conveniencia
     "get_manager",
+    "criar_manager",
     "carregar",
     "salvar",
     "info",
     "limpar",
+    "gerar_periodos_trimestrais",
+    "gerar_periodos",
     # Compatibilidade - Principal
     "baixar_cache_inicial",
     "carregar_cache",
