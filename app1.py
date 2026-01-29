@@ -4977,6 +4977,25 @@ elif menu == "Atualização Base":
 
 elif menu == "Glossário":
     st.markdown("""
+    ## **Sobre os Dados Apresentados**
+
+    Os dados são obtidos via API Olinda do IFdata do Banco Central, na visão **Conglomerado**.
+
+    **O que isso significa:**
+
+    **Conglomerado Prudencial** é um grupo de instituições financeiras e entidades autorizadas, controladas por uma mesma instituição líder, que deve consolidar suas demonstrações contábeis para fins regulatórios.
+
+    O Banco Central supervisiona o grupo como um todo, considerando o somatório das instituições, e decisões sobre liquidez ou insolvência afetam todas as entidades do conglomerado.
+
+    **Exemplos:**
+    - O Banco PAN faz parte do Conglomerado Prudencial BTG Pactual. O próprio PAN esclarece que, por estar consolidado no prudencial do BTG, o índice de Basileia "individual" deixou de ser formalmente reportado.
+    - O Banco Digio faz parte do conglomerado financeiro do Bradesco, então em leituras "por conglomerado" você não verá o Digio como um grupo separado.
+    - O Conglomerado Prudencial Original inclui Banco Original, PicPay Bank e a IP do PicPay (além de outros veículos do grupo). Dependendo do recorte, você verá o conglomerado (ou o líder) e não cada entidade isoladamente.
+
+    Em caso de dúvidas, consulte o site do Banco Central.
+
+    ---
+
     ## **Informações de Capital Regulatório**
 
     **Capital Principal:** Parcela do capital de melhor qualidade e imediatamente disponível para absorver perdas (base regulatória usada para comparação com o RWA).
