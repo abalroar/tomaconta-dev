@@ -466,9 +466,8 @@ def carregar_cache():
 def recalcular_metricas_derivadas(dados_periodos):
     """Recalcula métricas derivadas para dados carregados do cache.
 
-    Garante que métricas como Crédito/PL (%), Crédito/Ativo (%), etc. existam
-    mesmo em caches antigos que foram criados antes dessas métricas serem adicionadas.
-    Também renomeia colunas antigas para os novos nomes padronizados.
+    SEMPRE recalcula as métricas para garantir que estejam corretas,
+    mesmo que a coluna já exista (pode ter valores NaN de cache antigo).
     """
     if not dados_periodos:
         return dados_periodos
@@ -513,47 +512,43 @@ def recalcular_metricas_derivadas(dados_periodos):
         except (ValueError, IndexError):
             mes = 12
 
-        # ROE Anualizado
-        if "ROE Ac. YTD an. (%)" not in df_atualizado.columns:
-            if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
-                if mes == 3:
-                    fator = 4
-                elif mes == 6:
-                    fator = 2
-                elif mes == 9:
-                    fator = 12 / 9
-                elif mes == 12:
-                    fator = 1
-                else:
-                    fator = 12 / mes
-                df_atualizado["ROE Ac. YTD an. (%)"] = (
-                    (fator * df_atualizado["Lucro Líquido Acumulado YTD"].fillna(0)) /
-                    df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
-                )
+        # ROE Anualizado - SEMPRE recalcular
+        if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
+            if mes == 3:
+                fator = 4
+            elif mes == 6:
+                fator = 2
+            elif mes == 9:
+                fator = 12 / 9
+            elif mes == 12:
+                fator = 1
+            else:
+                fator = 12 / mes
+            df_atualizado["ROE Ac. YTD an. (%)"] = (
+                (fator * df_atualizado["Lucro Líquido Acumulado YTD"].fillna(0)) /
+                df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
+            )
 
-        # Crédito/PL
-        if "Crédito/PL (%)" not in df_atualizado.columns:
-            if "Carteira de Crédito" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
-                df_atualizado["Crédito/PL (%)"] = (
-                    df_atualizado["Carteira de Crédito"].fillna(0) /
-                    df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
-                )
+        # Crédito/PL - SEMPRE recalcular
+        if "Carteira de Crédito" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
+            df_atualizado["Crédito/PL (%)"] = (
+                df_atualizado["Carteira de Crédito"].fillna(0) /
+                df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
+            )
 
-        # Crédito/Captações
-        if "Crédito/Captações (%)" not in df_atualizado.columns:
-            if "Carteira de Crédito" in df_atualizado.columns and "Captações" in df_atualizado.columns:
-                df_atualizado["Crédito/Captações (%)"] = (
-                    df_atualizado["Carteira de Crédito"].fillna(0) /
-                    df_atualizado["Captações"].replace(0, np.nan)
-                )
+        # Crédito/Captações - SEMPRE recalcular
+        if "Carteira de Crédito" in df_atualizado.columns and "Captações" in df_atualizado.columns:
+            df_atualizado["Crédito/Captações (%)"] = (
+                df_atualizado["Carteira de Crédito"].fillna(0) /
+                df_atualizado["Captações"].replace(0, np.nan)
+            )
 
-        # Crédito/Ativo (%) - anteriormente chamado Carteira/Ativo (%)
-        if "Crédito/Ativo (%)" not in df_atualizado.columns:
-            if "Carteira de Crédito" in df_atualizado.columns and "Ativo Total" in df_atualizado.columns:
-                df_atualizado["Crédito/Ativo (%)"] = (
-                    df_atualizado["Carteira de Crédito"].fillna(0) /
-                    df_atualizado["Ativo Total"].replace(0, np.nan)
-                )
+        # Crédito/Ativo (%) - SEMPRE recalcular
+        if "Carteira de Crédito" in df_atualizado.columns and "Ativo Total" in df_atualizado.columns:
+            df_atualizado["Crédito/Ativo (%)"] = (
+                df_atualizado["Carteira de Crédito"].fillna(0) /
+                df_atualizado["Ativo Total"].replace(0, np.nan)
+            )
 
         # Migrar nome antigo Carteira/Ativo (%) para Crédito/Ativo (%) se existir
         if "Carteira/Ativo (%)" in df_atualizado.columns and "Crédito/Ativo (%)" not in df_atualizado.columns:
