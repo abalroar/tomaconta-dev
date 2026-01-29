@@ -10,6 +10,11 @@ Este módulo implementa caches para os relatórios que extraem TODAS as variáve
 - Relatório 14: Carteira de crédito ativa - por carteiras de instrumentos financeiros
 
 Todos usam a mesma lógica: extrair TODAS as variáveis do relatório da API.
+
+IMPORTANTE: Este módulo usa o extrator autônomo (extractor.py) que produz dados
+no formato exato que os gráficos esperam:
+- Coluna "Instituição" (não "NomeInstituicao")
+- Coluna "Período" no formato "1/2024" (trimestre/ano)
 """
 
 import logging
@@ -20,12 +25,6 @@ import pandas as pd
 import requests
 
 from .base import BaseCache, CacheConfig, CacheResult
-from .unified_extractor import (
-    extrair_cadastro,
-    extrair_valores,
-    normalizar_nome_coluna,
-    ExtractionError
-)
 
 logger = logging.getLogger("ifdata_cache")
 
@@ -34,7 +33,13 @@ logger = logging.getLogger("ifdata_cache")
 # CLASSE BASE PARA RELATORIOS COMPLETOS
 # =============================================================================
 class RelatorioCompletoCache(BaseCache):
-    """Cache base para relatórios que extraem todas as variáveis."""
+    """Cache base para relatórios que extraem todas as variáveis.
+
+    Produz dados com:
+    - Coluna "Instituição" (nome da instituição)
+    - Coluna "Período" no formato "1/2024" (trimestre/ano)
+    - Todas as variáveis do relatório
+    """
 
     def __init__(self, config: CacheConfig, base_dir: Path, relatorio_num: int):
         super().__init__(config, base_dir)
@@ -71,9 +76,13 @@ class RelatorioCompletoCache(BaseCache):
                 dfs = []
                 for periodo, df in dados_dict.items():
                     if isinstance(df, pd.DataFrame) and not df.empty:
-                        if "Periodo" not in df.columns:
+                        # Verificar coluna de período (pode ser "Periodo" ou "Período")
+                        if "Período" not in df.columns and "Periodo" not in df.columns:
                             df = df.copy()
-                            df["Periodo"] = str(periodo)
+                            df["Período"] = str(periodo)
+                        elif "Periodo" in df.columns and "Período" not in df.columns:
+                            df = df.copy()
+                            df["Período"] = df["Periodo"]
                         dfs.append(df)
 
                 if dfs:
@@ -125,90 +134,46 @@ class RelatorioCompletoCache(BaseCache):
     ) -> CacheResult:
         """Extrai dados de um período da API do BCB.
 
-        Extrai TODAS as variáveis do relatório.
+        Usa o extrator autônomo para extrair TODAS as variáveis do relatório.
+        Produz dados no formato exato que os gráficos esperam.
+
+        Args:
+            periodo: Período no formato YYYYMM (ex: "202312")
+            dict_aliases: Dicionário de aliases para instituições
+
+        Returns:
+            CacheResult com DataFrame ou erro
         """
         self._log("info", f"Extraindo período {periodo}...")
 
         try:
-            # 1. Buscar cadastro (nomes das instituições)
-            df_cadastro = extrair_cadastro(periodo)
+            # Usar extrator autônomo
+            from .extractor import extrair_relatorio_completo
 
-            # 2. Buscar valores do relatório
-            df_valores = extrair_valores(periodo, self.relatorio_num)
+            df = extrair_relatorio_completo(periodo, self.relatorio_num, dict_aliases)
 
-            if df_valores.empty:
+            if df is None or df.empty:
                 return CacheResult(
                     sucesso=False,
                     mensagem=f"Sem dados para {periodo}",
                     fonte="nenhum"
                 )
 
-            # 3. Normalizar nomes de colunas
-            if "NomeColuna" in df_valores.columns:
-                df_valores["NomeColuna"] = df_valores["NomeColuna"].apply(normalizar_nome_coluna)
+            # Contar variáveis (excluindo Instituição e Período)
+            cols_info = ["Instituição", "Período"]
+            n_variaveis = len([c for c in df.columns if c not in cols_info])
 
-            # 4. Pivotar dados (TODAS as variáveis)
-            df_pivot = df_valores.pivot_table(
-                index="CodInst",
-                columns="NomeColuna",
-                values="Saldo",
-                aggfunc="sum"
-            ).reset_index()
-            df_pivot.columns.name = None
-
-            # 5. Adicionar nomes de instituições
-            if not df_cadastro.empty and "CodInst" in df_cadastro.columns:
-                col_nome = None
-                for candidato in ["NomeInstituicao", "NomeInstituição"]:
-                    if candidato in df_cadastro.columns:
-                        col_nome = candidato
-                        break
-
-                if col_nome:
-                    df_nomes = df_cadastro[["CodInst", col_nome]].drop_duplicates()
-                    df_nomes = df_nomes.rename(columns={col_nome: "NomeInstituicao"})
-                    df_pivot = df_pivot.merge(df_nomes, on="CodInst", how="left")
-
-            # 6. Preencher nomes faltantes
-            if "NomeInstituicao" not in df_pivot.columns:
-                df_pivot["NomeInstituicao"] = df_pivot["CodInst"].apply(lambda x: f"[IF {x}]")
-            else:
-                df_pivot["NomeInstituicao"] = df_pivot.apply(
-                    lambda row: row["NomeInstituicao"] if pd.notna(row["NomeInstituicao"])
-                    else f"[IF {row['CodInst']}]",
-                    axis=1
-                )
-
-            # 7. Aplicar aliases se fornecido
-            if dict_aliases:
-                df_pivot["NomeInstituicao"] = df_pivot["NomeInstituicao"].apply(
-                    lambda x: dict_aliases.get(x, x) if pd.notna(x) else x
-                )
-
-            # 8. Adicionar período
-            df_pivot["Periodo"] = periodo
-
-            # 9. Reordenar colunas
-            cols_inicio = ["Periodo", "CodInst", "NomeInstituicao"]
-            outras_cols = sorted([c for c in df_pivot.columns if c not in cols_inicio])
-            df_pivot = df_pivot[cols_inicio + outras_cols]
-
-            # 10. Remover linhas sem dados
-            colunas_numericas = [c for c in df_pivot.columns if c not in cols_inicio]
-            if colunas_numericas:
-                df_pivot = df_pivot.dropna(subset=colunas_numericas, how="all")
-
-            self._log("info", f"Período {periodo}: {len(df_pivot)} instituições, {len(colunas_numericas)} variáveis")
+            self._log("info", f"Período {periodo}: {len(df)} instituições, {n_variaveis} variáveis")
 
             return CacheResult(
                 sucesso=True,
-                mensagem=f"Extraído {periodo}: {len(df_pivot)} registros",
-                dados=df_pivot,
+                mensagem=f"Extraído {periodo}: {len(df)} registros",
+                dados=df,
                 metadata={
                     "periodo": periodo,
                     "relatorio": self.relatorio_num,
-                    "n_instituicoes": len(df_pivot),
-                    "n_variaveis": len(colunas_numericas)
+                    "n_instituicoes": len(df),
+                    "n_variaveis": n_variaveis
                 },
                 fonte="api"
             )
@@ -226,18 +191,28 @@ class RelatorioCompletoCache(BaseCache):
     # =========================================================================
 
     def carregar_formato_antigo(self) -> Optional[dict]:
-        """Carrega e retorna no formato antigo {periodo: DataFrame}."""
+        """Carrega e retorna no formato antigo {periodo: DataFrame}.
+
+        O período é no formato de exibição ("1/2024").
+        """
         resultado = self.carregar()
         if not resultado.sucesso or resultado.dados is None:
             return None
 
         df = resultado.dados
-        if "Periodo" not in df.columns:
+
+        # Verificar coluna de período (pode ser "Período" ou "Periodo")
+        col_periodo = None
+        if "Período" in df.columns:
+            col_periodo = "Período"
+        elif "Periodo" in df.columns:
+            col_periodo = "Periodo"
+        else:
             return None
 
         dados_dict = {}
-        for periodo in df["Periodo"].unique():
-            dados_dict[str(periodo)] = df[df["Periodo"] == periodo].copy()
+        for periodo in df[col_periodo].unique():
+            dados_dict[str(periodo)] = df[df[col_periodo] == periodo].copy()
 
         return dados_dict
 
@@ -259,8 +234,8 @@ class RelatorioCompletoCache(BaseCache):
         for periodo, df in dados_dict.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 df_copy = df.copy()
-                if "Periodo" not in df_copy.columns:
-                    df_copy["Periodo"] = str(periodo)
+                if "Período" not in df_copy.columns:
+                    df_copy["Período"] = str(periodo)
                 dfs.append(df_copy)
 
         if not dfs:
@@ -287,7 +262,7 @@ ATIVO_CONFIG = CacheConfig(
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache",
     max_idade_horas=168.0,
-    colunas_obrigatorias=["Periodo", "CodInst"],
+    colunas_obrigatorias=["Período"],  # Formato de exibição com acento
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
     relatorio_tipo=2,
 )
@@ -301,7 +276,7 @@ PASSIVO_CONFIG = CacheConfig(
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache",
     max_idade_horas=168.0,
-    colunas_obrigatorias=["Periodo", "CodInst"],
+    colunas_obrigatorias=["Período"],
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
     relatorio_tipo=3,
 )
@@ -315,7 +290,7 @@ DRE_CONFIG = CacheConfig(
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache",
     max_idade_horas=168.0,
-    colunas_obrigatorias=["Periodo", "CodInst"],
+    colunas_obrigatorias=["Período"],
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
     relatorio_tipo=4,
 )
@@ -329,7 +304,7 @@ CARTEIRA_PF_CONFIG = CacheConfig(
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache",
     max_idade_horas=168.0,
-    colunas_obrigatorias=["Periodo", "CodInst"],
+    colunas_obrigatorias=["Período"],
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
     relatorio_tipo=11,
 )
@@ -343,7 +318,7 @@ CARTEIRA_PJ_CONFIG = CacheConfig(
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache",
     max_idade_horas=168.0,
-    colunas_obrigatorias=["Periodo", "CodInst"],
+    colunas_obrigatorias=["Período"],
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
     relatorio_tipo=13,
 )
@@ -357,7 +332,7 @@ CARTEIRA_INSTRUMENTOS_CONFIG = CacheConfig(
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache",
     max_idade_horas=168.0,
-    colunas_obrigatorias=["Periodo", "CodInst"],
+    colunas_obrigatorias=["Período"],
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
     relatorio_tipo=14,
 )
