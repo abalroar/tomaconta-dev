@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
+from typing import Tuple
 import time
 
 # === PERFORMANCE TIMER ===
@@ -267,6 +268,12 @@ ALIASES_PATH = str(DATA_DIR / "Aliases.xlsx")
 LOGO_PATH = str(DATA_DIR / "logo.png")
 CACHE_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/dados_cache.pkl"
 CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/cache_info.txt"
+
+# Cache de Capital (persistência externa no GitHub Releases)
+CAPITAL_CACHE_FILE = str(DATA_DIR / "capital_cache.pkl")
+CAPITAL_CACHE_INFO = str(DATA_DIR / "capital_cache_info.txt")
+CAPITAL_CACHE_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/capital_cache.pkl"
+CAPITAL_CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/capital_cache_info.txt"
 
 # Senha para proteger a funcionalidade de atualização de cache
 SENHA_ADMIN = "m4th3u$987"
@@ -862,18 +869,20 @@ def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None)
     return dados_corrigidos
 
 
-def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=None):
+def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=None, dados_periodos=None):
     """Resolve nomes de instituições que estão como códigos [IF xxxxx] no cache de capital.
 
     Usa múltiplas estratégias de lookup:
     1. Busca direta no dict_aliases (nome original -> alias)
     2. Busca por CodInst no df_aliases se disponível
-    3. Mantém o nome original se não encontrar correspondência
+    3. Busca no dados_periodos (cache principal) como fallback
+    4. Mantém o nome original se não encontrar correspondência
 
     Args:
         df_capital: DataFrame com dados de capital
         dict_aliases: Dicionário nome original -> alias
         df_aliases: DataFrame do Aliases.xlsx com mapeamentos
+        dados_periodos: Dicionário do cache principal para fallback de nomes
 
     Returns:
         DataFrame com nomes de instituições resolvidos
@@ -906,6 +915,20 @@ def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=Non
                 if pd.notna(cod) and pd.notna(alias):
                     mapa_codinst_nome[str(cod).strip()] = alias
 
+    # Construir mapa adicional a partir do dados_periodos (cache principal) como fallback
+    mapa_dados_periodos = {}
+    if dados_periodos:
+        for periodo, df_periodo in dados_periodos.items():
+            if 'Instituição' in df_periodo.columns and 'CodInst' in df_periodo.columns:
+                for _, row in df_periodo.iterrows():
+                    cod = row.get('CodInst')
+                    nome = row.get('Instituição')
+                    # Só usar se o nome não for um placeholder
+                    if pd.notna(cod) and pd.notna(nome) and not str(nome).startswith('[IF'):
+                        cod_str = str(int(cod)) if isinstance(cod, float) else str(cod)
+                        if cod_str not in mapa_dados_periodos:
+                            mapa_dados_periodos[cod_str] = nome
+
     def resolver_nome(nome, codinst=None):
         """Resolve um nome de instituição."""
         if pd.isna(nome):
@@ -917,26 +940,34 @@ def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=Non
         if dict_aliases and nome_str in dict_aliases:
             return dict_aliases[nome_str]
 
-        # 2. Verificar se é um placeholder [IF xxxxx]
-        match = re.match(r'\[IF\s+(\d+)\]', nome_str)
+        # 2. Verificar se é um placeholder [IF xxxxx] - agora aceita alfanuméricos
+        match = re.match(r'\[IF\s+([A-Za-z0-9]+)\]', nome_str)
         if match:
             cod_extraido = match.group(1)
 
-            # Tentar resolver pelo código extraído
+            # Tentar resolver pelo código extraído no mapa de aliases
             if mapa_codinst_nome and cod_extraido in mapa_codinst_nome:
                 return mapa_codinst_nome[cod_extraido]
+
+            # Tentar resolver no mapa do dados_periodos
+            if mapa_dados_periodos and cod_extraido in mapa_dados_periodos:
+                return mapa_dados_periodos[cod_extraido]
 
             # Se temos CodInst na linha, usar para lookup
             if codinst is not None and pd.notna(codinst):
                 cod_str = str(int(codinst)) if isinstance(codinst, float) else str(codinst)
                 if mapa_codinst_nome and cod_str in mapa_codinst_nome:
                     return mapa_codinst_nome[cod_str]
+                if mapa_dados_periodos and cod_str in mapa_dados_periodos:
+                    return mapa_dados_periodos[cod_str]
 
         # 3. Se temos CodInst, tentar lookup direto
         if codinst is not None and pd.notna(codinst):
             cod_str = str(int(codinst)) if isinstance(codinst, float) else str(codinst)
             if mapa_codinst_nome and cod_str in mapa_codinst_nome:
                 return mapa_codinst_nome[cod_str]
+            if mapa_dados_periodos and cod_str in mapa_dados_periodos:
+                return mapa_dados_periodos[cod_str]
 
         # 4. Manter nome original se não encontrou correspondência
         return nome_str
@@ -1069,6 +1100,220 @@ def baixar_cache_inicial():
     except Exception as e:
         st.error(f"erro ao baixar cache: {e}")
         return False, 'nenhuma'
+
+
+def baixar_cache_capital_inicial():
+    """Baixa o cache de capital do GitHub Releases se não existir localmente.
+
+    Similar ao baixar_cache_inicial(), mas para o cache de capital isolado.
+    Retorna tupla (sucesso, fonte) onde fonte pode ser 'local', 'github' ou 'nenhuma'.
+    """
+    cache_path = Path(CAPITAL_CACHE_FILE)
+    if cache_path.exists():
+        return True, 'local'
+
+    try:
+        with st.spinner("carregando cache de capital do github releases..."):
+            r = requests.get(CAPITAL_CACHE_URL, timeout=120)
+            if r.status_code == 200:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_bytes(r.content)
+                # Tentar baixar info também
+                r_info = requests.get(CAPITAL_CACHE_INFO_URL, timeout=30)
+                if r_info.status_code == 200:
+                    Path(CAPITAL_CACHE_INFO).write_text(r_info.text)
+                return True, 'github releases'
+            else:
+                # Cache de capital não existe no GitHub ainda - não é erro crítico
+                return False, 'nenhuma'
+    except Exception as e:
+        # Falha silenciosa - cache de capital é opcional
+        print(f"[CAPITAL] Aviso: não foi possível baixar cache de capital: {e}")
+        return False, 'nenhuma'
+
+
+def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
+    """Faz upload do cache de capital para GitHub Releases.
+
+    Similar ao upload_cache_github(), mas para o cache de capital.
+    Inclui verificação real de sucesso após upload.
+    """
+    repo = "abalroar/tomaconta"
+    tag = "v1.0-cache"
+
+    cache_path = Path(CAPITAL_CACHE_FILE)
+    info_path = Path(CAPITAL_CACHE_INFO)
+
+    if not cache_path.exists():
+        return False, "arquivo capital_cache.pkl não encontrado localmente"
+
+    cache_size = cache_path.stat().st_size
+
+    # Tentar usar gh CLI primeiro (geralmente não disponível no Streamlit Cloud)
+    try:
+        result = subprocess.run(['gh', '--version'], capture_output=True, timeout=5)
+        gh_available = result.returncode == 0
+    except Exception:
+        gh_available = False
+
+    if gh_available:
+        try:
+            # Deletar assets antigos se existirem
+            subprocess.run(
+                ['gh', 'release', 'delete-asset', tag, 'capital_cache.pkl', '-y', '-R', repo],
+                capture_output=True, timeout=30
+            )
+            subprocess.run(
+                ['gh', 'release', 'delete-asset', tag, 'capital_cache_info.txt', '-y', '-R', repo],
+                capture_output=True, timeout=30
+            )
+
+            # Upload novos arquivos
+            result = subprocess.run(
+                ['gh', 'release', 'upload', tag, str(cache_path), '--clobber', '-R', repo],
+                check=True, capture_output=True, timeout=300
+            )
+            if info_path.exists():
+                subprocess.run(
+                    ['gh', 'release', 'upload', tag, str(info_path), '--clobber', '-R', repo],
+                    check=True, capture_output=True, timeout=60
+                )
+
+            return True, f"cache de capital ({cache_size / 1024 / 1024:.1f} MB) enviado via gh CLI!"
+
+        except subprocess.CalledProcessError as e:
+            # Se gh CLI falhar, tentar com token
+            if token:
+                pass  # Continua para fallback com token
+            else:
+                return False, f"erro ao usar gh CLI: {e.stderr.decode() if e.stderr else str(e)}"
+        except Exception as e:
+            if token:
+                pass  # Continua para fallback com token
+            else:
+                return False, f"erro inesperado com gh CLI: {e}"
+
+    # Usar API do GitHub com token
+    if token:
+        try:
+            headers = {
+                'Authorization': f'token {token}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+
+            # Verificar se token é válido
+            user_url = "https://api.github.com/user"
+            r_user = requests.get(user_url, headers=headers, timeout=10)
+            if r_user.status_code != 200:
+                return False, f"token inválido ou expirado (status {r_user.status_code})"
+
+            # Obter release
+            release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+            r = requests.get(release_url, headers=headers, timeout=30)
+            if r.status_code == 404:
+                return False, f"release '{tag}' não encontrada no repo '{repo}'. Crie a release primeiro."
+            elif r.status_code != 200:
+                return False, f"erro ao acessar release: {r.status_code} - {r.text[:100]}"
+
+            release_data = r.json()
+            upload_url = release_data['upload_url'].replace('{?name,label}', '')
+
+            # Deletar assets antigos
+            for asset in release_data.get('assets', []):
+                if asset['name'] in ['capital_cache.pkl', 'capital_cache_info.txt']:
+                    delete_url = f"https://api.github.com/repos/{repo}/releases/assets/{asset['id']}"
+                    r_del = requests.delete(delete_url, headers=headers, timeout=30)
+                    if r_del.status_code not in [204, 404]:
+                        print(f"[CAPITAL] Aviso: não conseguiu deletar asset antigo: {r_del.status_code}")
+
+            # Upload capital_cache.pkl
+            with open(cache_path, 'rb') as f:
+                headers_upload = headers.copy()
+                headers_upload['Content-Type'] = 'application/octet-stream'
+                r = requests.post(
+                    f"{upload_url}?name=capital_cache.pkl",
+                    headers=headers_upload,
+                    data=f,
+                    timeout=300
+                )
+                if r.status_code not in [200, 201]:
+                    return False, f"falha no upload: {r.status_code} - {r.text[:100]}"
+
+            # Upload info se existir
+            if info_path.exists():
+                with open(info_path, 'rb') as f:
+                    r = requests.post(
+                        f"{upload_url}?name=capital_cache_info.txt",
+                        headers=headers_upload,
+                        data=f,
+                        timeout=60
+                    )
+
+            # VERIFICAÇÃO REAL: Confirmar que o asset existe após upload
+            r_verify = requests.get(release_url, headers=headers, timeout=30)
+            if r_verify.status_code == 200:
+                assets = r_verify.json().get('assets', [])
+                asset_names = [a['name'] for a in assets]
+                if 'capital_cache.pkl' in asset_names:
+                    uploaded_size = next((a['size'] for a in assets if a['name'] == 'capital_cache.pkl'), 0)
+                    return True, f"cache de capital ({uploaded_size / 1024 / 1024:.1f} MB) enviado e verificado!"
+                else:
+                    return False, "upload reportou sucesso mas asset não encontrado na release"
+
+            return True, f"cache de capital ({cache_size / 1024 / 1024:.1f} MB) enviado!"
+
+        except requests.exceptions.Timeout:
+            return False, "timeout durante upload (arquivo muito grande ou conexão lenta)"
+        except Exception as e:
+            return False, f"erro ao usar API do github: {str(e)}"
+
+    return False, "token não fornecido. Insira um token com permissão 'repo' para o repositório abalroar/tomaconta"
+
+
+def verificar_caches_github() -> dict:
+    """Verifica quais caches existem no GitHub Releases.
+
+    Retorna dict com status de cada cache no GitHub (sem autenticação, apenas leitura pública).
+    """
+    repo = "abalroar/tomaconta"
+    tag = "v1.0-cache"
+    result = {
+        'release_existe': False,
+        'cache_principal': {'existe': False, 'tamanho': 0, 'tamanho_fmt': 'N/A'},
+        'cache_capital': {'existe': False, 'tamanho': 0, 'tamanho_fmt': 'N/A'},
+        'erro': None
+    }
+
+    try:
+        release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+        r = requests.get(release_url, timeout=10)
+
+        if r.status_code == 404:
+            result['erro'] = f"Release '{tag}' não encontrada"
+            return result
+        elif r.status_code != 200:
+            result['erro'] = f"Erro ao acessar release: {r.status_code}"
+            return result
+
+        result['release_existe'] = True
+        release_data = r.json()
+
+        for asset in release_data.get('assets', []):
+            size = asset.get('size', 0)
+            size_fmt = f"{size / 1024 / 1024:.1f} MB" if size > 1024*1024 else f"{size / 1024:.1f} KB"
+
+            if asset['name'] == 'dados_cache.pkl':
+                result['cache_principal'] = {'existe': True, 'tamanho': size, 'tamanho_fmt': size_fmt}
+            elif asset['name'] == 'capital_cache.pkl':
+                result['cache_capital'] = {'existe': True, 'tamanho': size, 'tamanho_fmt': size_fmt}
+
+    except requests.exceptions.Timeout:
+        result['erro'] = "Timeout ao verificar GitHub"
+    except Exception as e:
+        result['erro'] = str(e)
+
+    return result
+
 
 def ordenar_periodos(periodos, reverso=False):
     def chave_periodo(valor):
@@ -1485,8 +1730,14 @@ if 'dados_periodos' not in st.session_state:
     print(_perf_log("init_dados_periodos"))
 
 # Carregar cache de capital (isolado) se disponível
+# Primeiro tenta local, depois GitHub Releases (igual ao cache principal)
 if 'dados_capital' not in st.session_state:
     _perf_start("init_dados_capital")
+    # Tentar baixar do GitHub Releases se não existir localmente
+    sucesso_capital, fonte_capital = baixar_cache_capital_inicial()
+    if sucesso_capital:
+        st.session_state['capital_cache_fonte'] = fonte_capital
+
     dados_capital = carregar_cache_capital()
     if dados_capital:
         # Aplicar aliases ao cache de capital (sem mapa de códigos)
@@ -1594,6 +1845,299 @@ with st.sidebar:
     st.markdown('<p class="sidebar-title">toma.conta</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-subtitle">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-author">por matheus prates, cfa</p>', unsafe_allow_html=True)
+
+    st.markdown("")
+
+    with st.expander("controle avançado"):
+        if 'df_aliases' in st.session_state:
+            st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
+        else:
+            st.error("aliases não encontrados")
+
+        # Informações detalhadas do cache
+        st.markdown("**status do cache**")
+        cache_info = get_cache_info_detalhado()
+        fonte = st.session_state.get('cache_fonte', 'desconhecida')
+
+        if cache_info['existe']:
+            st.caption(f"**caminho:** `{cache_info['caminho']}`")
+            st.caption(f"**modificado:** {cache_info['data_formatada']}")
+            st.caption(f"**tamanho:** {cache_info['tamanho_formatado']}")
+            st.caption(f"**fonte:** {fonte}")
+
+            # Mostrar info do cache_info.txt se existir
+            info_cache = ler_info_cache()
+            if info_cache:
+                st.caption(f"{info_cache.replace(chr(10), ' | ')}")
+        else:
+            st.warning("cache não encontrado no disco")
+
+        # Botão para forçar recarregamento do cache local
+        if st.button("recarregar cache do disco", use_container_width=True):
+            if forcar_recarregar_cache():
+                st.success("cache recarregado do disco com sucesso!")
+                st.rerun()
+            else:
+                st.error("falha ao recarregar cache - arquivo não existe")
+
+        st.markdown("---")
+        st.markdown("**atualizar dados (admin)**")
+
+        senha_input = st.text_input("senha de administrador", type="password", key="senha_admin")
+
+        if senha_input == SENHA_ADMIN:
+            col1, col2 = st.columns(2)
+            with col1:
+                ano_i = st.selectbox("ano inicial", range(2015,2028), index=8, key="ano_i")
+                mes_i = st.selectbox("trimestre inicial", ['03','06','09','12'], key="mes_i")
+            with col2:
+                ano_f = st.selectbox("ano final", range(2015,2028), index=10, key="ano_f")
+                mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
+
+            if 'dict_aliases' in st.session_state:
+                if st.button("extrair dados do BCB", type="primary", use_container_width=True):
+                    periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
+                    progress_bar = st.progress(0)
+                    status = st.empty()
+                    save_status = st.empty()
+
+                    def update(i, total, p):
+                        progress_bar.progress((i+1)/total)
+                        status.text(f"extraindo {p[4:6]}/{p[:4]} ({i+1}/{total})")
+
+                    # Callback para salvamento progressivo (a cada 5 períodos)
+                    def save_progress(dados_parciais, info):
+                        save_status.text(f"💾 salvando {len(dados_parciais)} períodos...")
+                        salvar_cache(dados_parciais, info, incremental=True)
+                        save_status.text(f"✓ {len(dados_parciais)} períodos salvos no cache")
+
+                    st.info(f"🔄 iniciando extração de {len(periodos)} períodos. salvamento progressivo a cada 5 períodos.")
+
+                    dados = processar_todos_periodos(
+                        periodos,
+                        st.session_state['dict_aliases'],
+                        progress_callback=update,
+                        save_callback=save_progress,
+                        save_interval=5
+                    )
+
+                    if not dados:
+                        progress_bar.empty()
+                        status.empty()
+                        save_status.empty()
+                        st.error("falha ao extrair dados: nenhum período retornou dados válidos.")
+                    else:
+                        periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
+                        cache_salvo = salvar_cache(dados, periodo_info, incremental=True)
+
+                        # Atualizar session_state com merge dos dados existentes + novos
+                        if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+                            # Merge: dados existentes + novos (novos sobrescrevem)
+                            dados_merged = st.session_state['dados_periodos'].copy()
+                            dados_merged.update(dados)
+                            st.session_state['dados_periodos'] = dados_merged
+                        else:
+                            st.session_state['dados_periodos'] = dados
+
+                        st.session_state['cache_fonte'] = 'extração local'
+
+                        progress_bar.empty()
+                        status.empty()
+                        save_status.empty()
+                        st.success(f"✓ {len(dados)} períodos extraídos! cache total: {len(st.session_state['dados_periodos'])} períodos")
+                        st.info(f"cache salvo em: {cache_salvo['caminho']}")
+                        st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
+                        st.rerun()
+
+                st.markdown("---")
+                st.markdown("**status dos caches**")
+
+                # Verificar status no GitHub
+                with st.spinner("verificando github..."):
+                    gh_status = verificar_caches_github()
+
+                col_status1, col_status2 = st.columns(2)
+
+                with col_status1:
+                    st.caption("**Cache Principal (dados_cache.pkl)**")
+                    # Local
+                    cache_info_local = get_cache_info()
+                    if cache_info_local['existe']:
+                        st.caption(f"📁 Local: ✅ {cache_info_local['tamanho_formatado']}")
+                    else:
+                        st.caption("📁 Local: ❌ não existe")
+                    # GitHub
+                    if gh_status['cache_principal']['existe']:
+                        st.caption(f"☁️ GitHub: ✅ {gh_status['cache_principal']['tamanho_fmt']}")
+                    else:
+                        st.caption("☁️ GitHub: ❌ não existe")
+
+                with col_status2:
+                    st.caption("**Cache Capital (capital_cache.pkl)**")
+                    # Local
+                    capital_info_local = get_capital_cache_info()
+                    if capital_info_local['existe']:
+                        st.caption(f"📁 Local: ✅ {capital_info_local['tamanho_formatado']} ({capital_info_local['n_periodos']} períodos)")
+                    else:
+                        st.caption("📁 Local: ❌ não existe")
+                    # GitHub
+                    if gh_status['cache_capital']['existe']:
+                        st.caption(f"☁️ GitHub: ✅ {gh_status['cache_capital']['tamanho_fmt']}")
+                    else:
+                        st.caption("☁️ GitHub: ⚠️ **NÃO EXISTE** - envie abaixo!")
+
+                if gh_status['erro']:
+                    st.warning(f"⚠️ Erro ao verificar GitHub: {gh_status['erro']}")
+
+                st.markdown("---")
+                st.markdown("**publicar caches no github**")
+                st.caption("envia os caches locais para github releases para persistência")
+
+                # Tentar usar token do Streamlit Secrets primeiro
+                token_from_secrets = st.secrets.get("GITHUB_TOKEN", None) if hasattr(st, 'secrets') else None
+                if token_from_secrets:
+                    st.caption("✓ usando GITHUB_TOKEN dos Secrets")
+
+                gh_token = st.text_input("github token (opcional)", type="password", key="gh_token",
+                                        help="token com permissão 'repo'. deixe em branco para usar Secrets ou gh CLI")
+
+                col_upload1, col_upload2 = st.columns(2)
+
+                with col_upload1:
+                    if st.button("📦 enviar cache PRINCIPAL", use_container_width=True, help="Envia dados_cache.pkl"):
+                        # Prioridade: input manual → Secrets → gh CLI
+                        token_final = gh_token if gh_token else token_from_secrets
+                        with st.spinner("enviando cache principal para github releases..."):
+                            sucesso, mensagem = upload_cache_github(token_final)
+                            if sucesso:
+                                st.success(f"✅ Cache PRINCIPAL: {mensagem}")
+                            else:
+                                st.error(f"❌ Cache PRINCIPAL: {mensagem}")
+
+                with col_upload2:
+                    # Botão para enviar cache de capital separadamente
+                    capital_info = get_capital_cache_info()
+                    btn_disabled = not capital_info['existe']
+                    btn_help = "Envia capital_cache.pkl" if capital_info['existe'] else "Cache de capital não existe localmente"
+
+                    if st.button("💰 enviar cache CAPITAL", use_container_width=True, disabled=btn_disabled, help=btn_help):
+                        token_final = gh_token if gh_token else token_from_secrets
+                        with st.spinner("enviando cache de capital para github releases..."):
+                            sucesso, mensagem = upload_cache_capital_github(token=token_final)
+                            if sucesso:
+                                st.success(f"✅ Cache CAPITAL: {mensagem}")
+                            else:
+                                st.error(f"❌ Cache CAPITAL: {mensagem}")
+
+                # =============================================================
+                # SEÇÃO ISOLADA: EXTRAÇÃO DE DADOS DE CAPITAL
+                # Cache separado (capital_cache.pkl), sem impacto no fluxo principal
+                # =============================================================
+                st.markdown("---")
+                st.markdown("**extrair capital (relatório 5)**")
+                st.caption("extrai informações de capital (índices, RWA, alavancagem) - cache separado")
+
+                # Mostrar status do cache de capital
+                capital_cache_info = get_capital_cache_info()
+                if capital_cache_info['existe']:
+                    st.caption(f"📊 cache capital: {capital_cache_info['n_periodos']} períodos | {capital_cache_info['tamanho_formatado']}")
+                    st.caption(f"📅 atualizado: {capital_cache_info['data_formatada']}")
+                else:
+                    st.caption("📊 cache capital: não existe ainda")
+
+                col_cap1, col_cap2 = st.columns(2)
+                with col_cap1:
+                    ano_cap_i = st.selectbox("ano inicial", range(2015, 2028), index=8, key="ano_cap_i")
+                    mes_cap_i = st.selectbox("trim. inicial", ['03', '06', '09', '12'], key="mes_cap_i")
+                with col_cap2:
+                    ano_cap_f = st.selectbox("ano final", range(2015, 2028), index=10, key="ano_cap_f")
+                    mes_cap_f = st.selectbox("trim. final", ['03', '06', '09', '12'], index=2, key="mes_cap_f")
+
+                # Opção de atualização completa (sobrescreve cache antigo)
+                atualizar_completo_capital = st.checkbox(
+                    "🔄 atualização completa (sobrescrever cache antigo)",
+                    value=False,
+                    key="atualizar_completo_capital",
+                    help="Marque para apagar o cache existente e extrair tudo do zero. Use quando houver problemas com nomes ou dados antigos."
+                )
+
+                if st.button("extrair dados de capital", type="secondary", use_container_width=True, key="btn_extrair_capital"):
+                    periodos_cap = gerar_periodos_capital(ano_cap_i, mes_cap_i, ano_cap_f, mes_cap_f)
+                    progress_bar_cap = st.progress(0)
+                    status_cap = st.empty()
+                    save_status_cap = st.empty()
+
+                    # Se atualização completa, deletar cache existente primeiro
+                    incremental_mode = not atualizar_completo_capital
+                    if atualizar_completo_capital:
+                        cache_path = Path(CAPITAL_CACHE_FILE)
+                        if cache_path.exists():
+                            cache_path.unlink()
+                            st.info("🗑️ cache antigo de capital removido para atualização completa")
+
+                    def update_cap(i, total, p):
+                        progress_bar_cap.progress((i + 1) / total)
+                        status_cap.text(f"extraindo capital {p[4:6]}/{p[:4]} ({i + 1}/{total})")
+
+                    def save_progress_cap(dados_parciais, info):
+                        save_status_cap.text(f"💾 salvando {len(dados_parciais)} períodos de capital...")
+                        salvar_cache_capital(dados_parciais, info, incremental=incremental_mode)
+                        save_status_cap.text(f"✓ {len(dados_parciais)} períodos de capital salvos")
+
+                    modo_texto = "completa" if atualizar_completo_capital else "incremental"
+                    st.info(f"🔄 iniciando extração de capital ({modo_texto}): {len(periodos_cap)} períodos")
+
+                    # Usar dict_aliases se disponível
+                    aliases_para_capital = st.session_state.get('dict_aliases', {})
+
+                    dados_capital = processar_todos_periodos_capital(
+                        periodos_cap,
+                        dict_aliases=aliases_para_capital,
+                        progress_callback=update_cap,
+                        save_callback=save_progress_cap,
+                        save_interval=5
+                    )
+
+                    if not dados_capital:
+                        progress_bar_cap.empty()
+                        status_cap.empty()
+                        save_status_cap.empty()
+                        st.error("falha ao extrair dados de capital: nenhum período retornou dados válidos.")
+                    else:
+                        periodo_info_cap = f"capital {periodos_cap[0][4:6]}/{periodos_cap[0][:4]} até {periodos_cap[-1][4:6]}/{periodos_cap[-1][:4]}"
+                        cache_capital_salvo = salvar_cache_capital(dados_capital, periodo_info_cap, incremental=incremental_mode)
+
+                        progress_bar_cap.empty()
+                        status_cap.empty()
+                        save_status_cap.empty()
+
+                        st.success(f"✓ {len(dados_capital)} períodos de capital extraídos!")
+                        st.info(f"cache capital salvo em: {cache_capital_salvo['caminho']}")
+                        st.info(f"tamanho: {cache_capital_salvo['tamanho_formatado']} | total: {cache_capital_salvo['n_periodos']} períodos")
+
+                        # Upload para GitHub Releases para persistência
+                        # Usa token do Streamlit Secrets se disponível
+                        github_token = st.secrets.get("GITHUB_TOKEN", None) if hasattr(st, 'secrets') else None
+                        with st.spinner("enviando cache de capital para github releases..."):
+                            sucesso_upload, msg_upload = upload_cache_capital_github(token=github_token)
+                            if sucesso_upload:
+                                st.success(f"☁️ {msg_upload}")
+                            else:
+                                st.warning(f"⚠️ cache local salvo, mas falha no upload: {msg_upload}")
+
+                        # Atualizar session_state com novos dados
+                        st.session_state['dados_capital'] = dados_capital
+
+                        # Mostrar campos extraídos
+                        with st.expander("campos extraídos"):
+                            campos = get_campos_capital_info()
+                            for original, exibido in campos.items():
+                                st.caption(f"• {exibido} ← _{original}_")
+
+            else:
+                st.warning("carregue os aliases primeiro")
+        elif senha_input:
+            st.error("senha incorreta")
 
 if menu == "Sobre":
     st.markdown("""
@@ -2253,9 +2797,11 @@ elif menu == "Capital Regulatório":
         df_capital = pd.concat(st.session_state['dados_capital'].values(), ignore_index=True)
 
         # Resolver nomes de instituições que estão como códigos [IF xxxxx]
+        # Usa múltiplas fontes: dict_aliases, df_aliases, e dados_periodos como fallback
         dict_aliases = st.session_state.get('dict_aliases', {})
         df_aliases = st.session_state.get('df_aliases', None)
-        df_capital = resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases)
+        dados_periodos = st.session_state.get('dados_periodos', None)
+        df_capital = resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases, dados_periodos)
 
         # Mapeamento flexível de colunas (nome esperado -> alternativas)
         mapa_colunas_capital = {
