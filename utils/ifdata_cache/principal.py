@@ -16,17 +16,19 @@ from .base import BaseCache, CacheConfig, CacheResult
 logger = logging.getLogger("ifdata_cache")
 
 # Configuracao do cache principal
+# Nota: colunas_obrigatorias reduzido para apenas "Periodo" pois "CodInst" pode
+# nao estar presente em dados legados e "Instituição" vs "NomeInstituicao" varia
 PRINCIPAL_CONFIG = CacheConfig(
     nome="principal",
-    descricao="Dados gerais das instituicoes financeiras (Relatorios 1-4)",
+    descricao="Dados gerais das instituicoes financeiras (Relatorio 1 - Resumo)",
     subdir="principal",
     arquivo_dados="dados.parquet",
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta/releases/download/v1.0-cache",
     max_idade_horas=168.0,  # 7 dias
-    colunas_obrigatorias=["Periodo", "CodInst", "NomeInstituicao"],
+    colunas_obrigatorias=["Periodo"],  # Relaxado para compatibilidade
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
-    relatorio_tipo=None,  # Multiplos relatorios
+    relatorio_tipo=1,  # Relatorio 1 - Resumo
 )
 
 
@@ -115,18 +117,90 @@ class PrincipalCache(BaseCache):
                 fonte="nenhum"
             )
 
-    def extrair_periodo(self, periodo: str, **kwargs) -> CacheResult:
+    def extrair_periodo(self, periodo: str, dict_aliases: dict = None, **kwargs) -> CacheResult:
         """Extrai dados de um periodo da API do BCB.
 
-        Nota: Esta funcao e um placeholder. A extracao completa
-        requer logica mais complexa que esta no app1.py (processar_periodo).
+        Usa a funcao processar_periodo do ifdata_extractor para extracao completa
+        dos dados do Relatorio 1 (Resumo) com as variaveis selecionadas.
+
+        Args:
+            periodo: Periodo no formato YYYYMM (ex: "202312")
+            dict_aliases: Dicionario de aliases para nomes de instituicoes
+
+        Returns:
+            CacheResult com DataFrame ou erro
         """
-        self._log("info", f"Extracao de periodo {periodo} nao implementada diretamente")
-        return CacheResult(
-            sucesso=False,
-            mensagem="Use a funcao processar_periodo do app1.py para extracao",
-            fonte="nenhum"
-        )
+        self._log("info", f"Extraindo periodo {periodo}...")
+
+        try:
+            # Importar a funcao de extracao do ifdata_extractor
+            from utils.ifdata_extractor import processar_periodo as processar_periodo_extractor
+
+            # Usar dict_aliases vazio se nao fornecido
+            aliases = dict_aliases if dict_aliases else {}
+
+            # Processar periodo usando a logica existente
+            df = processar_periodo_extractor(periodo, aliases)
+
+            if df is None or df.empty:
+                return CacheResult(
+                    sucesso=False,
+                    mensagem=f"Sem dados para periodo {periodo}",
+                    fonte="nenhum"
+                )
+
+            # Garantir que tenha coluna Periodo
+            if "Periodo" not in df.columns:
+                df["Periodo"] = periodo
+
+            # Renomear coluna se necessario para compatibilidade
+            if "Instituição" in df.columns and "NomeInstituicao" not in df.columns:
+                df = df.rename(columns={"Instituição": "NomeInstituicao"})
+
+            # Adicionar CodInst se nao existir (necessario para validacao)
+            if "CodInst" not in df.columns:
+                # Tentar extrair do cadastro
+                from utils.ifdata_extractor import extrair_cadastro
+                df_cad = extrair_cadastro(periodo)
+                if not df_cad.empty and "CodInst" in df_cad.columns:
+                    # Criar mapeamento nome -> codigo
+                    col_nome = None
+                    for candidato in ["NomeInstituicao", "NomeInstituição"]:
+                        if candidato in df_cad.columns:
+                            col_nome = candidato
+                            break
+                    if col_nome:
+                        mapa_cod = dict(zip(df_cad[col_nome], df_cad["CodInst"]))
+                        df["CodInst"] = df["NomeInstituicao"].map(mapa_cod)
+
+            self._log("info", f"Periodo {periodo}: {len(df)} registros extraidos")
+
+            return CacheResult(
+                sucesso=True,
+                mensagem=f"Extraido {periodo}: {len(df)} registros",
+                dados=df,
+                metadata={
+                    "periodo": periodo,
+                    "n_registros": len(df),
+                    "colunas": list(df.columns)
+                },
+                fonte="api"
+            )
+
+        except ImportError as e:
+            self._log("error", f"Erro de importacao: {e}")
+            return CacheResult(
+                sucesso=False,
+                mensagem=f"Erro de importacao: {e}. Verifique se ifdata_extractor.py existe.",
+                fonte="nenhum"
+            )
+        except Exception as e:
+            self._log("error", f"Erro ao extrair periodo {periodo}: {e}")
+            return CacheResult(
+                sucesso=False,
+                mensagem=f"Erro: {e}",
+                fonte="nenhum"
+            )
 
     # =========================================================================
     # COMPATIBILIDADE COM SISTEMA ANTIGO
