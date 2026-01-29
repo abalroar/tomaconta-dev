@@ -70,18 +70,30 @@ from .relatorios_completos import (
     listar_relatorios_completos,
 )
 
-# Extrator unificado
-from .unified_extractor import (
+# Extrator autônomo (novo sistema)
+from .extractor import (
     extrair_cadastro,
     extrair_valores,
+    extrair_periodo,
+    extrair_resumo,
+    extrair_capital,
+    extrair_relatorio_completo,
+    extrair_multiplos_periodos,
+    periodo_api_para_exibicao,
+    periodo_exibicao_para_api,
+    gerar_periodos,
+    VARIAVEIS_RESUMO_API as VARIAVEIS_RESUMO,
+    CAMPOS_CAPITAL as VARIAVEIS_CAPITAL,
+)
+
+# Compatibilidade com unified_extractor (mantido por retrocompatibilidade)
+from .unified_extractor import (
     processar_periodo,
     processar_multiplos_periodos,
-    gerar_periodos_trimestrais as gerar_periodos,
+    gerar_periodos_trimestrais,
     get_info_relatorio,
     listar_relatorios_disponiveis,
     RELATORIOS_INFO,
-    VARIAVEIS_RESUMO,
-    VARIAVEIS_CAPITAL,
 )
 
 # Funcoes de compatibilidade com sistema antigo
@@ -154,16 +166,26 @@ __all__ = [
     "CarteiraPJCache",
     "CarteiraInstrumentosCache",
     "listar_relatorios_completos",
-    # Extrator unificado
+    # Extrator autônomo
     "extrair_cadastro",
     "extrair_valores",
+    "extrair_periodo",
+    "extrair_resumo",
+    "extrair_capital",
+    "extrair_relatorio_completo",
+    "extrair_multiplos_periodos",
+    "periodo_api_para_exibicao",
+    "periodo_exibicao_para_api",
+    "gerar_periodos",
+    "VARIAVEIS_RESUMO",
+    "VARIAVEIS_CAPITAL",
+    # Extrator unificado (retrocompatibilidade)
     "processar_periodo",
     "processar_multiplos_periodos",
+    "gerar_periodos_trimestrais",
     "get_info_relatorio",
     "listar_relatorios_disponiveis",
     "RELATORIOS_INFO",
-    "VARIAVEIS_RESUMO",
-    "VARIAVEIS_CAPITAL",
     # Funcoes de conveniencia
     "get_manager",
     "criar_manager",

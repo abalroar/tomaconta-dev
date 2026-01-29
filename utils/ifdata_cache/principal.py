@@ -1,12 +1,13 @@
 """
-principal.py - Cache de dados principais do IFData
+principal.py - Cache de dados principais do IFData (Relatório 1 - Resumo)
 
-Implementa cache para os relatorios 1-4 do IFData (dados gerais das instituicoes).
+Implementa cache para o Relatório 1 do IFData com variáveis selecionadas.
+Produz dados no formato exato que os gráficos do app1.py esperam.
 """
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import pandas as pd
 import requests
@@ -15,65 +16,65 @@ from .base import BaseCache, CacheConfig, CacheResult
 
 logger = logging.getLogger("ifdata_cache")
 
-# Configuracao do cache principal
-# Nota: colunas_obrigatorias reduzido para apenas "Periodo" pois "CodInst" pode
-# nao estar presente em dados legados e "Instituição" vs "NomeInstituicao" varia
+# Configuração do cache principal
 PRINCIPAL_CONFIG = CacheConfig(
     nome="principal",
-    descricao="Dados gerais das instituicoes financeiras (Relatorio 1 - Resumo)",
+    descricao="Dados gerais das instituições (Relatório 1 - Resumo)",
     subdir="principal",
     arquivo_dados="dados.parquet",
     arquivo_metadata="metadata.json",
     github_url_base="https://github.com/abalroar/tomaconta/releases/download/v1.0-cache",
     max_idade_horas=168.0,  # 7 dias
-    colunas_obrigatorias=["Periodo"],  # Relaxado para compatibilidade
+    colunas_obrigatorias=["Período"],  # Formato de exibição
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
-    relatorio_tipo=1,  # Relatorio 1 - Resumo
+    relatorio_tipo=1,
 )
 
 
 class PrincipalCache(BaseCache):
-    """Cache de dados principais do IFData."""
+    """Cache de dados principais do IFData (Resumo).
+
+    Produz dados com:
+    - Coluna "Instituição" (nome da instituição)
+    - Coluna "Período" no formato "1/2024" (trimestre/ano)
+    - Métricas financeiras no formato esperado pelos gráficos
+    """
 
     def __init__(self, base_dir: Path):
         super().__init__(PRINCIPAL_CONFIG, base_dir)
-
-        # URLs especificas
         self.github_data_url = f"{self.config.github_url_base}/dados_cache.pkl"
-        self.github_info_url = f"{self.config.github_url_base}/cache_info.txt"
 
     def baixar_remoto(self) -> CacheResult:
         """Baixa dados do GitHub Releases."""
         self._log("info", "Tentando baixar do GitHub...")
 
         try:
-            # Baixar arquivo pickle do GitHub (formato antigo)
             response = requests.get(self.github_data_url, timeout=120)
 
             if response.status_code == 404:
-                self._log("warning", "Cache nao encontrado no GitHub (404)")
+                self._log("warning", "Cache não encontrado no GitHub (404)")
                 return CacheResult(
                     sucesso=False,
-                    mensagem="Cache nao existe no GitHub",
+                    mensagem="Cache não existe no GitHub",
                     fonte="nenhum"
                 )
 
             response.raise_for_status()
 
-            # Carregar pickle (formato antigo do sistema)
             import pickle
             import io
 
             dados_dict = pickle.load(io.BytesIO(response.content))
 
-            # Converter de {periodo: DataFrame} para DataFrame unico
+            # Converter de {periodo: DataFrame} para DataFrame único
             if isinstance(dados_dict, dict):
                 dfs = []
                 for periodo, df in dados_dict.items():
                     if isinstance(df, pd.DataFrame) and not df.empty:
-                        if "Periodo" not in df.columns:
+                        # Garantir coluna Período
+                        if "Período" not in df.columns:
                             df = df.copy()
-                            df["Periodo"] = str(periodo)
+                            df["Período"] = str(periodo)
                         dfs.append(df)
 
                 if dfs:
@@ -81,7 +82,7 @@ class PrincipalCache(BaseCache):
                 else:
                     return CacheResult(
                         sucesso=False,
-                        mensagem="Arquivo do GitHub vazio ou invalido",
+                        mensagem="Arquivo do GitHub vazio",
                         fonte="nenhum"
                     )
             elif isinstance(dados_dict, pd.DataFrame):
@@ -103,81 +104,49 @@ class PrincipalCache(BaseCache):
             )
 
         except requests.RequestException as e:
-            self._log("error", f"Erro de rede ao baixar: {e}")
-            return CacheResult(
-                sucesso=False,
-                mensagem=f"Erro de rede: {e}",
-                fonte="nenhum"
-            )
+            self._log("error", f"Erro de rede: {e}")
+            return CacheResult(sucesso=False, mensagem=f"Erro de rede: {e}", fonte="nenhum")
         except Exception as e:
-            self._log("error", f"Erro ao processar dados: {e}")
-            return CacheResult(
-                sucesso=False,
-                mensagem=f"Erro ao processar: {e}",
-                fonte="nenhum"
-            )
+            self._log("error", f"Erro: {e}")
+            return CacheResult(sucesso=False, mensagem=f"Erro: {e}", fonte="nenhum")
 
-    def extrair_periodo(self, periodo: str, dict_aliases: dict = None, **kwargs) -> CacheResult:
-        """Extrai dados de um periodo da API do BCB.
+    def extrair_periodo(
+        self,
+        periodo: str,
+        dict_aliases: Optional[Dict[str, str]] = None,
+        **kwargs
+    ) -> CacheResult:
+        """Extrai dados de um período da API do BCB.
 
-        Usa a funcao processar_periodo do ifdata_extractor para extracao completa
-        dos dados do Relatorio 1 (Resumo) com as variaveis selecionadas.
+        Usa o extrator autônomo para produzir dados no formato dos gráficos.
 
         Args:
-            periodo: Periodo no formato YYYYMM (ex: "202312")
-            dict_aliases: Dicionario de aliases para nomes de instituicoes
+            periodo: Período no formato YYYYMM (ex: "202312")
+            dict_aliases: Dicionário de aliases para instituições
 
         Returns:
             CacheResult com DataFrame ou erro
         """
-        self._log("info", f"Extraindo periodo {periodo}...")
+        self._log("info", f"Extraindo período {periodo}...")
 
         try:
-            # Importar a funcao de extracao do ifdata_extractor
-            from utils.ifdata_extractor import processar_periodo as processar_periodo_extractor
+            # Usar extrator autônomo
+            from .extractor import extrair_resumo
 
-            # Usar dict_aliases vazio se nao fornecido
-            aliases = dict_aliases if dict_aliases else {}
-
-            # Processar periodo usando a logica existente
-            df = processar_periodo_extractor(periodo, aliases)
+            df = extrair_resumo(periodo, dict_aliases)
 
             if df is None or df.empty:
                 return CacheResult(
                     sucesso=False,
-                    mensagem=f"Sem dados para periodo {periodo}",
+                    mensagem=f"Sem dados para período {periodo}",
                     fonte="nenhum"
                 )
 
-            # Garantir que tenha coluna Periodo
-            if "Periodo" not in df.columns:
-                df["Periodo"] = periodo
-
-            # Renomear coluna se necessario para compatibilidade
-            if "Instituição" in df.columns and "NomeInstituicao" not in df.columns:
-                df = df.rename(columns={"Instituição": "NomeInstituicao"})
-
-            # Adicionar CodInst se nao existir (necessario para validacao)
-            if "CodInst" not in df.columns:
-                # Tentar extrair do cadastro
-                from utils.ifdata_extractor import extrair_cadastro
-                df_cad = extrair_cadastro(periodo)
-                if not df_cad.empty and "CodInst" in df_cad.columns:
-                    # Criar mapeamento nome -> codigo
-                    col_nome = None
-                    for candidato in ["NomeInstituicao", "NomeInstituição"]:
-                        if candidato in df_cad.columns:
-                            col_nome = candidato
-                            break
-                    if col_nome:
-                        mapa_cod = dict(zip(df_cad[col_nome], df_cad["CodInst"]))
-                        df["CodInst"] = df["NomeInstituicao"].map(mapa_cod)
-
-            self._log("info", f"Periodo {periodo}: {len(df)} registros extraidos")
+            self._log("info", f"Período {periodo}: {len(df)} instituições")
 
             return CacheResult(
                 sucesso=True,
-                mensagem=f"Extraido {periodo}: {len(df)} registros",
+                mensagem=f"Extraído {periodo}: {len(df)} registros",
                 dados=df,
                 metadata={
                     "periodo": periodo,
@@ -187,15 +156,8 @@ class PrincipalCache(BaseCache):
                 fonte="api"
             )
 
-        except ImportError as e:
-            self._log("error", f"Erro de importacao: {e}")
-            return CacheResult(
-                sucesso=False,
-                mensagem=f"Erro de importacao: {e}. Verifique se ifdata_extractor.py existe.",
-                fonte="nenhum"
-            )
         except Exception as e:
-            self._log("error", f"Erro ao extrair periodo {periodo}: {e}")
+            self._log("error", f"Erro ao extrair {periodo}: {e}")
             return CacheResult(
                 sucesso=False,
                 mensagem=f"Erro: {e}",
@@ -209,20 +171,19 @@ class PrincipalCache(BaseCache):
     def carregar_formato_antigo(self) -> Optional[dict]:
         """Carrega e retorna no formato antigo {periodo: DataFrame}.
 
-        Para compatibilidade com codigo existente no app1.py.
+        O período é no formato de exibição ("1/2024").
         """
         resultado = self.carregar()
         if not resultado.sucesso or resultado.dados is None:
             return None
 
         df = resultado.dados
-        if "Periodo" not in df.columns:
+        if "Período" not in df.columns:
             return None
 
-        # Converter para formato antigo
         dados_dict = {}
-        for periodo in df["Periodo"].unique():
-            dados_dict[str(periodo)] = df[df["Periodo"] == periodo].copy()
+        for periodo in df["Período"].unique():
+            dados_dict[str(periodo)] = df[df["Período"] == periodo].copy()
 
         return dados_dict
 
@@ -232,30 +193,26 @@ class PrincipalCache(BaseCache):
         fonte: str = "api",
         info_extra: Optional[dict] = None
     ) -> CacheResult:
-        """Salva a partir do formato antigo {periodo: DataFrame}.
-
-        Para compatibilidade com codigo existente no app1.py.
-        """
+        """Salva a partir do formato antigo {periodo: DataFrame}."""
         if not dados_dict:
             return CacheResult(
                 sucesso=False,
-                mensagem="Dicionario de dados vazio",
+                mensagem="Dicionário vazio",
                 fonte="nenhum"
             )
 
-        # Converter para DataFrame unico
         dfs = []
         for periodo, df in dados_dict.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 df_copy = df.copy()
-                if "Periodo" not in df_copy.columns:
-                    df_copy["Periodo"] = str(periodo)
+                if "Período" not in df_copy.columns:
+                    df_copy["Período"] = str(periodo)
                 dfs.append(df_copy)
 
         if not dfs:
             return CacheResult(
                 sucesso=False,
-                mensagem="Nenhum DataFrame valido no dicionario",
+                mensagem="Nenhum DataFrame válido",
                 fonte="nenhum"
             )
 
