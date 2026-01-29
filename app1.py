@@ -5416,57 +5416,311 @@ elif menu == "Crie sua métrica!":
 
 elif menu == "Atualização Base":
     st.markdown("## Atualização Base")
-    st.markdown("painel de controle avançado para atualização de dados")
+    st.markdown("painel de controle unificado para extração de dados do IFData/BCB")
     st.markdown("---")
+
+    # Importar o gerenciador de cache unificado
+    from utils.ifdata_cache import CacheManager, CACHES_INFO, gerar_periodos_trimestrais as gerar_periodos_cache
+
+    # Inicializar gerenciador
+    if 'cache_manager' not in st.session_state:
+        st.session_state['cache_manager'] = CacheManager()
+    cache_manager = st.session_state['cache_manager']
 
     if 'df_aliases' in st.session_state:
         st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
     else:
         st.error("aliases não encontrados")
 
-    # Informações detalhadas do cache
-    st.markdown("**status do cache**")
-    cache_info = get_cache_info_detalhado()
-    fonte = st.session_state.get('cache_fonte', 'desconhecida')
+    # =============================================================
+    # STATUS DE TODOS OS CACHES
+    # =============================================================
+    st.markdown("### Status dos Caches")
 
-    if cache_info['existe']:
-        st.caption(f"**caminho:** `{cache_info['caminho']}`")
-        st.caption(f"**modificado:** {cache_info['data_formatada']}")
-        st.caption(f"**tamanho:** {cache_info['tamanho_formatado']}")
-        st.caption(f"**fonte:** {fonte}")
+    with st.expander("ver status de todos os caches", expanded=True):
+        caches_disponiveis = cache_manager.listar_caches()
+        caches_info = CACHES_INFO
 
-        # Mostrar info do cache_info.txt se existir
-        info_cache = ler_info_cache()
-        if info_cache:
-            st.caption(f"{info_cache.replace(chr(10), ' | ')}")
-    else:
-        st.warning("cache não encontrado no disco")
+        # Criar tabela de status
+        status_data = []
+        for tipo_cache in caches_disponiveis:
+            info = cache_manager.info(tipo_cache)
+            cache_info = caches_info.get(tipo_cache, {})
 
-    # Botão para forçar recarregamento do cache local
-    if st.button("recarregar cache do disco", use_container_width=True, key="btn_recarregar_cache_atualizacao"):
-        if forcar_recarregar_cache():
-            st.success("cache recarregado do disco com sucesso!")
-            st.rerun()
-        else:
-            st.error("falha ao recarregar cache - arquivo não existe")
+            status_data.append({
+                "Cache": cache_info.get("nome_exibicao", tipo_cache),
+                "Relatório": cache_info.get("relatorio", "?"),
+                "Existe": "Sim" if info.get("existe", False) else "Não",
+                "Períodos": info.get("total_periodos", 0) if info.get("existe") else "-",
+                "Registros": info.get("total_registros", 0) if info.get("existe") else "-",
+                "Tipo": "Todas vars." if cache_info.get("todas_variaveis") else "Vars. selecionadas",
+            })
+
+        df_status = pd.DataFrame(status_data)
+        st.dataframe(df_status, use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    st.markdown("**atualizar dados (admin)**")
+    st.markdown("### Extração de Dados (Admin)")
 
-    senha_input = st.text_input("senha de administrador", type="password", key="senha_admin_atualizacao")
+    senha_input = st.text_input("senha de administrador", type="password", key="senha_admin_atualizacao_nova")
 
     if senha_input == SENHA_ADMIN:
+
+        # =============================================================
+        # SELEÇÃO DO CACHE A ATUALIZAR
+        # =============================================================
+        st.markdown("#### 1. Selecione o cache a atualizar")
+
+        # Opções de cache com descrição
+        opcoes_cache = {
+            "principal": "Resumo (Rel. 1) - variáveis selecionadas",
+            "capital": "Capital Regulatório (Rel. 5) - variáveis selecionadas",
+            "ativo": "Ativo (Rel. 2) - TODAS as variáveis",
+            "passivo": "Passivo (Rel. 3) - TODAS as variáveis",
+            "dre": "DRE (Rel. 4) - TODAS as variáveis",
+            "carteira_pf": "Carteira PF (Rel. 11) - TODAS as variáveis",
+            "carteira_pj": "Carteira PJ (Rel. 13) - TODAS as variáveis",
+            "carteira_instrumentos": "Carteira Instrumentos (Rel. 14) - TODAS as variáveis",
+        }
+
+        cache_selecionado = st.selectbox(
+            "cache para atualizar",
+            options=list(opcoes_cache.keys()),
+            format_func=lambda x: opcoes_cache[x],
+            key="cache_selecionado"
+        )
+
+        # Mostrar status do cache selecionado
+        info_selecionado = cache_manager.info(cache_selecionado)
+        if info_selecionado.get("existe"):
+            st.info(f"Cache atual: {info_selecionado.get('total_periodos', 0)} períodos, {info_selecionado.get('total_registros', 0):,} registros")
+        else:
+            st.warning(f"Cache '{cache_selecionado}' não existe ainda")
+
+        # =============================================================
+        # MODO DE ATUALIZAÇÃO
+        # =============================================================
+        st.markdown("#### 2. Modo de atualização")
+
+        modo_atualizacao = st.radio(
+            "modo",
+            options=["incremental", "overwrite"],
+            format_func=lambda x: "Incremental (adiciona/atualiza períodos)" if x == "incremental" else "Overwrite (substitui todo o cache)",
+            horizontal=True,
+            key="modo_atualizacao"
+        )
+
+        if modo_atualizacao == "overwrite":
+            st.warning("Modo OVERWRITE: todos os dados existentes serão substituídos!")
+
+        # =============================================================
+        # SELEÇÃO DE PERÍODOS
+        # =============================================================
+        st.markdown("#### 3. Selecione o período de extração")
+
         col1, col2 = st.columns(2)
         with col1:
-            ano_i = st.selectbox("ano inicial", range(2015,2028), index=8, key="ano_i_atualizacao")
-            mes_i = st.selectbox("trimestre inicial", ['03','06','09','12'], key="mes_i_atualizacao")
+            ano_i = st.selectbox("ano inicial", range(2015, 2029), index=8, key="ano_i_unificado")
+            mes_i = st.selectbox("trimestre inicial", ['03', '06', '09', '12'], key="mes_i_unificado")
         with col2:
-            ano_f = st.selectbox("ano final", range(2015,2028), index=10, key="ano_f_atualizacao")
-            mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f_atualizacao")
+            ano_f = st.selectbox("ano final", range(2015, 2029), index=10, key="ano_f_unificado")
+            mes_f = st.selectbox("trimestre final", ['03', '06', '09', '12'], index=2, key="mes_f_unificado")
+
+        periodos_extrair = gerar_periodos_cache(ano_i, mes_i, ano_f, mes_f)
+        st.caption(f"Serão extraídos {len(periodos_extrair)} períodos: {periodos_extrair[0][4:6]}/{periodos_extrair[0][:4]} até {periodos_extrair[-1][4:6]}/{periodos_extrair[-1][:4]}")
+
+        # =============================================================
+        # CONFIGURAÇÕES AVANÇADAS
+        # =============================================================
+        with st.expander("configurações avançadas"):
+            intervalo_save = st.slider(
+                "salvar a cada N períodos",
+                min_value=1,
+                max_value=10,
+                value=4,
+                help="O cache será salvo parcialmente a cada N períodos extraídos para evitar perda de dados",
+                key="intervalo_save"
+            )
+
+            st.caption("Nota: a extração usa Tipo de Instituição 1 (Conglomerados Prudenciais e Instituições Independentes)")
+
+        # =============================================================
+        # BOTÃO DE EXTRAÇÃO
+        # =============================================================
+        st.markdown("#### 4. Executar extração")
 
         if 'dict_aliases' in st.session_state:
-            if st.button("extrair dados do BCB", type="primary", use_container_width=True, key="btn_extrair_bcb_atualizacao"):
-                periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
+
+            # Informação sobre token do GitHub (apenas para publicação posterior)
+            with st.expander("informações sobre GitHub token"):
+                st.caption("O token do GitHub NÃO é necessário para extração de dados.")
+                st.caption("Ele será necessário apenas se você quiser publicar o cache no GitHub Releases.")
+                gh_token = st.text_input(
+                    "github token (opcional, para publicação)",
+                    type="password",
+                    key="gh_token_unificado",
+                    help="Token com permissão 'repo'. Necessário apenas para publicar no GitHub."
+                )
+
+            if st.button(f"Extrair dados de {opcoes_cache[cache_selecionado]}", type="primary", use_container_width=True, key="btn_extrair_unificado"):
+
+                # Containers para UI
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                save_status = st.empty()
+                error_log = st.empty()
+                erros_encontrados = []
+
+                def callback_progresso(i, total, periodo):
+                    progress_bar.progress((i + 1) / total)
+                    status_text.text(f"extraindo {periodo[4:6]}/{periodo[:4]} ({i + 1}/{total})")
+
+                def callback_salvamento(info):
+                    save_status.text(f"salvando... {info}")
+
+                st.info(f"iniciando extração de {len(periodos_extrair)} períodos para '{cache_selecionado}'. Salvamento a cada {intervalo_save} períodos.")
+
+                try:
+                    # Usar o gerenciador unificado para extração
+                    resultado = cache_manager.extrair_periodos_com_salvamento(
+                        tipo=cache_selecionado,
+                        periodos=periodos_extrair,
+                        modo=modo_atualizacao,
+                        intervalo_salvamento=intervalo_save,
+                        callback_progresso=callback_progresso,
+                        callback_salvamento=callback_salvamento,
+                        dict_aliases=st.session_state.get('dict_aliases', {})
+                    )
+
+                    # Limpar UI de progresso
+                    progress_bar.empty()
+                    status_text.empty()
+                    save_status.empty()
+
+                    if resultado.sucesso:
+                        st.success(f"Extração concluída: {resultado.mensagem}")
+
+                        # Mostrar estatísticas
+                        metadata = resultado.metadata or {}
+                        col_stat1, col_stat2, col_stat3 = st.columns(3)
+                        with col_stat1:
+                            st.metric("Períodos extraídos", f"{metadata.get('periodos_extraidos', 0)}/{metadata.get('periodos_total', 0)}")
+                        with col_stat2:
+                            st.metric("Registros totais", f"{metadata.get('total_registros', 0):,}")
+                        with col_stat3:
+                            st.metric("Modo", metadata.get('modo', 'N/A'))
+
+                        # Mostrar erros se houver
+                        if metadata.get('erros'):
+                            with st.expander(f"erros encontrados ({len(metadata['erros'])})", expanded=False):
+                                for erro in metadata['erros']:
+                                    st.caption(f"- {erro}")
+
+                        # =============================================================
+                        # DOWNLOAD IMEDIATO DO CACHE
+                        # =============================================================
+                        st.markdown("---")
+                        st.markdown("#### Download do cache")
+                        st.caption("Faça download imediato do cache para backup caso a publicação no GitHub falhe")
+
+                        col_dl1, col_dl2 = st.columns(2)
+
+                        with col_dl1:
+                            # Download Parquet
+                            dados_parquet = cache_manager.get_dados_para_download(cache_selecionado)
+                            if dados_parquet:
+                                st.download_button(
+                                    label="Download (Parquet)",
+                                    data=dados_parquet,
+                                    file_name=f"{cache_selecionado}_cache.parquet",
+                                    mime="application/octet-stream",
+                                    key="download_parquet"
+                                )
+
+                        with col_dl2:
+                            # Download CSV
+                            dados_csv = cache_manager.get_dados_para_download_csv(cache_selecionado)
+                            if dados_csv:
+                                st.download_button(
+                                    label="Download (CSV)",
+                                    data=dados_csv,
+                                    file_name=f"{cache_selecionado}_cache.csv",
+                                    mime="text/csv",
+                                    key="download_csv"
+                                )
+
+                        # Atualizar session_state para caches principais
+                        if cache_selecionado == "principal" and resultado.dados is not None:
+                            # Converter para formato antigo se necessário
+                            from utils.ifdata_cache import PrincipalCache
+                            pc = PrincipalCache(cache_manager.base_dir)
+                            dados_dict = pc.carregar_formato_antigo()
+                            if dados_dict:
+                                if 'dados_periodos' in st.session_state and st.session_state['dados_periodos'] and modo_atualizacao == "incremental":
+                                    st.session_state['dados_periodos'].update(dados_dict)
+                                else:
+                                    st.session_state['dados_periodos'] = dados_dict
+                                st.session_state['cache_fonte'] = 'extração local'
+
+                        elif cache_selecionado == "capital" and resultado.dados is not None:
+                            from utils.ifdata_cache import CapitalCache
+                            cc = CapitalCache(cache_manager.base_dir)
+                            dados_dict = cc.carregar_formato_antigo()
+                            if dados_dict:
+                                st.session_state['dados_capital'] = dados_dict
+
+                    else:
+                        st.error(f"Extração falhou: {resultado.mensagem}")
+                        if resultado.metadata and resultado.metadata.get('erros'):
+                            with st.expander("detalhes dos erros"):
+                                for erro in resultado.metadata['erros']:
+                                    st.caption(f"- {erro}")
+
+                except Exception as e:
+                    progress_bar.empty()
+                    status_text.empty()
+                    save_status.empty()
+                    st.error(f"Erro durante extração: {str(e)}")
+
+                    import traceback
+                    with st.expander("traceback completo"):
+                        st.code(traceback.format_exc())
+
+        else:
+            st.warning("carregue os aliases primeiro (verifique a conexão com Google Sheets)")
+
+        # =============================================================
+        # SEÇÃO: PUBLICAR NO GITHUB
+        # =============================================================
+        st.markdown("---")
+        st.markdown("### Publicar cache no GitHub")
+        st.caption("Envia o cache local para GitHub Releases para uso permanente")
+
+        if st.button("enviar cache para github", use_container_width=True, key="btn_enviar_github_unificado"):
+            with st.spinner("enviando cache para github releases..."):
+                sucesso, mensagem = upload_cache_github(gh_token if 'gh_token' in dir() and gh_token else None)
+                if sucesso:
+                    st.success(mensagem)
+                else:
+                    st.error(mensagem)
+
+        # =============================================================
+        # SEÇÃO LEGACY: EXTRAÇÃO PRINCIPAL (COMPATIBILIDADE)
+        # =============================================================
+        st.markdown("---")
+        with st.expander("extração legacy (sistema antigo)", expanded=False):
+            st.caption("Use esta opção apenas para compatibilidade com o sistema antigo")
+
+            col_leg1, col_leg2 = st.columns(2)
+            with col_leg1:
+                ano_leg_i = st.selectbox("ano inicial", range(2015, 2028), index=8, key="ano_leg_i")
+                mes_leg_i = st.selectbox("trim. inicial", ['03', '06', '09', '12'], key="mes_leg_i")
+            with col_leg2:
+                ano_leg_f = st.selectbox("ano final", range(2015, 2028), index=10, key="ano_leg_f")
+                mes_leg_f = st.selectbox("trim. final", ['03', '06', '09', '12'], index=2, key="mes_leg_f")
+
+            if st.button("extrair (sistema legado)", key="btn_extrair_legado"):
+                periodos = gerar_periodos(ano_leg_i, mes_leg_i, ano_leg_f, mes_leg_f)
                 progress_bar = st.progress(0)
                 status = st.empty()
                 save_status = st.empty()
@@ -5475,13 +5729,10 @@ elif menu == "Atualização Base":
                     progress_bar.progress((i+1)/total)
                     status.text(f"extraindo {p[4:6]}/{p[:4]} ({i+1}/{total})")
 
-                # Callback para salvamento progressivo (a cada 5 períodos)
                 def save_progress(dados_parciais, info):
-                    save_status.text(f"💾 salvando {len(dados_parciais)} períodos...")
+                    save_status.text(f"salvando {len(dados_parciais)} períodos...")
                     salvar_cache(dados_parciais, info, incremental=True)
-                    save_status.text(f"✓ {len(dados_parciais)} períodos salvos no cache")
-
-                st.info(f"🔄 iniciando extração de {len(periodos)} períodos. salvamento progressivo a cada 5 períodos.")
+                    save_status.text(f"salvos {len(dados_parciais)} períodos")
 
                 dados = processar_todos_periodos(
                     periodos,
@@ -5495,14 +5746,12 @@ elif menu == "Atualização Base":
                     progress_bar.empty()
                     status.empty()
                     save_status.empty()
-                    st.error("falha ao extrair dados: nenhum período retornou dados válidos.")
+                    st.error("falha ao extrair dados")
                 else:
                     periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
                     cache_salvo = salvar_cache(dados, periodo_info, incremental=True)
 
-                    # Atualizar session_state com merge dos dados existentes + novos
                     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-                        # Merge: dados existentes + novos (novos sobrescrevem)
                         dados_merged = st.session_state['dados_periodos'].copy()
                         dados_merged.update(dados)
                         st.session_state['dados_periodos'] = dados_merged
@@ -5514,103 +5763,9 @@ elif menu == "Atualização Base":
                     progress_bar.empty()
                     status.empty()
                     save_status.empty()
-                    st.success(f"✓ {len(dados)} períodos extraídos! cache total: {len(st.session_state['dados_periodos'])} períodos")
-                    st.info(f"cache salvo em: {cache_salvo['caminho']}")
-                    st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
+                    st.success(f"{len(dados)} períodos extraídos!")
                     st.rerun()
 
-            st.markdown("---")
-            st.markdown("**publicar cache no github**")
-            st.caption("envia o cache local para github releases para que outros usuários possam usar")
-
-            gh_token = st.text_input("github token (opcional)", type="password", key="gh_token_atualizacao",
-                                    help="token com permissão 'repo'. deixe em branco se gh CLI estiver autenticado")
-
-            if st.button("enviar cache para github", use_container_width=True, key="btn_enviar_github_atualizacao"):
-                with st.spinner("enviando cache para github releases..."):
-                    sucesso, mensagem = upload_cache_github(gh_token if gh_token else None)
-                    if sucesso:
-                        st.success(mensagem)
-                    else:
-                        st.error(mensagem)
-
-            # =============================================================
-            # SEÇÃO ISOLADA: EXTRAÇÃO DE DADOS DE CAPITAL
-            # Cache separado (capital_cache.pkl), sem impacto no fluxo principal
-            # =============================================================
-            st.markdown("---")
-            st.markdown("**extrair capital (relatório 5)**")
-            st.caption("extrai informações de capital (índices, RWA, alavancagem) - cache separado")
-
-            # Mostrar status do cache de capital
-            capital_cache_info = get_capital_cache_info()
-            if capital_cache_info['existe']:
-                st.caption(f"📊 cache capital: {capital_cache_info['n_periodos']} períodos | {capital_cache_info['tamanho_formatado']}")
-                st.caption(f"📅 atualizado: {capital_cache_info['data_formatada']}")
-            else:
-                st.caption("📊 cache capital: não existe ainda")
-
-            col_cap1, col_cap2 = st.columns(2)
-            with col_cap1:
-                ano_cap_i = st.selectbox("ano inicial", range(2015, 2028), index=8, key="ano_cap_i_atualizacao")
-                mes_cap_i = st.selectbox("trim. inicial", ['03', '06', '09', '12'], key="mes_cap_i_atualizacao")
-            with col_cap2:
-                ano_cap_f = st.selectbox("ano final", range(2015, 2028), index=10, key="ano_cap_f_atualizacao")
-                mes_cap_f = st.selectbox("trim. final", ['03', '06', '09', '12'], index=2, key="mes_cap_f_atualizacao")
-
-            if st.button("extrair dados de capital", type="secondary", use_container_width=True, key="btn_extrair_capital_atualizacao"):
-                periodos_cap = gerar_periodos_capital(ano_cap_i, mes_cap_i, ano_cap_f, mes_cap_f)
-                progress_bar_cap = st.progress(0)
-                status_cap = st.empty()
-                save_status_cap = st.empty()
-
-                def update_cap(i, total, p):
-                    progress_bar_cap.progress((i + 1) / total)
-                    status_cap.text(f"extraindo capital {p[4:6]}/{p[:4]} ({i + 1}/{total})")
-
-                def save_progress_cap(dados_parciais, info):
-                    save_status_cap.text(f"💾 salvando {len(dados_parciais)} períodos de capital...")
-                    salvar_cache_capital(dados_parciais, info, incremental=True)
-                    save_status_cap.text(f"✓ {len(dados_parciais)} períodos de capital salvos")
-
-                st.info(f"🔄 iniciando extração de capital: {len(periodos_cap)} períodos")
-
-                # Usar dict_aliases se disponível
-                aliases_para_capital = st.session_state.get('dict_aliases', {})
-
-                dados_capital = processar_todos_periodos_capital(
-                    periodos_cap,
-                    dict_aliases=aliases_para_capital,
-                    progress_callback=update_cap,
-                    save_callback=save_progress_cap,
-                    save_interval=5
-                )
-
-                if not dados_capital:
-                    progress_bar_cap.empty()
-                    status_cap.empty()
-                    save_status_cap.empty()
-                    st.error("falha ao extrair dados de capital: nenhum período retornou dados válidos.")
-                else:
-                    periodo_info_cap = f"capital {periodos_cap[0][4:6]}/{periodos_cap[0][:4]} até {periodos_cap[-1][4:6]}/{periodos_cap[-1][:4]}"
-                    cache_capital_salvo = salvar_cache_capital(dados_capital, periodo_info_cap, incremental=True)
-
-                    progress_bar_cap.empty()
-                    status_cap.empty()
-                    save_status_cap.empty()
-
-                    st.success(f"✓ {len(dados_capital)} períodos de capital extraídos!")
-                    st.info(f"cache capital salvo em: {cache_capital_salvo['caminho']}")
-                    st.info(f"tamanho: {cache_capital_salvo['tamanho_formatado']} | total: {cache_capital_salvo['n_periodos']} períodos")
-
-                    # Mostrar campos extraídos
-                    with st.expander("campos extraídos"):
-                        campos = get_campos_capital_info()
-                        for original, exibido in campos.items():
-                            st.caption(f"• {exibido} ← _{original}_")
-
-        else:
-            st.warning("carregue os aliases primeiro")
     elif senha_input:
         st.error("senha incorreta")
 
