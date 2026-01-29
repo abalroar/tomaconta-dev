@@ -37,8 +37,9 @@ from utils.ifdata_extractor import (
     get_log_file_path,
     parece_codigo_instituicao,
 )
-# Import isolado para extração de capital (cache separado, sem impacto no fluxo principal)
-from utils.capital_extractor import (
+# Sistema unificado de cache (capital e principal)
+from utils.ifdata_cache import (
+    # Cache de capital
     gerar_periodos_capital,
     processar_todos_periodos_capital,
     salvar_cache_capital,
@@ -46,6 +47,10 @@ from utils.capital_extractor import (
     get_capital_cache_info,
     ler_info_cache_capital,
     get_campos_capital_info,
+    baixar_cache_capital_inicial,
+    # Gerenciador unificado
+    CacheManager,
+    get_manager as get_cache_manager,
 )
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
