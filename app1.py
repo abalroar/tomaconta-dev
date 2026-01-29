@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
+from typing import Tuple
 import time
 
 # === PERFORMANCE TIMER ===
@@ -267,6 +268,12 @@ ALIASES_PATH = str(DATA_DIR / "Aliases.xlsx")
 LOGO_PATH = str(DATA_DIR / "logo.png")
 CACHE_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/dados_cache.pkl"
 CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/cache_info.txt"
+
+# Cache de Capital (persistência externa no GitHub Releases)
+CAPITAL_CACHE_FILE = str(DATA_DIR / "capital_cache.pkl")
+CAPITAL_CACHE_INFO = str(DATA_DIR / "capital_cache_info.txt")
+CAPITAL_CACHE_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/capital_cache.pkl"
+CAPITAL_CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/download/v1.0-cache/capital_cache_info.txt"
 
 # Senha para proteger a funcionalidade de atualização de cache
 SENHA_ADMIN = "m4th3u$987"
@@ -683,18 +690,20 @@ def aplicar_aliases_em_periodos(dados_periodos, dict_aliases, mapa_codigos=None)
     return dados_corrigidos
 
 
-def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=None):
+def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=None, dados_periodos=None):
     """Resolve nomes de instituições que estão como códigos [IF xxxxx] no cache de capital.
 
     Usa múltiplas estratégias de lookup:
     1. Busca direta no dict_aliases (nome original -> alias)
     2. Busca por CodInst no df_aliases se disponível
-    3. Mantém o nome original se não encontrar correspondência
+    3. Busca no dados_periodos (cache principal) como fallback
+    4. Mantém o nome original se não encontrar correspondência
 
     Args:
         df_capital: DataFrame com dados de capital
         dict_aliases: Dicionário nome original -> alias
         df_aliases: DataFrame do Aliases.xlsx com mapeamentos
+        dados_periodos: Dicionário do cache principal para fallback de nomes
 
     Returns:
         DataFrame com nomes de instituições resolvidos
@@ -727,6 +736,20 @@ def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=Non
                 if pd.notna(cod) and pd.notna(alias):
                     mapa_codinst_nome[str(cod).strip()] = alias
 
+    # Construir mapa adicional a partir do dados_periodos (cache principal) como fallback
+    mapa_dados_periodos = {}
+    if dados_periodos:
+        for periodo, df_periodo in dados_periodos.items():
+            if 'Instituição' in df_periodo.columns and 'CodInst' in df_periodo.columns:
+                for _, row in df_periodo.iterrows():
+                    cod = row.get('CodInst')
+                    nome = row.get('Instituição')
+                    # Só usar se o nome não for um placeholder
+                    if pd.notna(cod) and pd.notna(nome) and not str(nome).startswith('[IF'):
+                        cod_str = str(int(cod)) if isinstance(cod, float) else str(cod)
+                        if cod_str not in mapa_dados_periodos:
+                            mapa_dados_periodos[cod_str] = nome
+
     def resolver_nome(nome, codinst=None):
         """Resolve um nome de instituição."""
         if pd.isna(nome):
@@ -738,26 +761,34 @@ def resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases=Non
         if dict_aliases and nome_str in dict_aliases:
             return dict_aliases[nome_str]
 
-        # 2. Verificar se é um placeholder [IF xxxxx]
-        match = re.match(r'\[IF\s+(\d+)\]', nome_str)
+        # 2. Verificar se é um placeholder [IF xxxxx] - agora aceita alfanuméricos
+        match = re.match(r'\[IF\s+([A-Za-z0-9]+)\]', nome_str)
         if match:
             cod_extraido = match.group(1)
 
-            # Tentar resolver pelo código extraído
+            # Tentar resolver pelo código extraído no mapa de aliases
             if mapa_codinst_nome and cod_extraido in mapa_codinst_nome:
                 return mapa_codinst_nome[cod_extraido]
+
+            # Tentar resolver no mapa do dados_periodos
+            if mapa_dados_periodos and cod_extraido in mapa_dados_periodos:
+                return mapa_dados_periodos[cod_extraido]
 
             # Se temos CodInst na linha, usar para lookup
             if codinst is not None and pd.notna(codinst):
                 cod_str = str(int(codinst)) if isinstance(codinst, float) else str(codinst)
                 if mapa_codinst_nome and cod_str in mapa_codinst_nome:
                     return mapa_codinst_nome[cod_str]
+                if mapa_dados_periodos and cod_str in mapa_dados_periodos:
+                    return mapa_dados_periodos[cod_str]
 
         # 3. Se temos CodInst, tentar lookup direto
         if codinst is not None and pd.notna(codinst):
             cod_str = str(int(codinst)) if isinstance(codinst, float) else str(codinst)
             if mapa_codinst_nome and cod_str in mapa_codinst_nome:
                 return mapa_codinst_nome[cod_str]
+            if mapa_dados_periodos and cod_str in mapa_dados_periodos:
+                return mapa_dados_periodos[cod_str]
 
         # 4. Manter nome original se não encontrou correspondência
         return nome_str
@@ -890,6 +921,142 @@ def baixar_cache_inicial():
     except Exception as e:
         st.error(f"erro ao baixar cache: {e}")
         return False, 'nenhuma'
+
+
+def baixar_cache_capital_inicial():
+    """Baixa o cache de capital do GitHub Releases se não existir localmente.
+
+    Similar ao baixar_cache_inicial(), mas para o cache de capital isolado.
+    Retorna tupla (sucesso, fonte) onde fonte pode ser 'local', 'github' ou 'nenhuma'.
+    """
+    cache_path = Path(CAPITAL_CACHE_FILE)
+    if cache_path.exists():
+        return True, 'local'
+
+    try:
+        with st.spinner("carregando cache de capital do github releases..."):
+            r = requests.get(CAPITAL_CACHE_URL, timeout=120)
+            if r.status_code == 200:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_bytes(r.content)
+                # Tentar baixar info também
+                r_info = requests.get(CAPITAL_CACHE_INFO_URL, timeout=30)
+                if r_info.status_code == 200:
+                    Path(CAPITAL_CACHE_INFO).write_text(r_info.text)
+                return True, 'github releases'
+            else:
+                # Cache de capital não existe no GitHub ainda - não é erro crítico
+                return False, 'nenhuma'
+    except Exception as e:
+        # Falha silenciosa - cache de capital é opcional
+        print(f"[CAPITAL] Aviso: não foi possível baixar cache de capital: {e}")
+        return False, 'nenhuma'
+
+
+def upload_cache_capital_github(token: str = None) -> Tuple[bool, str]:
+    """Faz upload do cache de capital para GitHub Releases.
+
+    Similar ao upload_cache_github(), mas para o cache de capital.
+    """
+    repo = "abalroar/tomaconta"
+    tag = "v1.0-cache"
+
+    cache_path = Path(CAPITAL_CACHE_FILE)
+    info_path = Path(CAPITAL_CACHE_INFO)
+
+    if not cache_path.exists():
+        return False, "arquivo capital_cache.pkl não encontrado"
+
+    # Tentar usar gh CLI primeiro
+    try:
+        result = subprocess.run(['gh', '--version'], capture_output=True, timeout=5)
+        gh_available = result.returncode == 0
+    except Exception:
+        gh_available = False
+
+    if gh_available:
+        try:
+            # Deletar assets antigos se existirem
+            subprocess.run(
+                ['gh', 'release', 'delete-asset', tag, 'capital_cache.pkl', '-y', '-R', repo],
+                capture_output=True, timeout=30
+            )
+            subprocess.run(
+                ['gh', 'release', 'delete-asset', tag, 'capital_cache_info.txt', '-y', '-R', repo],
+                capture_output=True, timeout=30
+            )
+
+            # Upload novos arquivos
+            subprocess.run(
+                ['gh', 'release', 'upload', tag, str(cache_path), '--clobber', '-R', repo],
+                check=True, capture_output=True, timeout=300
+            )
+            if info_path.exists():
+                subprocess.run(
+                    ['gh', 'release', 'upload', tag, str(info_path), '--clobber', '-R', repo],
+                    check=True, capture_output=True, timeout=60
+                )
+
+            return True, "cache de capital enviado para github releases com sucesso!"
+
+        except subprocess.CalledProcessError as e:
+            return False, f"erro ao usar gh CLI: {e}"
+        except Exception as e:
+            return False, f"erro inesperado: {e}"
+
+    # Fallback: usar API do GitHub com token
+    if token:
+        try:
+            headers = {
+                'Authorization': f'token {token}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+
+            # Obter release
+            release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+            r = requests.get(release_url, headers=headers, timeout=30)
+            if r.status_code != 200:
+                return False, f"release {tag} não encontrada"
+
+            release_data = r.json()
+            upload_url = release_data['upload_url'].replace('{?name,label}', '')
+
+            # Deletar assets antigos
+            for asset in release_data.get('assets', []):
+                if asset['name'] in ['capital_cache.pkl', 'capital_cache_info.txt']:
+                    delete_url = f"https://api.github.com/repos/{repo}/releases/assets/{asset['id']}"
+                    requests.delete(delete_url, headers=headers, timeout=30)
+
+            # Upload capital_cache.pkl
+            with open(cache_path, 'rb') as f:
+                headers_upload = headers.copy()
+                headers_upload['Content-Type'] = 'application/octet-stream'
+                r = requests.post(
+                    f"{upload_url}?name=capital_cache.pkl",
+                    headers=headers_upload,
+                    data=f,
+                    timeout=300
+                )
+                if r.status_code not in [200, 201]:
+                    return False, f"falha no upload do cache de capital: {r.status_code}"
+
+            # Upload info se existir
+            if info_path.exists():
+                with open(info_path, 'rb') as f:
+                    r = requests.post(
+                        f"{upload_url}?name=capital_cache_info.txt",
+                        headers=headers_upload,
+                        data=f,
+                        timeout=60
+                    )
+
+            return True, "cache de capital enviado para github releases com sucesso!"
+
+        except Exception as e:
+            return False, f"erro ao usar API do github: {str(e)}"
+
+    return False, "gh CLI não disponível e nenhum token fornecido"
+
 
 def ordenar_periodos(periodos, reverso=False):
     def chave_periodo(valor):
@@ -1296,8 +1463,14 @@ if 'dados_periodos' not in st.session_state:
     print(_perf_log("init_dados_periodos"))
 
 # Carregar cache de capital (isolado) se disponível
+# Primeiro tenta local, depois GitHub Releases (igual ao cache principal)
 if 'dados_capital' not in st.session_state:
     _perf_start("init_dados_capital")
+    # Tentar baixar do GitHub Releases se não existir localmente
+    sucesso_capital, fonte_capital = baixar_cache_capital_inicial()
+    if sucesso_capital:
+        st.session_state['capital_cache_fonte'] = fonte_capital
+
     dados_capital = carregar_cache_capital()
     if dados_capital:
         # Aplicar aliases ao cache de capital (sem mapa de códigos)
@@ -1537,11 +1710,27 @@ with st.sidebar:
                     ano_cap_f = st.selectbox("ano final", range(2015, 2028), index=10, key="ano_cap_f")
                     mes_cap_f = st.selectbox("trim. final", ['03', '06', '09', '12'], index=2, key="mes_cap_f")
 
+                # Opção de atualização completa (sobrescreve cache antigo)
+                atualizar_completo_capital = st.checkbox(
+                    "🔄 atualização completa (sobrescrever cache antigo)",
+                    value=False,
+                    key="atualizar_completo_capital",
+                    help="Marque para apagar o cache existente e extrair tudo do zero. Use quando houver problemas com nomes ou dados antigos."
+                )
+
                 if st.button("extrair dados de capital", type="secondary", use_container_width=True, key="btn_extrair_capital"):
                     periodos_cap = gerar_periodos_capital(ano_cap_i, mes_cap_i, ano_cap_f, mes_cap_f)
                     progress_bar_cap = st.progress(0)
                     status_cap = st.empty()
                     save_status_cap = st.empty()
+
+                    # Se atualização completa, deletar cache existente primeiro
+                    incremental_mode = not atualizar_completo_capital
+                    if atualizar_completo_capital:
+                        cache_path = Path(CAPITAL_CACHE_FILE)
+                        if cache_path.exists():
+                            cache_path.unlink()
+                            st.info("🗑️ cache antigo de capital removido para atualização completa")
 
                     def update_cap(i, total, p):
                         progress_bar_cap.progress((i + 1) / total)
@@ -1549,10 +1738,11 @@ with st.sidebar:
 
                     def save_progress_cap(dados_parciais, info):
                         save_status_cap.text(f"💾 salvando {len(dados_parciais)} períodos de capital...")
-                        salvar_cache_capital(dados_parciais, info, incremental=True)
+                        salvar_cache_capital(dados_parciais, info, incremental=incremental_mode)
                         save_status_cap.text(f"✓ {len(dados_parciais)} períodos de capital salvos")
 
-                    st.info(f"🔄 iniciando extração de capital: {len(periodos_cap)} períodos")
+                    modo_texto = "completa" if atualizar_completo_capital else "incremental"
+                    st.info(f"🔄 iniciando extração de capital ({modo_texto}): {len(periodos_cap)} períodos")
 
                     # Usar dict_aliases se disponível
                     aliases_para_capital = st.session_state.get('dict_aliases', {})
@@ -1572,7 +1762,7 @@ with st.sidebar:
                         st.error("falha ao extrair dados de capital: nenhum período retornou dados válidos.")
                     else:
                         periodo_info_cap = f"capital {periodos_cap[0][4:6]}/{periodos_cap[0][:4]} até {periodos_cap[-1][4:6]}/{periodos_cap[-1][:4]}"
-                        cache_capital_salvo = salvar_cache_capital(dados_capital, periodo_info_cap, incremental=True)
+                        cache_capital_salvo = salvar_cache_capital(dados_capital, periodo_info_cap, incremental=incremental_mode)
 
                         progress_bar_cap.empty()
                         status_cap.empty()
@@ -1581,6 +1771,17 @@ with st.sidebar:
                         st.success(f"✓ {len(dados_capital)} períodos de capital extraídos!")
                         st.info(f"cache capital salvo em: {cache_capital_salvo['caminho']}")
                         st.info(f"tamanho: {cache_capital_salvo['tamanho_formatado']} | total: {cache_capital_salvo['n_periodos']} períodos")
+
+                        # Upload para GitHub Releases para persistência
+                        with st.spinner("enviando cache de capital para github releases..."):
+                            sucesso_upload, msg_upload = upload_cache_capital_github()
+                            if sucesso_upload:
+                                st.success(f"☁️ {msg_upload}")
+                            else:
+                                st.warning(f"⚠️ cache local salvo, mas falha no upload: {msg_upload}")
+
+                        # Atualizar session_state com novos dados
+                        st.session_state['dados_capital'] = dados_capital
 
                         # Mostrar campos extraídos
                         with st.expander("campos extraídos"):
@@ -2159,9 +2360,11 @@ elif menu == "Infos de Capital":
         df_capital = pd.concat(st.session_state['dados_capital'].values(), ignore_index=True)
 
         # Resolver nomes de instituições que estão como códigos [IF xxxxx]
+        # Usa múltiplas fontes: dict_aliases, df_aliases, e dados_periodos como fallback
         dict_aliases = st.session_state.get('dict_aliases', {})
         df_aliases = st.session_state.get('df_aliases', None)
-        df_capital = resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases)
+        dados_periodos = st.session_state.get('dados_periodos', None)
+        df_capital = resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases, dados_periodos)
 
         # Mapeamento flexível de colunas (nome esperado -> alternativas)
         mapa_colunas_capital = {

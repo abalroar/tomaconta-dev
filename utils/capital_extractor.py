@@ -286,27 +286,54 @@ def processar_periodo_capital(ano_mes: str, dict_aliases: dict = None) -> Option
 
     # 4. Preparar mapeamento de nomes de instituições
     mapa_nomes = {}
+    fonte_nomes = "nenhuma"
+
     if not df_cad.empty:
         coluna_nome = obter_coluna_nome_instituicao(df_cad)
+        logger.debug(f"Cadastro {ano_mes}: {len(df_cad)} registros, coluna nome: {coluna_nome}")
+        logger.debug(f"Cadastro colunas disponíveis: {list(df_cad.columns)}")
+
         if coluna_nome and "CodInst" in df_cad.columns:
             for _, row in df_cad.iterrows():
                 cod = row.get("CodInst")
                 nome = row.get(coluna_nome)
                 if pd.notna(cod) and pd.notna(nome):
                     mapa_nomes[cod] = nome
+            fonte_nomes = "cadastro"
+            logger.info(f"Mapa de nomes populado do cadastro: {len(mapa_nomes)} instituições")
+        else:
+            logger.warning(f"Cadastro {ano_mes}: coluna nome não encontrada ou sem CodInst")
+    else:
+        logger.warning(f"Cadastro {ano_mes} vazio - tentando fallback em df_valores")
 
     # Tentar obter nomes do próprio df_valores se cadastro falhou
     if not mapa_nomes:
         coluna_nome_valores = obter_coluna_nome_instituicao(df_valores)
+        logger.debug(f"Valores {ano_mes}: coluna nome: {coluna_nome_valores}")
+
         if coluna_nome_valores and "CodInst" in df_valores.columns:
             for _, row in df_valores.drop_duplicates(subset=["CodInst"]).iterrows():
                 cod = row.get("CodInst")
                 nome = row.get(coluna_nome_valores)
                 if pd.notna(cod) and pd.notna(nome):
                     mapa_nomes[cod] = nome
+            fonte_nomes = "valores"
+            logger.info(f"Mapa de nomes populado de df_valores: {len(mapa_nomes)} instituições")
+        else:
+            logger.error(f"FALHA: Não foi possível obter nomes para período {ano_mes}")
 
     # 5. Adicionar nome da instituição
     df_pivot["Instituição"] = df_pivot["CodInst"].map(mapa_nomes)
+
+    # Contar quantos nomes foram resolvidos vs faltantes
+    nomes_resolvidos = df_pivot["Instituição"].notna().sum()
+    nomes_faltantes = df_pivot["Instituição"].isna().sum()
+
+    if nomes_faltantes > 0:
+        logger.warning(f"Período {ano_mes}: {nomes_faltantes} instituições sem nome (fonte: {fonte_nomes})")
+        # Listar códigos sem nome para debug
+        codigos_sem_nome = df_pivot[df_pivot["Instituição"].isna()]["CodInst"].tolist()[:10]
+        logger.debug(f"Exemplos de códigos sem nome: {codigos_sem_nome}")
 
     # Preencher nomes faltantes com placeholder
     df_pivot["Instituição"] = df_pivot.apply(
