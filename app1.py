@@ -5023,4 +5023,40 @@ elif menu == "Glossário":
     **Índice de Basileia:** Relação entre Patrimônio de Referência e RWA Total (Patrimônio de Referência / RWA Total).
 
     **Adicional de Capital Principal:** Requerimento de adicional de capital principal (ACP), apurado pela soma de ACP Conservação, ACP Contracíclico e ACP Sistêmico.
+
+    ---
+
+    ## **Variáveis Monetárias**
+
+    **Ativo Total:** Padrão COSIF.
+
+    **Carteira de Crédito:** Valor líquido, já descontada a PDD.
+
+    **Títulos e Valores Mobiliários:** Títulos de Renda Fixa + Aplicação em COEs + Cotas de Fundos de Curto Prazo e Fundos de Investimentos, já descontados de Perda Incorrida, Perda Esperada e Ajuste a Valor Justo.
+
+    **Passivo Exigível:** Passivo Total, incluindo Depósitos, Compromissadas, Outros Instrumentos de Dívida, Relações Interfinanceiras, Relações Interdependências, Derivativos, Provisões (Cíveis, Fiscais, Trabalhistas) e Outras Obrigações.
+
+    **Captações:** Todos os tipos de passivos, exceto (i) Títulos de Dívida Elegíveis a Capital e (ii) Dívidas Subordinadas Elegíveis a Capital.
+
+    **Patrimônio Líquido:** Padrão COSIF.
+
+    **Lucro Líquido Acumulado YTD:** Lucro líquido acumulado entre janeiro do ano-competência até o final do semestre de referência (ex: 09/2025 refere-se ao lucro acumulado no ano de 2025, até 30/09/2025).
+
+    ---
+
+    ## **Índices e Percentuais**
+
+    **Índice de Imobilização:** Ativo Permanente dividido pelo Patrimônio de Referência.
+
+    ---
+
+    ## **Métricas Calculadas**
+
+    **ROE Ac. YTD an. (%):** Lucro Líquido acumulado entre janeiro e o fim do período, dividido pelo Patrimônio Líquido.
+
+    **Crédito/PL (%):** Carteira de Crédito Líquida dividida pelo Patrimônio Líquido.
+
+    **Crédito/Captações (%):** Carteira de Crédito Líquida dividida pelas Captações.
+
+    **Crédito/Ativo (%):** Carteira de Crédito Líquida dividida pelo Ativo Total.
     """)
