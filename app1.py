@@ -1152,9 +1152,19 @@ def get_dados_concatenados() -> pd.DataFrame:
     if 'dados_periodos' not in st.session_state or not st.session_state['dados_periodos']:
         return pd.DataFrame()
 
-    # Hash baseado nas chaves dos períodos para invalidação de cache
+    # Hash baseado nas chaves dos períodos E nas colunas para invalidação de cache
+    # Isso garante que o cache seja invalidado quando métricas derivadas são recalculadas
+    # ou quando dados de capital são mesclados
     periodos_keys = tuple(sorted(st.session_state['dados_periodos'].keys()))
-    periodos_hash = str(hash(periodos_keys))
+
+    # Incluir colunas do primeiro DataFrame no hash para detectar mudanças
+    primeiro_periodo = next(iter(st.session_state['dados_periodos'].values()))
+    colunas_hash = tuple(sorted(primeiro_periodo.columns.tolist()))
+
+    # Flag de mesclagem de capital também invalida o cache
+    capital_mesclado = st.session_state.get('_dados_capital_mesclados', False)
+
+    periodos_hash = str(hash((periodos_keys, colunas_hash, capital_mesclado)))
 
     return _get_dados_concatenados(periodos_hash, periodos_keys)
 
