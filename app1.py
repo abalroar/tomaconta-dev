@@ -472,9 +472,32 @@ def recalcular_metricas_derivadas(dados_periodos):
     if not dados_periodos:
         return dados_periodos
 
+    # Mapeamento de nomes antigos para novos
+    RENOMEAR_COLUNAS = {
+        'Lucro Líquido': 'Lucro Líquido Acumulado YTD',
+        'ROE An. (%)': 'ROE Ac. YTD an. (%)',
+        'Crédito/PL': 'Crédito/PL (%)',
+    }
+
+    # Colunas obsoletas a serem removidas
+    COLUNAS_OBSOLETAS = ['Risco/Retorno', 'Funding Gap (%)']
+
     dados_atualizados = {}
     for periodo, df in dados_periodos.items():
         df_atualizado = df.copy()
+
+        # Renomear colunas antigas para novos nomes
+        colunas_para_renomear = {
+            old: new for old, new in RENOMEAR_COLUNAS.items()
+            if old in df_atualizado.columns and new not in df_atualizado.columns
+        }
+        if colunas_para_renomear:
+            df_atualizado = df_atualizado.rename(columns=colunas_para_renomear)
+
+        # Remover colunas obsoletas
+        colunas_remover = [col for col in COLUNAS_OBSOLETAS if col in df_atualizado.columns]
+        if colunas_remover:
+            df_atualizado = df_atualizado.drop(columns=colunas_remover)
 
         # Extrair mês do período para cálculo do fator de anualização
         try:
