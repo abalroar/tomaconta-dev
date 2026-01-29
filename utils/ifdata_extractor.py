@@ -634,7 +634,7 @@ def extrair_lucro_periodo(ano_mes: str) -> pd.DataFrame:
 
     df_lucro = df[df["NomeColuna"] == "Lucro Líquido"].copy()
     df_lucro = df_lucro.groupby("CodInst")["Saldo"].sum().reset_index()
-    df_lucro.columns = ["CodInst", "Lucro Líquido"]
+    df_lucro.columns = ["CodInst", "Lucro Líquido Acumulado YTD"]
 
     cache_lucros[ano_mes] = df_lucro
     return df_lucro
@@ -653,29 +653,29 @@ def calcular_lucro_semestral(ano_mes: str, df_pivot: pd.DataFrame) -> pd.DataFra
         periodo_anterior = f"{ano}06"
         df_lucro_anterior = extrair_lucro_periodo(periodo_anterior)
 
-        if not df_lucro_anterior.empty and "Lucro Líquido" in df_result.columns:
+        if not df_lucro_anterior.empty and "Lucro Líquido Acumulado YTD" in df_result.columns:
             df_result = df_result.merge(
                 df_lucro_anterior, on="CodInst", how="left", suffixes=("", "_06")
             )
-            df_result["Lucro Líquido"] = (
-                df_result["Lucro Líquido"].fillna(0) +
-                df_result["Lucro Líquido_06"].fillna(0)
+            df_result["Lucro Líquido Acumulado YTD"] = (
+                df_result["Lucro Líquido Acumulado YTD"].fillna(0) +
+                df_result["Lucro Líquido Acumulado YTD_06"].fillna(0)
             )
-            df_result = df_result.drop(columns=["Lucro Líquido_06"], errors="ignore")
+            df_result = df_result.drop(columns=["Lucro Líquido Acumulado YTD_06"], errors="ignore")
 
     elif mes == "12":
         periodo_anterior = f"{ano}09"
         df_lucro_anterior = extrair_lucro_periodo(periodo_anterior)
 
-        if not df_lucro_anterior.empty and "Lucro Líquido" in df_result.columns:
+        if not df_lucro_anterior.empty and "Lucro Líquido Acumulado YTD" in df_result.columns:
             df_result = df_result.merge(
                 df_lucro_anterior, on="CodInst", how="left", suffixes=("", "_09")
             )
-            df_result["Lucro Líquido"] = (
-                df_result["Lucro Líquido"].fillna(0) +
-                df_result["Lucro Líquido_09"].fillna(0)
+            df_result["Lucro Líquido Acumulado YTD"] = (
+                df_result["Lucro Líquido Acumulado YTD"].fillna(0) +
+                df_result["Lucro Líquido Acumulado YTD_09"].fillna(0)
             )
-            df_result = df_result.drop(columns=["Lucro Líquido_09"], errors="ignore")
+            df_result = df_result.drop(columns=["Lucro Líquido Acumulado YTD_09"], errors="ignore")
 
     return df_result
 
@@ -784,6 +784,8 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         )
 
     # 4. Extrair métricas financeiras
+    # IMPORTANTE: "Lucro Líquido" é o nome da coluna na API do BC,
+    # depois é renomeado para "Lucro Líquido Acumulado YTD" no passo 6.
     colunas_desejadas = [
         "Ativo Total",
         "Carteira de Crédito",
@@ -827,7 +829,9 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
 
         df_pivot = df_pivot.drop(columns=["Carteira de Crédito Classificada"], errors="ignore")
 
-    # 6. Ajustar lucro semestral
+    # 6. Renomear coluna de Lucro Líquido e ajustar lucro semestral
+    if "Lucro Líquido" in df_pivot.columns:
+        df_pivot = df_pivot.rename(columns={"Lucro Líquido": "Lucro Líquido Acumulado YTD"})
     df_pivot = calcular_lucro_semestral(ano_mes, df_pivot)
 
     # 7. Merge com nomes
@@ -856,7 +860,7 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         "Passivo Exigível",
         "Captações",
         "Patrimônio Líquido",
-        "Lucro Líquido",
+        "Lucro Líquido Acumulado YTD",
         "Patrimônio de Referência",
         "Patrimônio de Referência para Comparação com o RWA (e)",
         "Índice de Basileia",
@@ -873,7 +877,7 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
     # 9. Calcular métricas derivadas
     mes = int(ano_mes[4:6])
 
-    if "Lucro Líquido" in df_out.columns and "Patrimônio Líquido" in df_out.columns:
+    if "Lucro Líquido Acumulado YTD" in df_out.columns and "Patrimônio Líquido" in df_out.columns:
         if mes == 3:
             fator = 4
         elif mes == 6:
@@ -885,13 +889,13 @@ def processar_periodo(ano_mes: str, dict_aliases: dict) -> pd.DataFrame:
         else:
             fator = 12 / mes
 
-        df_out["ROE An. (%)"] = (
-            (fator * df_out["Lucro Líquido"].fillna(0)) /
+        df_out["ROE Ac. YTD an. (%)"] = (
+            (fator * df_out["Lucro Líquido Acumulado YTD"].fillna(0)) /
             df_out["Patrimônio Líquido"].replace(0, np.nan)
         )
 
     if "Carteira de Crédito" in df_out.columns and "Patrimônio Líquido" in df_out.columns:
-        df_out["Crédito/PL"] = (
+        df_out["Crédito/PL (%)"] = (
             df_out["Carteira de Crédito"].fillna(0) /
             df_out["Patrimônio Líquido"].replace(0, np.nan)
         )

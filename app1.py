@@ -279,17 +279,20 @@ CAPITAL_CACHE_INFO_URL = "https://github.com/abalroar/tomaconta/releases/downloa
 SENHA_ADMIN = "m4th3u$987"
 
 VARS_PERCENTUAL = [
-    'ROE An. (%)',
+    'ROE Ac. YTD an. (%)',
     'Índice de Basileia',
     'Crédito/Captações (%)',
     'Crédito/Ativo (%)',
-    'Market Share Carteira',
     'Índice de Imobilização',
+    # Variáveis de Capital (Relatório 5)
+    'Índice de Capital Principal',
+    'Índice de Capital Nível I',
+    'Razão de Alavancagem',
 ]
-VARS_RAZAO = ['Crédito/PL']
+VARS_RAZAO = ['Crédito/PL (%)']
 VARS_MOEDAS = [
     'Carteira de Crédito',
-    'Lucro Líquido',
+    'Lucro Líquido Acumulado YTD',
     'Patrimônio Líquido',
     'Captações',
     'Ativo Total',
@@ -297,8 +300,89 @@ VARS_MOEDAS = [
     'Passivo Exigível',
     'Patrimônio de Referência',
     'Patrimônio de Referência para Comparação com o RWA (e)',
+    # Variáveis de Capital (Relatório 5)
+    'Capital Principal',
+    'Capital Complementar',
+    'Capital Nível II',
+    'RWA Total',
+    'RWA Crédito',
+    'RWA Mercado',
+    'RWA Operacional',
+    'Exposição Total',
+    'Adicional de Capital Principal',
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
+
+# Variáveis disponíveis para ponderação (variáveis de tamanho/volume em valores absolutos)
+# Mapeamento: label exibido -> nome da coluna no DataFrame
+VARIAVEIS_PONDERACAO = {
+    'Média Simples': None,  # Sem ponderação
+    'Ativo Total': 'Ativo Total',
+    'Carteira de Crédito': 'Carteira de Crédito',
+    'Patrimônio Líquido': 'Patrimônio Líquido',
+    'Patrimônio de Referência': 'Patrimônio de Referência',
+    'Captações': 'Captações',
+    'Passivo Exigível': 'Passivo Exigível',
+    'RWA Total': 'RWA Total',
+}
+
+def calcular_media_ponderada(df, coluna_valor, coluna_peso=None):
+    """Calcula média simples ou ponderada de uma coluna.
+
+    Args:
+        df: DataFrame com os dados
+        coluna_valor: Nome da coluna cujos valores serão promediados
+        coluna_peso: Nome da coluna de peso (None para média simples)
+
+    Returns:
+        float: Média calculada
+    """
+    if df.empty or coluna_valor not in df.columns:
+        return 0
+
+    valores = df[coluna_valor].dropna()
+    if valores.empty:
+        return 0
+
+    # Média simples se não houver coluna de peso
+    if coluna_peso is None:
+        return valores.mean()
+
+    if coluna_peso not in df.columns:
+        return valores.mean()
+
+    # Filtrar apenas registros com peso e valor válidos
+    mask = df[coluna_valor].notna() & df[coluna_peso].notna() & (df[coluna_peso] > 0)
+    df_valid = df[mask]
+
+    if df_valid.empty:
+        return valores.mean()
+
+    # Calcular média ponderada: sum(valor * peso) / sum(peso)
+    soma_ponderada = (df_valid[coluna_valor] * df_valid[coluna_peso]).sum()
+    soma_pesos = df_valid[coluna_peso].sum()
+
+    if soma_pesos == 0:
+        return valores.mean()
+
+    return soma_ponderada / soma_pesos
+
+def get_label_media(coluna_peso):
+    """Retorna o label descritivo do tipo de média."""
+    if coluna_peso is None:
+        return 'Média'
+    # Abreviar nomes longos
+    abreviacoes = {
+        'Ativo Total': 'Ativo Total',
+        'Carteira de Crédito': 'Cart. Crédito',
+        'Patrimônio Líquido': 'PL',
+        'Patrimônio de Referência': 'PR',
+        'Captações': 'Captações',
+        'Passivo Exigível': 'Passivo',
+        'RWA Total': 'RWA',
+    }
+    nome_abrev = abreviacoes.get(coluna_peso, coluna_peso)
+    return f'Média (pond. {nome_abrev})'
 
 def get_cache_info_detalhado():
     """Retorna informações detalhadas sobre o arquivo de cache."""
@@ -389,15 +473,38 @@ def carregar_cache():
 def recalcular_metricas_derivadas(dados_periodos):
     """Recalcula métricas derivadas para dados carregados do cache.
 
-    Garante que métricas como Crédito/PL, Crédito/Ativo (%), etc. existam
-    mesmo em caches antigos que foram criados antes dessas métricas serem adicionadas.
+    SEMPRE recalcula as métricas para garantir que estejam corretas,
+    mesmo que a coluna já exista (pode ter valores NaN de cache antigo).
     """
     if not dados_periodos:
         return dados_periodos
 
+    # Mapeamento de nomes antigos para novos
+    RENOMEAR_COLUNAS = {
+        'Lucro Líquido': 'Lucro Líquido Acumulado YTD',
+        'ROE An. (%)': 'ROE Ac. YTD an. (%)',
+        'Crédito/PL': 'Crédito/PL (%)',
+    }
+
+    # Colunas obsoletas a serem removidas
+    COLUNAS_OBSOLETAS = ['Risco/Retorno', 'Funding Gap (%)']
+
     dados_atualizados = {}
     for periodo, df in dados_periodos.items():
         df_atualizado = df.copy()
+
+        # Renomear colunas antigas para novos nomes
+        colunas_para_renomear = {
+            old: new for old, new in RENOMEAR_COLUNAS.items()
+            if old in df_atualizado.columns and new not in df_atualizado.columns
+        }
+        if colunas_para_renomear:
+            df_atualizado = df_atualizado.rename(columns=colunas_para_renomear)
+
+        # Remover colunas obsoletas
+        colunas_remover = [col for col in COLUNAS_OBSOLETAS if col in df_atualizado.columns]
+        if colunas_remover:
+            df_atualizado = df_atualizado.drop(columns=colunas_remover)
 
         # Extrair mês do período para cálculo do fator de anualização
         try:
@@ -412,47 +519,43 @@ def recalcular_metricas_derivadas(dados_periodos):
         except (ValueError, IndexError):
             mes = 12
 
-        # ROE Anualizado
-        if "ROE An. (%)" not in df_atualizado.columns:
-            if "Lucro Líquido" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
-                if mes == 3:
-                    fator = 4
-                elif mes == 6:
-                    fator = 2
-                elif mes == 9:
-                    fator = 12 / 9
-                elif mes == 12:
-                    fator = 1
-                else:
-                    fator = 12 / mes
-                df_atualizado["ROE An. (%)"] = (
-                    (fator * df_atualizado["Lucro Líquido"].fillna(0)) /
-                    df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
-                )
+        # ROE Anualizado - SEMPRE recalcular
+        if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
+            if mes == 3:
+                fator = 4
+            elif mes == 6:
+                fator = 2
+            elif mes == 9:
+                fator = 12 / 9
+            elif mes == 12:
+                fator = 1
+            else:
+                fator = 12 / mes
+            df_atualizado["ROE Ac. YTD an. (%)"] = (
+                (fator * df_atualizado["Lucro Líquido Acumulado YTD"].fillna(0)) /
+                df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
+            )
 
-        # Crédito/PL
-        if "Crédito/PL" not in df_atualizado.columns:
-            if "Carteira de Crédito" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
-                df_atualizado["Crédito/PL"] = (
-                    df_atualizado["Carteira de Crédito"].fillna(0) /
-                    df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
-                )
+        # Crédito/PL - SEMPRE recalcular
+        if "Carteira de Crédito" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
+            df_atualizado["Crédito/PL (%)"] = (
+                df_atualizado["Carteira de Crédito"].fillna(0) /
+                df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
+            )
 
-        # Crédito/Captações
-        if "Crédito/Captações (%)" not in df_atualizado.columns:
-            if "Carteira de Crédito" in df_atualizado.columns and "Captações" in df_atualizado.columns:
-                df_atualizado["Crédito/Captações (%)"] = (
-                    df_atualizado["Carteira de Crédito"].fillna(0) /
-                    df_atualizado["Captações"].replace(0, np.nan)
-                )
+        # Crédito/Captações - SEMPRE recalcular
+        if "Carteira de Crédito" in df_atualizado.columns and "Captações" in df_atualizado.columns:
+            df_atualizado["Crédito/Captações (%)"] = (
+                df_atualizado["Carteira de Crédito"].fillna(0) /
+                df_atualizado["Captações"].replace(0, np.nan)
+            )
 
-        # Crédito/Ativo (%) - anteriormente chamado Carteira/Ativo (%)
-        if "Crédito/Ativo (%)" not in df_atualizado.columns:
-            if "Carteira de Crédito" in df_atualizado.columns and "Ativo Total" in df_atualizado.columns:
-                df_atualizado["Crédito/Ativo (%)"] = (
-                    df_atualizado["Carteira de Crédito"].fillna(0) /
-                    df_atualizado["Ativo Total"].replace(0, np.nan)
-                )
+        # Crédito/Ativo (%) - SEMPRE recalcular
+        if "Carteira de Crédito" in df_atualizado.columns and "Ativo Total" in df_atualizado.columns:
+            df_atualizado["Crédito/Ativo (%)"] = (
+                df_atualizado["Carteira de Crédito"].fillna(0) /
+                df_atualizado["Ativo Total"].replace(0, np.nan)
+            )
 
         # Migrar nome antigo Carteira/Ativo (%) para Crédito/Ativo (%) se existir
         if "Carteira/Ativo (%)" in df_atualizado.columns and "Crédito/Ativo (%)" not in df_atualizado.columns:
@@ -461,6 +564,82 @@ def recalcular_metricas_derivadas(dados_periodos):
         dados_atualizados[periodo] = df_atualizado
 
     return dados_atualizados
+
+# Variáveis de capital que serão mescladas com os dados principais
+VARS_CAPITAL_MERGE = [
+    'Capital Principal',
+    'Capital Complementar',
+    'Capital Nível II',
+    'RWA Total',
+    'RWA Crédito',
+    'RWA Mercado',
+    'RWA Operacional',
+    'Exposição Total',
+    'Índice de Capital Principal',
+    'Índice de Capital Nível I',
+    'Razão de Alavancagem',
+    'Adicional de Capital Principal',
+]
+
+def mesclar_dados_capital(dados_periodos, dados_capital):
+    """Mescla dados de capital (Relatório 5) com os dados principais.
+
+    Permite que as variáveis de capital estejam disponíveis nas abas
+    Resumo, Análise Individual, Série Histórica, Scatter Plot, Deltas e Brincar.
+    """
+    if not dados_periodos or not dados_capital:
+        return dados_periodos
+
+    dados_mesclados = {}
+
+    for periodo, df_principal in dados_periodos.items():
+        df_merged = df_principal.copy()
+
+        # Encontrar período correspondente no cache de capital
+        # O formato pode ser diferente, então precisamos normalizar
+        if periodo in dados_capital:
+            df_capital = dados_capital[periodo]
+        else:
+            # Tentar formatos alternativos (ex: "03/2024" vs "202403")
+            periodo_alt = None
+            for p in dados_capital.keys():
+                # Normalizar ambos para comparação
+                p_norm = p.replace('/', '')
+                periodo_norm = periodo.replace('/', '')
+                if p_norm == periodo_norm or p == periodo:
+                    periodo_alt = p
+                    break
+            if periodo_alt:
+                df_capital = dados_capital[periodo_alt]
+            else:
+                dados_mesclados[periodo] = df_merged
+                continue
+
+        # Fazer merge por nome da instituição
+        if 'Instituição' in df_capital.columns:
+            # Selecionar apenas as colunas de capital que queremos mesclar
+            colunas_para_merge = ['Instituição'] + [c for c in VARS_CAPITAL_MERGE if c in df_capital.columns]
+
+            if len(colunas_para_merge) > 1:  # Tem pelo menos uma variável de capital
+                df_capital_subset = df_capital[colunas_para_merge].drop_duplicates(subset=['Instituição'])
+
+                # Fazer merge preservando os dados principais
+                df_merged = df_merged.merge(
+                    df_capital_subset,
+                    on='Instituição',
+                    how='left',
+                    suffixes=('', '_capital')
+                )
+
+                # Se houver colunas duplicadas, manter a versão do capital (mais atualizada/específica)
+                for col in VARS_CAPITAL_MERGE:
+                    if f'{col}_capital' in df_merged.columns:
+                        df_merged[col] = df_merged[f'{col}_capital']
+                        df_merged = df_merged.drop(columns=[f'{col}_capital'])
+
+        dados_mesclados[periodo] = df_merged
+
+    return dados_mesclados
 
 def ler_info_cache():
     if os.path.exists(CACHE_INFO):
@@ -1140,9 +1319,19 @@ def get_dados_concatenados() -> pd.DataFrame:
     if 'dados_periodos' not in st.session_state or not st.session_state['dados_periodos']:
         return pd.DataFrame()
 
-    # Hash baseado nas chaves dos períodos para invalidação de cache
+    # Hash baseado nas chaves dos períodos E nas colunas para invalidação de cache
+    # Isso garante que o cache seja invalidado quando métricas derivadas são recalculadas
+    # ou quando dados de capital são mesclados
     periodos_keys = tuple(sorted(st.session_state['dados_periodos'].keys()))
-    periodos_hash = str(hash(periodos_keys))
+
+    # Incluir colunas do primeiro DataFrame no hash para detectar mudanças
+    primeiro_periodo = next(iter(st.session_state['dados_periodos'].values()))
+    colunas_hash = tuple(sorted(primeiro_periodo.columns.tolist()))
+
+    # Flag de mesclagem de capital também invalida o cache
+    capital_mesclado = st.session_state.get('_dados_capital_mesclados', False)
+
+    periodos_hash = str(hash((periodos_keys, colunas_hash, capital_mesclado)))
 
     return _get_dados_concatenados(periodos_hash, periodos_keys)
 
@@ -1294,9 +1483,9 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
 
     metricas_principais = [
         ('Carteira de Crédito', 'Carteira de Crédito'),
-        ('ROE Anualizado', 'ROE An. (%)'),
+        ('ROE Anualizado', 'ROE Ac. YTD an. (%)'),
         ('Índice de Basileia', 'Índice de Basileia'),
-        ('Crédito/PL', 'Crédito/PL'),
+        ('Crédito/PL', 'Crédito/PL (%)'),
     ]
 
     metricas_data = []
@@ -1385,7 +1574,7 @@ def gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_fi
         row_images = []
         for var in graficos_linha:
             try:
-                use_bar = (var == 'Lucro Líquido')
+                use_bar = (var == 'Lucro Líquido Acumulado YTD')
                 fig = criar_figura_grafico(df_sorted, var, var, use_bar=use_bar)
                 img_buffer = io.BytesIO()
                 fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=200)
@@ -1483,6 +1672,17 @@ if 'dados_capital' not in st.session_state:
         st.session_state['dados_capital'] = dados_capital
     print(_perf_log("init_dados_capital"))
 
+# Mesclar dados de capital com dados principais para disponibilizar nas abas
+if 'dados_periodos' in st.session_state and 'dados_capital' in st.session_state:
+    if not st.session_state.get('_dados_capital_mesclados', False):
+        _perf_start("mesclar_capital")
+        st.session_state['dados_periodos'] = mesclar_dados_capital(
+            st.session_state['dados_periodos'],
+            st.session_state['dados_capital']
+        )
+        st.session_state['_dados_capital_mesclados'] = True
+        print(_perf_log("mesclar_capital"))
+
 print(_perf_log("init_total"))
 
 # Menu horizontal no topo
@@ -1550,7 +1750,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Resumo", "Infos de Capital", "Análise Individual", "Série Histórica", "Scatter Plot", "Deltas", "Brincar"],
+    ["Sobre", "Atualização Base", "Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Crie sua métrica!", "Glossário"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -1562,7 +1762,7 @@ if menu != st.session_state['menu_atual']:
 
 st.markdown("---")
 
-# Sidebar apenas para controle avançado
+# Sidebar apenas para informações básicas
 with st.sidebar:
     st.markdown('<p class="sidebar-title">toma.conta</p>', unsafe_allow_html=True)
     st.markdown('<p class="sidebar-subtitle">análise de instituições financeiras brasileiras</p>', unsafe_allow_html=True)
@@ -1807,104 +2007,180 @@ if menu == "Sobre":
     st.markdown("""
     ## sobre a plataforma
 
-    o toma.conta é uma plataforma de análise financeira que automatiza a extração, processamento e visualização de dados de instituições financeiras brasileiras, oferecendo insights comparativos e históricos.
+    o **toma.conta** é uma plataforma completa de análise financeira do sistema bancário brasileiro. com dados oficiais do banco central, oferece visualizações interativas, comparações entre instituições, análise de capital regulatório e ferramentas para criação de métricas customizadas — tudo em uma interface intuitiva e com exportação profissional.
     """)
+
+    st.markdown("### módulos de análise")
 
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("""
         <div class="feature-card">
-            <h4>extração automatizada</h4>
-            <p>integração direta com a api if.data do banco central do brasil para coleta de dados históricos.</p>
+            <h4>painel comparativo</h4>
+            <p>rankings e gráficos de composição para comparar instituições em um período específico. inclui médias ponderadas do grupo e diferenças calculadas automaticamente.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>análise temporal</h4>
-            <p>acompanhamento histórico de métricas financeiras ao longo de múltiplos trimestres com séries temporais.</p>
+            <h4>histórico individual</h4>
+            <p>análise detalhada de uma instituição ao longo do tempo com mini-gráficos de tendência. exportação em pdf scorecard com visão de 4 anos.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>visualização interativa</h4>
-            <p>gráficos de dispersão customizáveis com filtros dinâmicos e comparações multi-institucionais.</p>
+            <h4>histórico peers</h4>
+            <p>séries temporais comparativas entre múltiplas instituições. ideal para acompanhar a evolução de peers ou concorrentes ao longo dos trimestres.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="feature-card">
+            <h4>scatter plot</h4>
+            <p>gráficos de dispersão com 3 dimensões (eixo x, eixo y e tamanho da bolha). visualize relações entre variáveis e movimentação entre períodos.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
         <div class="feature-card">
-            <h4>nomenclatura personalizada</h4>
-            <p>sistema de nomenclaturas para renomear e categorizar instituições conforme nomes-fantasia.</p>
+            <h4>deltas (antes e depois)</h4>
+            <p>análise de variações absolutas e percentuais entre dois períodos. identifique rapidamente quem cresceu, encolheu ou mudou de patamar.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>métricas calculadas</h4>
-            <p>roe anualizado (%), alavancagem (crédito / PL), lucro líquido, patrimônio líquido, carteira de crédito (R$ mm)</p>
+            <h4>capital regulatório</h4>
+            <p>dados do relatório 5 do bcb: capital principal, complementar, nível ii, rwa por tipo de risco, razão de alavancagem e índices de capital.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="feature-card">
+            <h4>crie sua métrica</h4>
+            <p>construa indicadores customizados combinando variáveis com operações matemáticas. visualize como ranking, scatter plot ou análise de deltas.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="feature-card">
+            <h4>glossário técnico</h4>
+            <p>definições detalhadas de todas as variáveis, métricas calculadas e informações sobre consolidação prudencial (visão conglomerado).</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    st.markdown("### indicadores disponíveis")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("""
+        **variáveis monetárias**
+        - ativo total
+        - carteira de crédito (líquida)
+        - títulos e valores mobiliários
+        - passivo exigível
+        - captações
+        - patrimônio líquido
+        - lucro líquido ac. ytd
+        - patrimônio de referência
+        """)
+
+    with col2:
+        st.markdown("""
+        **capital regulatório**
+        - capital principal (tier 1)
+        - capital complementar
+        - capital nível ii
+        - rwa total / crédito / mercado / operacional
+        - exposição total
+        - índices de capital
+        - razão de alavancagem
+        """)
+
+    with col3:
+        st.markdown("""
+        **métricas calculadas**
+        - roe anualizado (%)
+        - crédito / pl (%)
+        - crédito / captações (%)
+        - crédito / ativo (%)
+
+        **índices**
+        - índice de basileia
+        - índice de imobilização
+        - número de agências e pacs
+        """)
+
+    st.markdown("---")
+
+    st.markdown("### recursos avançados")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        <div class="feature-card">
+            <h4>filtros inteligentes</h4>
+            <p>selecione instituições por top n (por qualquer indicador), por peer group ou lista customizada. 8 opções de ponderação para médias do grupo.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="feature-card">
+            <h4>nomenclatura personalizada</h4>
+            <p>renomeie instituições com nomes-fantasia, defina cores personalizadas e agrupe por categoria (peer groups) para análises segmentadas.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("""
+        <div class="feature-card">
+            <h4>exportação profissional</h4>
+            <p>exporte para excel (multi-abas) ou csv. gere pdf scorecards com histórico de 4 anos para apresentações e relatórios.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
             <h4>dados oficiais</h4>
-            <p>fonte única e confiável: api if.data do banco central do brasil com atualização trimestral.</p>
+            <p>fonte única: api if.data e relatório 5 do banco central. dados consolidados (visão conglomerado) com atualização trimestral.</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("---")
 
     st.markdown("""
-    ## dados disponíveis
+    ### como utilizar
 
-    todas as informações são extraídas diretamente da **api if.data** do banco central, incluindo:
-    """)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        - carteira de crédito classificada
-        - patrimônio líquido e resultado
-        - índice de basileia e capital
-        """)
-
-    with col2:
-        st.markdown("""
-        - captações e funding
-        - ativo total e composição
-        - cadastro de instituições autorizadas
-        """)
-
-    st.markdown("---")
-
-    st.markdown("""
-    ## como utilizar
-
-    1. **dados pré-carregados**: a plataforma já possui dados históricos prontos para análise
-    2. **navegue pelas páginas**: use o menu lateral para acessar análise individual ou scatter plot
-    3. **atualize quando necessário**: configure o período desejado e clique em extrair dados
-    4. **personalize visualizações**: aplique filtros e ajuste variáveis conforme sua análise
+    1. **dados pré-carregados**: a plataforma já possui dados históricos prontos para análise imediata
+    2. **navegue pelos módulos**: use o menu superior para acessar painel, histórico, scatter plot, deltas ou capital regulatório
+    3. **aplique filtros**: selecione instituições por top n, peer group ou lista customizada
+    4. **personalize análises**: ajuste variáveis, períodos e ponderações conforme sua necessidade
+    5. **exporte resultados**: baixe em excel, csv ou gere pdf scorecards para compartilhar
 
     ---
 
-    ## stack tecnológica
+    ### stack tecnológica
 
-    - **python 3.10+** | linguagem base
-    - **streamlit** | interface web interativa
-    - **pandas** | processamento e análise de dados
-    - **plotly** | visualizações dinâmicas
-    - **api bcb olinda** | fonte oficial de dados
+    | componente | função |
+    |------------|--------|
+    | **python 3.10+** | linguagem base |
+    | **streamlit** | interface web interativa |
+    | **pandas** | processamento e análise de dados |
+    | **plotly** | visualizações dinâmicas e interativas |
+    | **api bcb olinda** | fonte oficial de dados (if.data e relatório 5) |
     """)
 
     st.markdown("---")
     st.caption("desenvolvido em 2026 por matheus prates, cfa | ferramenta open-source para análise do sistema financeiro brasileiro")
 
-elif menu == "Resumo":
+elif menu == "Painel":
     st.markdown("## resumo comparativo por período")
     st.caption("compare múltiplas instituições em um único trimestre, com ranking e média do grupo selecionado.")
 
@@ -1918,7 +2194,7 @@ elif menu == "Resumo":
             'Passivo Exigível': ['Passivo Exigível'],
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
-            'Lucro Líquido': ['Lucro Líquido'],
+            'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
             'Patrimônio de Referência': [
                 'Patrimônio de Referência para Comparação com o RWA (e)',
                 'Patrimônio de Referência',
@@ -1927,6 +2203,12 @@ elif menu == "Resumo":
             'Índice de Imobilização': ['Índice de Imobilização'],
             'Número de Agências': ['Número de Agências'],
             'Número de Postos de Atendimento': ['Número de Postos de Atendimento'],
+            # Variáveis de Capital (Relatório 5)
+            'RWA Total': ['RWA Total'],
+            'Capital Principal': ['Capital Principal'],
+            'Índice de Capital Principal': ['Índice de Capital Principal'],
+            'Índice de Capital Nível I': ['Índice de Capital Nível I'],
+            'Razão de Alavancagem': ['Razão de Alavancagem'],
         }
 
         indicadores_disponiveis = {}
@@ -1950,7 +2232,7 @@ elif menu == "Resumo":
                 ]
             }
 
-            col_periodo, col_indicador, col_escala, col_tipo = st.columns([1.2, 2, 1.1, 1.3])
+            col_periodo, col_indicador, col_tipo, col_media = st.columns([1.2, 2, 1.3, 1.8])
             with col_periodo:
                 periodo_resumo = st.selectbox(
                     "período (trimestre)",
@@ -1963,13 +2245,6 @@ elif menu == "Resumo":
                     "indicador",
                     list(indicadores_disponiveis.keys()),
                     key="indicador_resumo"
-                )
-            with col_escala:
-                escala_resumo = st.radio(
-                    "escala",
-                    ["Linear", "Log"],
-                    horizontal=True,
-                    key="escala_resumo"
                 )
             componentes_disponiveis = [
                 col for col in componentes_indicador.get(indicador_label, []) if col in df.columns
@@ -1984,6 +2259,14 @@ elif menu == "Resumo":
                     )
                 else:
                     tipo_grafico = "Ranking"
+            with col_media:
+                tipo_media_label = st.selectbox(
+                    "ponderar média por",
+                    list(VARIAVEIS_PONDERACAO.keys()),
+                    index=0,
+                    key="tipo_media_resumo"
+                )
+                coluna_peso_resumo = VARIAVEIS_PONDERACAO[tipo_media_label]
 
             col_peers, col_bancos = st.columns([1.2, 2.8])
 
@@ -2130,7 +2413,8 @@ elif menu == "Resumo":
                 st.info("selecione instituições ou ajuste os filtros para visualizar o resumo.")
             else:
                 df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
-                media_display = df_selecionado['valor_display'].mean()
+                media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
+                label_media = get_label_media(coluna_peso_resumo)
 
                 if modo_ordenacao == "Ordenar por valor":
                     ordenar_asc = direcao_top == "Bottom"
@@ -2187,12 +2471,24 @@ elif menu == "Resumo":
                         st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
 
                         df_componentes['ranking'] = df_componentes['total'].rank(method='first', ascending=False).astype(int)
-                        media_grupo_raw = df_componentes['total'].mean()
+                        # Merge com df_selecionado para ter acesso às colunas de peso
+                        colunas_peso_possiveis = [v for v in VARIAVEIS_PONDERACAO.values() if v is not None]
+                        colunas_peso_disponiveis = ['Instituição'] + [c for c in colunas_peso_possiveis if c in df_selecionado.columns]
+                        if len(colunas_peso_disponiveis) > 1:
+                            df_componentes_merge = df_componentes.merge(
+                                df_selecionado[colunas_peso_disponiveis].drop_duplicates(),
+                                on='Instituição',
+                                how='left'
+                            )
+                        else:
+                            df_componentes_merge = df_componentes.copy()
+                        media_grupo_raw = calcular_media_ponderada(df_componentes_merge, 'total', coluna_peso_resumo)
                         df_export_base = df_componentes.copy()
                         df_export_base['Período'] = periodo_resumo
                         df_export_base['Indicador'] = indicador_label
                         df_export_base['Valor'] = df_export_base['total']
                         df_export_base['Média do Grupo'] = media_grupo_raw
+                        df_export_base['Tipo de Média'] = tipo_media_label
                         df_export_base['Diferença vs Média'] = df_export_base['Valor'] - media_grupo_raw
                         df_export_base = df_export_base[[
                             'Período',
@@ -2201,6 +2497,7 @@ elif menu == "Resumo":
                             'Valor',
                             'ranking',
                             'Média do Grupo',
+                            'Tipo de Média',
                             'Diferença vs Média'
                         ]].rename(columns={'ranking': 'Ranking'})
 
@@ -2257,11 +2554,6 @@ elif menu == "Resumo":
                             idx_cor += 1
                         cores_barras.append(cor)
 
-                    usar_log = escala_resumo == "Log"
-                    if usar_log and (df_selecionado['valor_display'] <= 0).any():
-                        st.warning("escala log desativada: o indicador possui valores zero ou negativos.")
-                        usar_log = False
-
                     fig_resumo = go.Figure()
                     banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
                     fig_resumo.add_trace(go.Bar(
@@ -2291,7 +2583,7 @@ elif menu == "Resumo":
                             x=[media_display] * len(df_selecionado),
                             y=df_selecionado['Instituição'],
                             mode='lines',
-                            name='Média',
+                            name=label_media,
                             line=dict(color='#1f77b4', dash='dash')
                         ))
                     else:
@@ -2299,7 +2591,7 @@ elif menu == "Resumo":
                             x=df_selecionado['Instituição'],
                             y=[media_display] * len(df_selecionado),
                             mode='lines',
-                            name='Média',
+                            name=label_media,
                             line=dict(color='#1f77b4', dash='dash')
                         ))
 
@@ -2315,25 +2607,24 @@ elif menu == "Resumo":
                         xaxis=dict(
                             tickangle=-45 if not orientacao_horizontal else 0,
                             tickformat=format_info['tickformat'] if orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None,
-                            type='log' if usar_log and orientacao_horizontal else None
+                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
                         ),
                         yaxis=dict(
                             tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None,
-                            type='log' if usar_log and not orientacao_horizontal else None
+                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
                         ),
                         font=dict(family='IBM Plex Sans')
                     )
 
                     st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
 
-                    media_grupo_raw = df_selecionado[indicador_col].mean()
+                    media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
                     df_export = df_selecionado.copy()
                     df_export['Período'] = periodo_resumo
                     df_export['Indicador'] = indicador_label
                     df_export['Valor'] = df_export[indicador_col]
                     df_export['Média do Grupo'] = media_grupo_raw
+                    df_export['Tipo de Média'] = tipo_media_label
                     df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
                     df_export = df_export[[
                         'Período',
@@ -2342,6 +2633,7 @@ elif menu == "Resumo":
                         'Valor',
                         'ranking',
                         'Média do Grupo',
+                        'Tipo de Média',
                         'Diferença vs Média'
                     ]].rename(columns={'ranking': 'Ranking'})
 
@@ -2361,7 +2653,7 @@ elif menu == "Resumo":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Infos de Capital":
+elif menu == "Capital Regulatório":
     st.markdown("## infos de capital")
     st.caption("análise de indicadores de capital usando dados do Relatório 5 (IFData/Olinda).")
 
@@ -2406,7 +2698,7 @@ elif menu == "Infos de Capital":
 
             # Seletor de tipo de gráfico
             tipos_graficos = ["Índice de Basileia Total"]
-            col_tipo_graf, col_periodo_cap = st.columns([2, 1.5])
+            col_tipo_graf, col_periodo_cap, col_media_cap = st.columns([2, 1.5, 1.8])
 
             with col_tipo_graf:
                 tipo_grafico_capital = st.selectbox(
@@ -2421,6 +2713,14 @@ elif menu == "Infos de Capital":
                     index=0,
                     key="periodo_capital"
                 )
+            with col_media_cap:
+                tipo_media_cap_label = st.selectbox(
+                    "ponderar média por",
+                    list(VARIAVEIS_PONDERACAO.keys()),
+                    index=0,
+                    key="tipo_media_capital"
+                )
+                coluna_peso_capital = VARIAVEIS_PONDERACAO[tipo_media_cap_label]
 
             if tipo_grafico_capital == "Índice de Basileia Total":
                 # Filtrar dados do período
@@ -2465,6 +2765,18 @@ elif menu == "Infos de Capital":
                     df_periodo_cap['AT1 (%)'] +
                     df_periodo_cap['T2 (%)']
                 )
+
+                # Merge com dados principais para obter variáveis de ponderação
+                if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+                    df_dados_periodo = st.session_state['dados_periodos'].get(periodo_capital)
+                    if df_dados_periodo is not None:
+                        # Todas as colunas de peso possíveis
+                        colunas_peso_possiveis = [v for v in VARIAVEIS_PONDERACAO.values() if v is not None]
+                        colunas_peso = ['Instituição'] + colunas_peso_possiveis
+                        colunas_disponiveis = [c for c in colunas_peso if c in df_dados_periodo.columns]
+                        if len(colunas_disponiveis) > 1:  # Pelo menos Instituição + uma coluna de peso
+                            df_peso = df_dados_periodo[colunas_disponiveis].drop_duplicates(subset=['Instituição'])
+                            df_periodo_cap = df_periodo_cap.merge(df_peso, on='Instituição', how='left')
 
                 # --- Seleção de Bancos (mesmo padrão do Resumo) ---
                 col_peers_cap, col_bancos_cap = st.columns([1.2, 2.8])
@@ -2614,11 +2926,12 @@ elif menu == "Infos de Capital":
                         )
                         df_selecionado_cap = df_selecionado_cap.sort_values('ordem')
 
-                    # Calcular médias
-                    media_basileia = df_selecionado_cap['Índice de Basileia Total (%)'].mean()
-                    media_cet1 = df_selecionado_cap['CET1 (%)'].mean()
-                    media_at1 = df_selecionado_cap['AT1 (%)'].mean()
-                    media_t2 = df_selecionado_cap['T2 (%)'].mean()
+                    # Calcular médias (simples ou ponderadas)
+                    media_basileia = calcular_media_ponderada(df_selecionado_cap, 'Índice de Basileia Total (%)', coluna_peso_capital)
+                    media_cet1 = calcular_media_ponderada(df_selecionado_cap, 'CET1 (%)', coluna_peso_capital)
+                    media_at1 = calcular_media_ponderada(df_selecionado_cap, 'AT1 (%)', coluna_peso_capital)
+                    media_t2 = calcular_media_ponderada(df_selecionado_cap, 'T2 (%)', coluna_peso_capital)
+                    label_media_cap = get_label_media(coluna_peso_capital)
 
                     # Calcular ranking
                     df_selecionado_cap['Ranking'] = df_selecionado_cap['Índice de Basileia Total (%)'].rank(
@@ -2673,9 +2986,9 @@ elif menu == "Infos de Capital":
                         x=df_selecionado_cap['Instituição'],
                         y=[media_basileia] * n_bancos_cap,
                         mode='lines',
-                        name=f'Média ({media_basileia:.2f}%)',
+                        name=f'{label_media_cap} ({media_basileia:.2f}%)',
                         line=dict(color='#3498db', dash='dash', width=2),
-                        hovertemplate=f"Média: {media_basileia:.2f}%<extra></extra>"
+                        hovertemplate=f"{label_media_cap}: {media_basileia:.2f}%<extra></extra>"
                     ))
 
                     # Adicionar linha horizontal do Mínimo Regulatório (10,5%)
@@ -2714,6 +3027,7 @@ elif menu == "Infos de Capital":
                     df_export_capital.insert(0, 'Período', periodo_capital)
 
                     # Adicionar médias e mínimo regulatório para referência
+                    df_export_capital['Tipo de Média'] = tipo_media_cap_label
                     df_export_capital['Média CET1 (%)'] = round(media_cet1, 2)
                     df_export_capital['Média AT1 (%)'] = round(media_at1, 2)
                     df_export_capital['Média T2 (%)'] = round(media_t2, 2)
@@ -2816,7 +3130,7 @@ elif menu == "Infos de Capital":
             "para usar esta aba, extraia os dados de capital na seção 'controle avançado' → 'extrair capital (relatório 5)' na sidebar."
         )
 
-elif menu == "Análise Individual":
+elif menu == "Histórico Individual":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -2920,11 +3234,11 @@ elif menu == "Análise Individual":
                     with col1:
                         st.metric("carteira de crédito", formatar_valor(dados_periodo_final.get('Carteira de Crédito'), 'Carteira de Crédito'))
                     with col2:
-                        st.metric("roe anualizado", formatar_valor(dados_periodo_final.get('ROE An. (%)'), 'ROE An. (%)'))
+                        st.metric("roe ac. ytd an.", formatar_valor(dados_periodo_final.get('ROE Ac. YTD an. (%)'), 'ROE Ac. YTD an. (%)'))
                     with col3:
                         st.metric("índice de basileia", formatar_valor(dados_periodo_final.get('Índice de Basileia'), 'Índice de Basileia'))
                     with col4:
-                        st.metric("crédito/pl", formatar_valor(dados_periodo_final.get('Crédito/PL'), 'Crédito/PL'))
+                        st.metric("crédito/pl (%)", formatar_valor(dados_periodo_final.get('Crédito/PL (%)'), 'Crédito/PL (%)'))
 
                     st.markdown("---")
                     st.markdown("### evolução histórica das variáveis")
@@ -2935,11 +3249,16 @@ elif menu == "Análise Individual":
                         'Patrimônio Líquido',
                         'Carteira de Crédito',
                         'Crédito/Ativo (%)',
-                        'Crédito/PL',
+                        'Crédito/PL (%)',
                         'Crédito/Captações (%)',
-                        'Market Share Carteira',
-                        'Lucro Líquido',
-                        'ROE An. (%)'
+                        'Lucro Líquido Acumulado YTD',
+                        'ROE Ac. YTD an. (%)',
+                        # Variáveis de Capital (Relatório 5)
+                        'RWA Total',
+                        'Capital Principal',
+                        'Índice de Capital Principal',
+                        'Índice de Capital Nível I',
+                        'Razão de Alavancagem',
                     ]
 
                     # Filtra apenas as variáveis que existem e têm dados
@@ -2951,8 +3270,8 @@ elif menu == "Análise Individual":
                             if i + j < len(variaveis):
                                 var = variaveis[i + j]
                                 with col_obj:
-                                    # Usa gráfico de barras para Lucro Líquido
-                                    tipo_grafico = 'barra' if var == 'Lucro Líquido' else 'linha'
+                                    # Usa gráfico de barras para Lucro Líquido Acumulado YTD
+                                    tipo_grafico = 'barra' if var == 'Lucro Líquido Acumulado YTD' else 'linha'
                                     fig = criar_mini_grafico(df_banco_filtrado, var, var, tipo=tipo_grafico)
                                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             else:
@@ -2963,7 +3282,7 @@ elif menu == "Análise Individual":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Série Histórica":
+elif menu == "Histórico Peers":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -3023,17 +3342,22 @@ elif menu == "Série Histórica":
                         'Carteira de Crédito',
                         'Crédito/Ativo (%)',
                         'Índice de Basileia',
-                        'Crédito/PL',
+                        'Crédito/PL (%)',
                         'Crédito/Captações (%)',
-                        'Market Share Carteira',
-                        'Lucro Líquido',
-                        'ROE An. (%)'
+                        'Lucro Líquido Acumulado YTD',
+                        'ROE Ac. YTD an. (%)',
+                        # Variáveis de Capital (Relatório 5)
+                        'RWA Total',
+                        'Capital Principal',
+                        'Índice de Capital Principal',
+                        'Índice de Capital Nível I',
+                        'Razão de Alavancagem',
                     ]
                     defaults_variaveis = [
                         'Carteira de Crédito',
                         'Patrimônio Líquido',
-                        'Lucro Líquido',
-                        'ROE An. (%)',
+                        'Lucro Líquido Acumulado YTD',
+                        'ROE Ac. YTD an. (%)',
                         'Índice de Basileia'
                     ]
                     defaults_variaveis = [v for v in defaults_variaveis if v in variaveis_disponiveis]
@@ -3085,8 +3409,8 @@ elif menu == "Série Histórica":
                         fig = go.Figure()
                         export_frames = []
                         periodos_filtrados_lucro = periodos_filtrados
-                        if variavel == 'Lucro Líquido':
-                            st.markdown("**período lucro líquido**")
+                        if variavel == 'Lucro Líquido Acumulado YTD':
+                            st.markdown("**período lucro líquido acumulado ytd**")
                             col_lucro_ini, col_lucro_fim = st.columns(2)
                             with col_lucro_ini:
                                 periodo_inicial_lucro = st.selectbox(
@@ -3114,7 +3438,7 @@ elif menu == "Série Histórica":
                                 continue
 
                             df_banco = df_banco[df_banco['Período'].isin(
-                                periodos_filtrados_lucro if variavel == 'Lucro Líquido' else periodos_filtrados
+                                periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else periodos_filtrados
                             )]
                             df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
                             df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
@@ -3123,7 +3447,7 @@ elif menu == "Série Histórica":
                             y_values = df_banco[variavel] * format_info['multiplicador']
                             cor_banco = obter_cor_banco(instituicao) or None
 
-                            if variavel == 'Lucro Líquido':
+                            if variavel == 'Lucro Líquido Acumulado YTD':
                                 fig.add_trace(go.Bar(
                                     x=df_banco['Período'],
                                     y=y_values,
@@ -3156,15 +3480,15 @@ elif menu == "Série Histórica":
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                             xaxis=dict(
                                 showgrid=False,
-                                tickmode='array' if variavel == 'Lucro Líquido' else None,
-                                tickvals=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None,
-                                ticktext=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None,
-                                categoryorder='array' if variavel == 'Lucro Líquido' else None,
-                                categoryarray=periodos_filtrados_lucro if variavel == 'Lucro Líquido' else None
+                                tickmode='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                tickvals=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                ticktext=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                categoryorder='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                categoryarray=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None
                             ),
                             yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat=format_info['tickformat'], ticksuffix=format_info['ticksuffix']),
                             font=dict(family='IBM Plex Sans'),
-                            barmode='group' if variavel == 'Lucro Líquido' else None
+                            barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else None
                         )
 
                         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
@@ -3241,7 +3565,7 @@ elif menu == "Scatter Plot":
         with col1:
             var_x = st.selectbox("eixo x", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
         with col2:
-            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE An. (%)') if 'ROE An. (%)' in colunas_numericas else 1)
+            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1)
         with col3:
             opcoes_tamanho = ['Tamanho Fixo'] + colunas_numericas
             default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
@@ -3342,7 +3666,8 @@ elif menu == "Scatter Plot":
                 hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x:{format_x["tickformat"]}}}{format_x["ticksuffix"]}<br>{var_y}: %{{y:{format_y["tickformat"]}}}{format_y["ticksuffix"]}<extra></extra>'
             ))
 
-        # Título dinâmico
+        # Título dinâmico - Scatter Plot n=1
+        st.markdown("#### Scatter Plot n=1")
         if bancos_selecionados:
             titulo_scatter = f'{var_y} vs {var_x} - {periodo_scatter} ({len(df_scatter)} bancos)'
         else:
@@ -3363,11 +3688,268 @@ elif menu == "Scatter Plot":
         )
 
         st.plotly_chart(fig_scatter, use_container_width=True)
+
+        # ============================================================
+        # SCATTER PLOT n=2 - Comparação entre dois períodos
+        # ============================================================
+        st.markdown("---")
+        st.markdown("#### Scatter Plot n=2")
+        st.caption("Visualize a movimentação dos bancos entre dois períodos")
+
+        # Seletores para os dois períodos
+        col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+
+        with col_p1:
+            var_x_n2 = st.selectbox(
+                "eixo x",
+                colunas_numericas,
+                index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0,
+                key="var_x_n2"
+            )
+        with col_p2:
+            var_y_n2 = st.selectbox(
+                "eixo y",
+                colunas_numericas,
+                index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1,
+                key="var_y_n2"
+            )
+        with col_p3:
+            # Período inicial (mais antigo por padrão)
+            idx_inicial = min(1, len(periodos) - 1) if len(periodos) > 1 else 0
+            periodo_inicial = st.selectbox(
+                "período inicial",
+                periodos,
+                index=idx_inicial,
+                key="periodo_inicial_n2"
+            )
+        with col_p4:
+            # Período subsequente (mais recente por padrão)
+            periodo_subseq = st.selectbox(
+                "período subsequente",
+                periodos,
+                index=0,
+                key="periodo_subseq_n2"
+            )
+
+        # Segunda linha: Top N e tamanho
+        col_n2_t1, col_n2_t2, col_n2_t3 = st.columns([1, 1, 2])
+
+        with col_n2_t1:
+            top_n_scatter_n2 = st.slider("top n", 5, 50, 15, key="top_n_n2")
+        with col_n2_t2:
+            var_top_n_n2 = st.selectbox(
+                "top n por",
+                colunas_numericas,
+                index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
+                key="var_top_n_n2"
+            )
+        with col_n2_t3:
+            opcoes_tamanho_n2 = ['Tamanho Fixo'] + colunas_numericas
+            default_idx_n2 = opcoes_tamanho_n2.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho_n2 else 1
+            var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=default_idx_n2, key="var_size_n2")
+
+        # Terceira linha: Peers e Seleção de bancos
+        col_n2_f1, col_n2_f2 = st.columns([1, 3])
+
+        with col_n2_f1:
+            peer_selecionado_n2 = st.selectbox(
+                "filtrar por peer",
+                opcoes_peer,
+                index=0,
+                key="peer_n2"
+            )
+
+        # Bancos do peer selecionado para n=2
+        bancos_do_peer_n2 = []
+        if peer_selecionado_n2 != 'Nenhum' and 'df_aliases' in st.session_state:
+            df_aliases = st.session_state['df_aliases']
+            coluna_peer_n2 = df_aliases[peer_selecionado_n2]
+            mask_peer_n2 = (
+                coluna_peer_n2.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
+            )
+            bancos_do_peer_n2 = df_aliases.loc[mask_peer_n2, 'Alias Banco'].tolist()
+
+        with col_n2_f2:
+            default_bancos_n2 = bancos_do_peer_n2 if bancos_do_peer_n2 else []
+            bancos_selecionados_n2 = st.multiselect(
+                "selecionar bancos",
+                todos_bancos,
+                default=default_bancos_n2,
+                key="bancos_multiselect_n2"
+            )
+
+        # Validação: períodos devem ser diferentes
+        if periodo_inicial == periodo_subseq:
+            st.warning("Selecione dois períodos diferentes para visualizar a movimentação.")
+        else:
+            # Filtra dados para os dois períodos
+            df_p1 = df[df['Período'] == periodo_inicial].copy()
+            df_p2 = df[df['Período'] == periodo_subseq].copy()
+
+            # Aplica filtro de peer
+            if peer_selecionado_n2 != 'Nenhum':
+                df_p1 = df_p1[df_p1['Instituição'].isin(bancos_do_peer_n2)]
+                df_p2 = df_p2[df_p2['Instituição'].isin(bancos_do_peer_n2)]
+
+            # Aplica seleção de bancos ou top N
+            if bancos_selecionados_n2:
+                df_p1 = df_p1[df_p1['Instituição'].isin(bancos_selecionados_n2)]
+                df_p2 = df_p2[df_p2['Instituição'].isin(bancos_selecionados_n2)]
+            else:
+                # Usa top N do período subsequente (mais recente)
+                df_p2_valid = df_p2.dropna(subset=[var_top_n_n2])
+                top_bancos = df_p2_valid.nlargest(top_n_scatter_n2, var_top_n_n2)['Instituição'].tolist()
+                df_p1 = df_p1[df_p1['Instituição'].isin(top_bancos)]
+                df_p2 = df_p2[df_p2['Instituição'].isin(top_bancos)]
+
+            # Encontra bancos presentes em ambos os períodos
+            bancos_comuns = set(df_p1['Instituição'].unique()) & set(df_p2['Instituição'].unique())
+
+            if len(bancos_comuns) == 0:
+                st.warning("Nenhum banco encontrado em ambos os períodos selecionados.")
+            else:
+                # Formatos dos eixos
+                format_x_n2 = get_axis_format(var_x_n2)
+                format_y_n2 = get_axis_format(var_y_n2)
+
+                # Prepara dados com valores de exibição
+                df_p1['x_display'] = df_p1[var_x_n2] * format_x_n2['multiplicador']
+                df_p1['y_display'] = df_p1[var_y_n2] * format_y_n2['multiplicador']
+                df_p2['x_display'] = df_p2[var_x_n2] * format_x_n2['multiplicador']
+                df_p2['y_display'] = df_p2[var_y_n2] * format_y_n2['multiplicador']
+
+                # Tamanho dos pontos
+                if var_size_n2 != 'Tamanho Fixo':
+                    format_size_n2 = get_axis_format(var_size_n2)
+                    df_p1['size_display'] = df_p1[var_size_n2] * format_size_n2['multiplicador']
+                    df_p2['size_display'] = df_p2[var_size_n2] * format_size_n2['multiplicador']
+                    max_size = max(df_p1['size_display'].max(), df_p2['size_display'].max())
+
+                fig_scatter_n2 = go.Figure()
+                cores_plotly = px.colors.qualitative.Plotly
+                idx_cor_n2 = 0
+
+                for instituicao in sorted(bancos_comuns):
+                    # Dados do período inicial
+                    row_p1 = df_p1[df_p1['Instituição'] == instituicao]
+                    # Dados do período subsequente
+                    row_p2 = df_p2[df_p2['Instituição'] == instituicao]
+
+                    if row_p1.empty or row_p2.empty:
+                        continue
+
+                    x1 = row_p1['x_display'].values[0]
+                    y1 = row_p1['y_display'].values[0]
+                    x2 = row_p2['x_display'].values[0]
+                    y2 = row_p2['y_display'].values[0]
+
+                    # Cor do banco
+                    cor = obter_cor_banco(instituicao)
+                    if not cor:
+                        cor = cores_plotly[idx_cor_n2 % len(cores_plotly)]
+                        idx_cor_n2 += 1
+
+                    # Tamanho dos marcadores
+                    if var_size_n2 == 'Tamanho Fixo':
+                        marker_size_p1 = 20
+                        marker_size_p2 = 20
+                    else:
+                        marker_size_p1 = row_p1['size_display'].values[0] / max_size * 80 if max_size > 0 else 20
+                        marker_size_p2 = row_p2['size_display'].values[0] / max_size * 80 if max_size > 0 else 20
+
+                    # Adiciona linha conectando os dois pontos (seta)
+                    fig_scatter_n2.add_trace(go.Scatter(
+                        x=[x1, x2],
+                        y=[y1, y2],
+                        mode='lines',
+                        line=dict(color=cor, width=2),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+
+                    # Ponto do período inicial (círculo vazio/anel)
+                    fig_scatter_n2.add_trace(go.Scatter(
+                        x=[x1],
+                        y=[y1],
+                        mode='markers',
+                        name=f'{instituicao} ({periodo_inicial})',
+                        marker=dict(
+                            size=marker_size_p1,
+                            color='white',
+                            opacity=1.0,
+                            line=dict(width=3, color=cor)
+                        ),
+                        hovertemplate=f'<b>{instituicao}</b> ({periodo_inicial})<br>{var_x_n2}: %{{x:{format_x_n2["tickformat"]}}}{format_x_n2["ticksuffix"]}<br>{var_y_n2}: %{{y:{format_y_n2["tickformat"]}}}{format_y_n2["ticksuffix"]}<extra></extra>',
+                        legendgroup=instituicao,
+                        showlegend=False
+                    ))
+
+                    # Ponto do período subsequente (círculo cheio com seta)
+                    fig_scatter_n2.add_trace(go.Scatter(
+                        x=[x2],
+                        y=[y2],
+                        mode='markers',
+                        name=instituicao,
+                        marker=dict(
+                            size=marker_size_p2,
+                            color=cor,
+                            opacity=1.0,
+                            line=dict(width=1, color='white'),
+                            symbol='circle'
+                        ),
+                        hovertemplate=f'<b>{instituicao}</b> ({periodo_subseq})<br>{var_x_n2}: %{{x:{format_x_n2["tickformat"]}}}{format_x_n2["ticksuffix"]}<br>{var_y_n2}: %{{y:{format_y_n2["tickformat"]}}}{format_y_n2["ticksuffix"]}<extra></extra>',
+                        legendgroup=instituicao,
+                        showlegend=True
+                    ))
+
+                    # Adiciona seta (annotation) para indicar direção
+                    fig_scatter_n2.add_annotation(
+                        x=x2,
+                        y=y2,
+                        ax=x1,
+                        ay=y1,
+                        xref='x',
+                        yref='y',
+                        axref='x',
+                        ayref='y',
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowsize=1.5,
+                        arrowwidth=2,
+                        arrowcolor=cor,
+                        opacity=0.7
+                    )
+
+                # Título do gráfico n=2
+                if bancos_selecionados_n2:
+                    titulo_scatter_n2 = f'{var_y_n2} vs {var_x_n2} - {periodo_inicial} → {periodo_subseq} ({len(bancos_comuns)} bancos)'
+                else:
+                    titulo_scatter_n2 = f'{var_y_n2} vs {var_x_n2} - {periodo_inicial} → {periodo_subseq} (top {top_n_scatter_n2} por {var_top_n_n2})'
+
+                fig_scatter_n2.update_layout(
+                    title=titulo_scatter_n2,
+                    xaxis_title=var_x_n2,
+                    yaxis_title=var_y_n2,
+                    height=650,
+                    plot_bgcolor='#f8f9fa',
+                    paper_bgcolor='white',
+                    showlegend=True,
+                    legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                    xaxis=dict(tickformat=format_x_n2['tickformat'], ticksuffix=format_x_n2['ticksuffix']),
+                    yaxis=dict(tickformat=format_y_n2['tickformat'], ticksuffix=format_y_n2['ticksuffix']),
+                    font=dict(family='IBM Plex Sans')
+                )
+
+                st.plotly_chart(fig_scatter_n2, use_container_width=True)
+
+                # Legenda explicativa
+                st.caption("○ Círculo vazio = período inicial | ● Círculo cheio = período subsequente | → Seta indica direção da movimentação")
+
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Deltas":
+elif menu == "Deltas (Antes e Depois)":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -3410,11 +3992,16 @@ elif menu == "Deltas":
             'Carteira de Crédito',
             'Crédito/Ativo (%)',
             'Índice de Basileia',
-            'Crédito/PL',
+            'Crédito/PL (%)',
             'Crédito/Captações (%)',
-            'Market Share Carteira',
-            'Lucro Líquido',
-            'ROE An. (%)'
+            'Lucro Líquido Acumulado YTD',
+            'ROE Ac. YTD an. (%)',
+            # Variáveis de Capital (Relatório 5)
+            'RWA Total',
+            'Capital Principal',
+            'Índice de Capital Principal',
+            'Índice de Capital Nível I',
+            'Razão de Alavancagem',
         ]
         variaveis_selecionadas_delta = st.multiselect(
             "selecionar variáveis",
@@ -3834,7 +4421,7 @@ elif menu == "Deltas":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Brincar":
+elif menu == "Crie sua métrica!":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -4673,3 +5260,289 @@ elif menu == "Brincar":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Atualização Base":
+    st.markdown("## Atualização Base")
+    st.markdown("painel de controle avançado para atualização de dados")
+    st.markdown("---")
+
+    if 'df_aliases' in st.session_state:
+        st.success(f"{len(st.session_state['df_aliases'])} aliases carregados")
+    else:
+        st.error("aliases não encontrados")
+
+    # Informações detalhadas do cache
+    st.markdown("**status do cache**")
+    cache_info = get_cache_info_detalhado()
+    fonte = st.session_state.get('cache_fonte', 'desconhecida')
+
+    if cache_info['existe']:
+        st.caption(f"**caminho:** `{cache_info['caminho']}`")
+        st.caption(f"**modificado:** {cache_info['data_formatada']}")
+        st.caption(f"**tamanho:** {cache_info['tamanho_formatado']}")
+        st.caption(f"**fonte:** {fonte}")
+
+        # Mostrar info do cache_info.txt se existir
+        info_cache = ler_info_cache()
+        if info_cache:
+            st.caption(f"{info_cache.replace(chr(10), ' | ')}")
+    else:
+        st.warning("cache não encontrado no disco")
+
+    # Botão para forçar recarregamento do cache local
+    if st.button("recarregar cache do disco", use_container_width=True, key="btn_recarregar_cache_atualizacao"):
+        if forcar_recarregar_cache():
+            st.success("cache recarregado do disco com sucesso!")
+            st.rerun()
+        else:
+            st.error("falha ao recarregar cache - arquivo não existe")
+
+    st.markdown("---")
+    st.markdown("**atualizar dados (admin)**")
+
+    senha_input = st.text_input("senha de administrador", type="password", key="senha_admin_atualizacao")
+
+    if senha_input == SENHA_ADMIN:
+        col1, col2 = st.columns(2)
+        with col1:
+            ano_i = st.selectbox("ano inicial", range(2015,2028), index=8, key="ano_i_atualizacao")
+            mes_i = st.selectbox("trimestre inicial", ['03','06','09','12'], key="mes_i_atualizacao")
+        with col2:
+            ano_f = st.selectbox("ano final", range(2015,2028), index=10, key="ano_f_atualizacao")
+            mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f_atualizacao")
+
+        if 'dict_aliases' in st.session_state:
+            if st.button("extrair dados do BCB", type="primary", use_container_width=True, key="btn_extrair_bcb_atualizacao"):
+                periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
+                progress_bar = st.progress(0)
+                status = st.empty()
+                save_status = st.empty()
+
+                def update(i, total, p):
+                    progress_bar.progress((i+1)/total)
+                    status.text(f"extraindo {p[4:6]}/{p[:4]} ({i+1}/{total})")
+
+                # Callback para salvamento progressivo (a cada 5 períodos)
+                def save_progress(dados_parciais, info):
+                    save_status.text(f"💾 salvando {len(dados_parciais)} períodos...")
+                    salvar_cache(dados_parciais, info, incremental=True)
+                    save_status.text(f"✓ {len(dados_parciais)} períodos salvos no cache")
+
+                st.info(f"🔄 iniciando extração de {len(periodos)} períodos. salvamento progressivo a cada 5 períodos.")
+
+                dados = processar_todos_periodos(
+                    periodos,
+                    st.session_state['dict_aliases'],
+                    progress_callback=update,
+                    save_callback=save_progress,
+                    save_interval=5
+                )
+
+                if not dados:
+                    progress_bar.empty()
+                    status.empty()
+                    save_status.empty()
+                    st.error("falha ao extrair dados: nenhum período retornou dados válidos.")
+                else:
+                    periodo_info = f"{periodos[0][4:6]}/{periodos[0][:4]} até {periodos[-1][4:6]}/{periodos[-1][:4]}"
+                    cache_salvo = salvar_cache(dados, periodo_info, incremental=True)
+
+                    # Atualizar session_state com merge dos dados existentes + novos
+                    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+                        # Merge: dados existentes + novos (novos sobrescrevem)
+                        dados_merged = st.session_state['dados_periodos'].copy()
+                        dados_merged.update(dados)
+                        st.session_state['dados_periodos'] = dados_merged
+                    else:
+                        st.session_state['dados_periodos'] = dados
+
+                    st.session_state['cache_fonte'] = 'extração local'
+
+                    progress_bar.empty()
+                    status.empty()
+                    save_status.empty()
+                    st.success(f"✓ {len(dados)} períodos extraídos! cache total: {len(st.session_state['dados_periodos'])} períodos")
+                    st.info(f"cache salvo em: {cache_salvo['caminho']}")
+                    st.info(f"tamanho: {cache_salvo['tamanho_formatado']}")
+                    st.rerun()
+
+            st.markdown("---")
+            st.markdown("**publicar cache no github**")
+            st.caption("envia o cache local para github releases para que outros usuários possam usar")
+
+            gh_token = st.text_input("github token (opcional)", type="password", key="gh_token_atualizacao",
+                                    help="token com permissão 'repo'. deixe em branco se gh CLI estiver autenticado")
+
+            if st.button("enviar cache para github", use_container_width=True, key="btn_enviar_github_atualizacao"):
+                with st.spinner("enviando cache para github releases..."):
+                    sucesso, mensagem = upload_cache_github(gh_token if gh_token else None)
+                    if sucesso:
+                        st.success(mensagem)
+                    else:
+                        st.error(mensagem)
+
+            # =============================================================
+            # SEÇÃO ISOLADA: EXTRAÇÃO DE DADOS DE CAPITAL
+            # Cache separado (capital_cache.pkl), sem impacto no fluxo principal
+            # =============================================================
+            st.markdown("---")
+            st.markdown("**extrair capital (relatório 5)**")
+            st.caption("extrai informações de capital (índices, RWA, alavancagem) - cache separado")
+
+            # Mostrar status do cache de capital
+            capital_cache_info = get_capital_cache_info()
+            if capital_cache_info['existe']:
+                st.caption(f"📊 cache capital: {capital_cache_info['n_periodos']} períodos | {capital_cache_info['tamanho_formatado']}")
+                st.caption(f"📅 atualizado: {capital_cache_info['data_formatada']}")
+            else:
+                st.caption("📊 cache capital: não existe ainda")
+
+            col_cap1, col_cap2 = st.columns(2)
+            with col_cap1:
+                ano_cap_i = st.selectbox("ano inicial", range(2015, 2028), index=8, key="ano_cap_i_atualizacao")
+                mes_cap_i = st.selectbox("trim. inicial", ['03', '06', '09', '12'], key="mes_cap_i_atualizacao")
+            with col_cap2:
+                ano_cap_f = st.selectbox("ano final", range(2015, 2028), index=10, key="ano_cap_f_atualizacao")
+                mes_cap_f = st.selectbox("trim. final", ['03', '06', '09', '12'], index=2, key="mes_cap_f_atualizacao")
+
+            if st.button("extrair dados de capital", type="secondary", use_container_width=True, key="btn_extrair_capital_atualizacao"):
+                periodos_cap = gerar_periodos_capital(ano_cap_i, mes_cap_i, ano_cap_f, mes_cap_f)
+                progress_bar_cap = st.progress(0)
+                status_cap = st.empty()
+                save_status_cap = st.empty()
+
+                def update_cap(i, total, p):
+                    progress_bar_cap.progress((i + 1) / total)
+                    status_cap.text(f"extraindo capital {p[4:6]}/{p[:4]} ({i + 1}/{total})")
+
+                def save_progress_cap(dados_parciais, info):
+                    save_status_cap.text(f"💾 salvando {len(dados_parciais)} períodos de capital...")
+                    salvar_cache_capital(dados_parciais, info, incremental=True)
+                    save_status_cap.text(f"✓ {len(dados_parciais)} períodos de capital salvos")
+
+                st.info(f"🔄 iniciando extração de capital: {len(periodos_cap)} períodos")
+
+                # Usar dict_aliases se disponível
+                aliases_para_capital = st.session_state.get('dict_aliases', {})
+
+                dados_capital = processar_todos_periodos_capital(
+                    periodos_cap,
+                    dict_aliases=aliases_para_capital,
+                    progress_callback=update_cap,
+                    save_callback=save_progress_cap,
+                    save_interval=5
+                )
+
+                if not dados_capital:
+                    progress_bar_cap.empty()
+                    status_cap.empty()
+                    save_status_cap.empty()
+                    st.error("falha ao extrair dados de capital: nenhum período retornou dados válidos.")
+                else:
+                    periodo_info_cap = f"capital {periodos_cap[0][4:6]}/{periodos_cap[0][:4]} até {periodos_cap[-1][4:6]}/{periodos_cap[-1][:4]}"
+                    cache_capital_salvo = salvar_cache_capital(dados_capital, periodo_info_cap, incremental=True)
+
+                    progress_bar_cap.empty()
+                    status_cap.empty()
+                    save_status_cap.empty()
+
+                    st.success(f"✓ {len(dados_capital)} períodos de capital extraídos!")
+                    st.info(f"cache capital salvo em: {cache_capital_salvo['caminho']}")
+                    st.info(f"tamanho: {cache_capital_salvo['tamanho_formatado']} | total: {cache_capital_salvo['n_periodos']} períodos")
+
+                    # Mostrar campos extraídos
+                    with st.expander("campos extraídos"):
+                        campos = get_campos_capital_info()
+                        for original, exibido in campos.items():
+                            st.caption(f"• {exibido} ← _{original}_")
+
+        else:
+            st.warning("carregue os aliases primeiro")
+    elif senha_input:
+        st.error("senha incorreta")
+
+elif menu == "Glossário":
+    st.markdown("""
+    ## **Sobre os Dados Apresentados**
+
+    Os dados são obtidos via API Olinda do IFdata do Banco Central, na visão **Conglomerado**.
+
+    **O que isso significa:**
+
+    **Conglomerado Prudencial** é um grupo de instituições financeiras e entidades autorizadas, controladas por uma mesma instituição líder, que deve consolidar suas demonstrações contábeis para fins regulatórios.
+
+    O Banco Central supervisiona o grupo como um todo, considerando o somatório das instituições, e decisões sobre liquidez ou insolvência afetam todas as entidades do conglomerado.
+
+    **Exemplos:**
+    - O Banco PAN faz parte do Conglomerado Prudencial BTG Pactual. O próprio PAN esclarece que, por estar consolidado no prudencial do BTG, o índice de Basileia "individual" deixou de ser formalmente reportado.
+    - O Banco Digio faz parte do conglomerado financeiro do Bradesco, então em leituras "por conglomerado" você não verá o Digio como um grupo separado.
+    - O Conglomerado Prudencial Original inclui Banco Original, PicPay Bank e a IP do PicPay (além de outros veículos do grupo). Dependendo do recorte, você verá o conglomerado (ou o líder) e não cada entidade isoladamente.
+
+    Em caso de dúvidas, consulte o site do Banco Central.
+
+    ---
+
+    ## **Informações de Capital Regulatório**
+
+    **Capital Principal:** Parcela do capital de melhor qualidade e imediatamente disponível para absorver perdas (base regulatória usada para comparação com o RWA).
+
+    **Capital Complementar:** Instrumentos de capital e dívida perpétuos elegíveis como patrimônio regulatório (complementam o Capital Principal na formação do Nível I).
+
+    **Capital Nível II:** Parcela do capital composta por instrumentos subordinados, elegíveis como patrimônio regulatório, aptos a absorver perdas durante o funcionamento da instituição.
+
+    **Patrimônio de Referência:** Montante de capital regulatório total formado pela soma do Patrimônio de Referência Nível I e do Capital Nível II (usado para comparação com o RWA).
+
+    **RWA Crédito:** Parcela dos ativos ponderados pelo risco (RWA) referente à exposição ao risco de crédito (pode ser apurado pela abordagem padronizada ou por modelo interno IRB, quando aplicável).
+
+    **RWA Mercado:** Parcela do RWA referente à exposição ao risco de mercado, composta pela soma das parcelas de risco cambial, commodities, juros/cupons, ações e CVA (ajuste de valor de crédito da contraparte em derivativos), entre outras componentes do relatório.
+
+    **RWA Operacional:** Parcela do RWA referente à exposição ao risco operacional.
+
+    **RWA Total:** Soma das parcelas de RWA de Crédito, Mercado, Operacional e (quando existir no relatório) a parcela relativa a serviços de pagamento.
+
+    **Exposição Total:** Exposição total sem ponderação de risco (definição regulatória usada no cálculo da razão de alavancagem, conforme Circular 3.748/2015).
+
+    **Índice de Capital Principal:** Relação entre Capital Principal e RWA Total (Capital Principal / RWA Total).
+
+    **Índice de Capital Nível I:** Relação entre Patrimônio de Referência Nível I e RWA Total (Nível I / RWA Total).
+
+    **Índice de Basileia:** Relação entre Patrimônio de Referência e RWA Total (Patrimônio de Referência / RWA Total).
+
+    **Adicional de Capital Principal:** Requerimento de adicional de capital principal (ACP), apurado pela soma de ACP Conservação, ACP Contracíclico e ACP Sistêmico.
+
+    ---
+
+    ## **Variáveis Monetárias**
+
+    **Ativo Total:** Padrão COSIF.
+
+    **Carteira de Crédito:** Valor líquido, já descontada a PDD.
+
+    **Títulos e Valores Mobiliários:** Títulos de Renda Fixa + Aplicação em COEs + Cotas de Fundos de Curto Prazo e Fundos de Investimentos, já descontados de Perda Incorrida, Perda Esperada e Ajuste a Valor Justo.
+
+    **Passivo Exigível:** Passivo Total, incluindo Depósitos, Compromissadas, Outros Instrumentos de Dívida, Relações Interfinanceiras, Relações Interdependências, Derivativos, Provisões (Cíveis, Fiscais, Trabalhistas) e Outras Obrigações.
+
+    **Captações:** Todos os tipos de passivos, exceto (i) Títulos de Dívida Elegíveis a Capital e (ii) Dívidas Subordinadas Elegíveis a Capital.
+
+    **Patrimônio Líquido:** Padrão COSIF.
+
+    **Lucro Líquido Acumulado YTD:** Lucro líquido acumulado entre janeiro do ano-competência até o final do semestre de referência (ex: 09/2025 refere-se ao lucro acumulado no ano de 2025, até 30/09/2025).
+
+    ---
+
+    ## **Índices e Percentuais**
+
+    **Índice de Imobilização:** Ativo Permanente dividido pelo Patrimônio de Referência.
+
+    ---
+
+    ## **Métricas Calculadas**
+
+    **ROE Ac. YTD an. (%):** Lucro Líquido acumulado entre janeiro e o fim do período, dividido pelo Patrimônio Líquido.
+
+    **Crédito/PL (%):** Carteira de Crédito Líquida dividida pelo Patrimônio Líquido.
+
+    **Crédito/Captações (%):** Carteira de Crédito Líquida dividida pelas Captações.
+
+    **Crédito/Ativo (%):** Carteira de Crédito Líquida dividida pelo Ativo Total.
+    """)
