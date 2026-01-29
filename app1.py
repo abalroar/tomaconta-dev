@@ -1748,7 +1748,7 @@ elif menu == "Painel":
                 ]
             }
 
-            col_periodo, col_indicador, col_escala, col_tipo, col_media = st.columns([1.2, 2, 1.1, 1.3, 1.8])
+            col_periodo, col_indicador, col_tipo, col_media = st.columns([1.2, 2, 1.3, 1.8])
             with col_periodo:
                 periodo_resumo = st.selectbox(
                     "período (trimestre)",
@@ -1761,13 +1761,6 @@ elif menu == "Painel":
                     "indicador",
                     list(indicadores_disponiveis.keys()),
                     key="indicador_resumo"
-                )
-            with col_escala:
-                escala_resumo = st.radio(
-                    "escala",
-                    ["Linear", "Log"],
-                    horizontal=True,
-                    key="escala_resumo"
                 )
             componentes_disponiveis = [
                 col for col in componentes_indicador.get(indicador_label, []) if col in df.columns
@@ -2077,11 +2070,6 @@ elif menu == "Painel":
                             idx_cor += 1
                         cores_barras.append(cor)
 
-                    usar_log = escala_resumo == "Log"
-                    if usar_log and (df_selecionado['valor_display'] <= 0).any():
-                        st.warning("escala log desativada: o indicador possui valores zero ou negativos.")
-                        usar_log = False
-
                     fig_resumo = go.Figure()
                     banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
                     fig_resumo.add_trace(go.Bar(
@@ -2135,13 +2123,11 @@ elif menu == "Painel":
                         xaxis=dict(
                             tickangle=-45 if not orientacao_horizontal else 0,
                             tickformat=format_info['tickformat'] if orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None,
-                            type='log' if usar_log and orientacao_horizontal else None
+                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
                         ),
                         yaxis=dict(
                             tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None,
-                            type='log' if usar_log and not orientacao_horizontal else None
+                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
                         ),
                         font=dict(family='IBM Plex Sans')
                     )
