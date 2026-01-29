@@ -79,6 +79,7 @@ VARIAVEIS_DERIVADAS = [
 # =============================================================================
 # VARIÁVEIS DO RELATÓRIO 5 (CAPITAL)
 # =============================================================================
+# NOTA: Os nomes da API contêm \n (quebras de linha) que são removidos na normalização
 CAMPOS_CAPITAL = {
     "Capital Principal para Comparação com RWA (a)": "Capital Principal",
     "Capital Complementar (b)": "Capital Complementar",
@@ -96,7 +97,20 @@ CAMPOS_CAPITAL = {
     "IRRBB": "IRRBB",
     "Razão de Alavancagem (o) = (c) / (k)": "Razão de Alavancagem",
     "Índice de Imobilização (p)": "Índice de Imobilização Capital",
+    # Adicionar também o Patrimônio de Referência (sem os parênteses)
+    "Patrimônio de Referência para Comparação com o RWA": "Patrimônio de Referência",
 }
+
+
+def _normalizar_nome_coluna(nome: str) -> str:
+    """Normaliza nome de coluna removendo quebras de linha e espaços extras."""
+    if not isinstance(nome, str):
+        return nome
+    # Remover quebras de linha e substituir por espaço
+    nome = nome.replace('\n', ' ').replace('\r', ' ')
+    # Remover espaços extras
+    nome = ' '.join(nome.split())
+    return nome
 
 
 # =============================================================================
@@ -275,18 +289,13 @@ def extrair_resumo(
         logger.warning(f"Sem dados para Resumo {periodo}")
         return None
 
-    # 2. Normalizar nomes de colunas (remover espaços extras)
+    # 2. Normalizar nomes de colunas (remover \n e espaços extras)
     if "NomeColuna" in df_val.columns:
-        df_val["NomeColuna"] = df_val["NomeColuna"].str.strip()
-        df_val["NomeColuna"] = df_val["NomeColuna"].apply(lambda x: " ".join(str(x).split()))
+        df_val["NomeColuna"] = df_val["NomeColuna"].apply(_normalizar_nome_coluna)
 
-    # 3. Filtrar apenas variáveis desejadas
-    variaveis_norm = [" ".join(v.split()) for v in VARIAVEIS_RESUMO_API]
+    # 3. Filtrar apenas variáveis desejadas (normalizar também a lista)
+    variaveis_norm = [_normalizar_nome_coluna(v) for v in VARIAVEIS_RESUMO_API]
     df_filtrado = df_val[df_val["NomeColuna"].isin(variaveis_norm)].copy()
-
-    if df_filtrado.empty:
-        # Tentar sem normalização
-        df_filtrado = df_val[df_val["NomeColuna"].isin(VARIAVEIS_RESUMO_API)].copy()
 
     if df_filtrado.empty:
         logger.warning(f"Nenhuma variável encontrada para {periodo}")
@@ -450,16 +459,22 @@ def extrair_capital(
         logger.warning(f"Sem dados de Capital para {periodo}")
         return None
 
-    # Normalizar nomes
+    # Normalizar nomes das colunas (remover \n e espaços extras)
     if "NomeColuna" in df_val.columns:
-        df_val["NomeColuna"] = df_val["NomeColuna"].str.strip()
+        df_val["NomeColuna"] = df_val["NomeColuna"].apply(_normalizar_nome_coluna)
+
+    # Criar mapeamento normalizado para filtrar e renomear
+    campos_api_normalizados = {_normalizar_nome_coluna(k): v for k, v in CAMPOS_CAPITAL.items()}
 
     # Filtrar campos desejados
-    campos_api = list(CAMPOS_CAPITAL.keys())
-    df_filtrado = df_val[df_val["NomeColuna"].isin(campos_api)].copy()
+    df_filtrado = df_val[df_val["NomeColuna"].isin(campos_api_normalizados.keys())].copy()
 
     if df_filtrado.empty:
         logger.warning(f"Nenhum campo de capital encontrado para {periodo}")
+        # Log das colunas disponíveis para debug
+        if not df_val.empty and "NomeColuna" in df_val.columns:
+            cols_disponiveis = df_val["NomeColuna"].unique()[:10]
+            logger.debug(f"Colunas disponíveis (primeiras 10): {list(cols_disponiveis)}")
         return None
 
     # Pivotar
@@ -471,8 +486,8 @@ def extrair_capital(
     ).reset_index()
     df_pivot.columns.name = None
 
-    # Renomear colunas
-    rename_map = {k: v for k, v in CAMPOS_CAPITAL.items() if k in df_pivot.columns}
+    # Renomear colunas usando o mapeamento normalizado
+    rename_map = {k: v for k, v in campos_api_normalizados.items() if k in df_pivot.columns}
     df_pivot = df_pivot.rename(columns=rename_map)
 
     # Adicionar nomes
@@ -550,9 +565,9 @@ def extrair_relatorio_completo(
         logger.warning(f"Sem dados para relatório {relatorio}, período {periodo}")
         return None
 
-    # Normalizar
+    # Normalizar nomes de colunas (remover \n e espaços extras)
     if "NomeColuna" in df_val.columns:
-        df_val["NomeColuna"] = df_val["NomeColuna"].str.strip()
+        df_val["NomeColuna"] = df_val["NomeColuna"].apply(_normalizar_nome_coluna)
 
     # Pivotar TODAS as variáveis
     df_pivot = df_val.pivot_table(

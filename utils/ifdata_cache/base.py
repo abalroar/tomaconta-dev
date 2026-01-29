@@ -179,9 +179,15 @@ class BaseCache(ABC):
                 "colunas": list(dados.columns),
             }
 
-            # Adicionar periodos se disponivel
-            if "Periodo" in dados.columns:
-                periodos = sorted(dados["Periodo"].unique().tolist())
+            # Adicionar periodos se disponivel (verificar ambas as grafias)
+            col_periodo = None
+            if "Período" in dados.columns:
+                col_periodo = "Período"
+            elif "Periodo" in dados.columns:
+                col_periodo = "Periodo"
+
+            if col_periodo:
+                periodos = sorted(dados[col_periodo].unique().tolist())
                 metadata["periodos"] = [str(p) for p in periodos]
                 metadata["total_periodos"] = len(periodos)
 
