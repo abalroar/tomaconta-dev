@@ -662,7 +662,7 @@ def upload_cache_github(cache_manager: CacheManager, tipo_cache: str, gh_token: 
     if not metadata_path.exists():
         return False, f"metadata.json não encontrada para '{tipo_cache}'"
 
-    repo = "abalroar/tomaconta-dev"
+    repo = os.getenv("TOMACONTA_RELEASE_REPO", "abalroar/tomaconta")
     tag = "v1.0-cache"
     asset_data_name = f"{tipo_cache}_dados.parquet"
     asset_metadata_name = f"{tipo_cache}_metadata.json"
@@ -1075,7 +1075,7 @@ def verificar_caches_github() -> dict:
 
     Retorna dict com status de cada cache no GitHub (sem autenticação, apenas leitura pública).
     """
-    repo = "abalroar/tomaconta-dev"
+    repo = os.getenv("TOMACONTA_RELEASE_REPO", "abalroar/tomaconta")
     tag = "v1.0-cache"
     result = {
         'release_existe': False,

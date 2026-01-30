@@ -6,6 +6,7 @@ Produz dados no formato exato que os gráficos do app1.py esperam.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -42,43 +43,40 @@ class PrincipalCache(BaseCache):
 
     def __init__(self, base_dir: Path):
         super().__init__(PRINCIPAL_CONFIG, base_dir)
+        release_repo = os.getenv("TOMACONTA_RELEASE_REPO", "abalroar/tomaconta")
+        raw_repo = os.getenv("TOMACONTA_RAW_REPO", "abalroar/tomaconta-dev")
+        release_base = f"https://github.com/{release_repo}/releases/download/v1.0-cache"
+
         # URLs em ordem de prioridade:
-        # 1. Parquet do repositório tomaconta-dev
-        self.github_raw_url = "https://raw.githubusercontent.com/abalroar/tomaconta-dev/main/data/cache/principal/dados.parquet"
-        # 2. Parquet dos releases tomaconta-dev
-        self.github_release_parquet_url = "https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache/principal_dados.parquet"
-        # 3. Pickle dos releases tomaconta-dev
-        self.github_release_dev_url = "https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache/dados_cache.pkl"
-        # 3. Pickle dos releases tomaconta (original)
-        self.github_release_url = f"{self.config.github_url_base}/dados_cache.pkl"
+        # 1. Parquet do repositório raw (configurável)
+        self.github_raw_url = f"https://raw.githubusercontent.com/{raw_repo}/main/data/cache/principal/dados.parquet"
+        # 2. Parquet dos releases (prod por padrão)
+        self.github_release_parquet_url = f"{release_base}/principal_dados.parquet"
+        # 3. Pickle dos releases (compat legado)
+        self.github_release_url = f"{release_base}/dados_cache.pkl"
 
     def baixar_remoto(self) -> CacheResult:
         """Baixa dados do GitHub (tenta múltiplas fontes em ordem de prioridade)."""
         self._log("info", "Tentando baixar do GitHub...")
 
-        # 1. Tentar parquet do repositório tomaconta-dev
+        # 1. Tentar parquet do repositório raw
         resultado = self._baixar_parquet_repo()
         if resultado.sucesso:
             return resultado
 
-        # 2. Tentar parquet dos releases tomaconta-dev
+        # 2. Tentar parquet dos releases
         resultado = self._baixar_parquet_release()
         if resultado.sucesso:
             return resultado
 
-        # 3. Tentar pickle dos releases tomaconta-dev
-        resultado = self._baixar_pickle_releases(self.github_release_dev_url, "tomaconta-dev")
-        if resultado.sucesso:
-            return resultado
-
-        # 4. Fallback: pickle dos releases tomaconta (original)
-        resultado = self._baixar_pickle_releases(self.github_release_url, "tomaconta")
+        # 3. Fallback: pickle dos releases
+        resultado = self._baixar_pickle_releases(self.github_release_url, "releases")
         if resultado.sucesso:
             return resultado
 
         return CacheResult(
             sucesso=False,
-            mensagem="Cache não encontrado no GitHub (tentou repositório e releases de tomaconta-dev e tomaconta)",
+            mensagem="Cache não encontrado no GitHub (tentou repositório raw e releases)",
             fonte="nenhum"
         )
 
