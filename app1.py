@@ -1720,19 +1720,70 @@ with col_header:
         </div>
     """, unsafe_allow_html=True)
 
-# Menu centralizado usando CSS flex
+# Menu principal de análise
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
-menu = st.segmented_control(
-    "navegação",
-    ["Sobre", "Atualização Base", "Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Taxas de Juros", "Crie sua métrica!", "Glossário"],
-    default=st.session_state['menu_atual'],
-    label_visibility="collapsed"
+
+# Lista de opções do menu principal (análise)
+MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
+
+# Lista de opções do menu secundário (utilitários)
+MENU_SECUNDARIO = ["Sobre", "Atualizar Base", "Glossário"]
+
+# Todos os menus combinados para validação
+TODOS_MENUS = MENU_PRINCIPAL + MENU_SECUNDARIO
+
+# Validar e corrigir menu_atual se necessário
+if st.session_state['menu_atual'] not in TODOS_MENUS:
+    # Migrar "Taxas de Juros" para "Taxas de Juros por Produto"
+    if st.session_state['menu_atual'] == "Taxas de Juros":
+        st.session_state['menu_atual'] = "Taxas de Juros por Produto"
+    # Migrar "Atualização Base" para "Atualizar Base"
+    elif st.session_state['menu_atual'] == "Atualização Base":
+        st.session_state['menu_atual'] = "Atualizar Base"
+    else:
+        st.session_state['menu_atual'] = "Sobre"
+
+# Determinar qual menu está ativo e qual item está selecionado
+menu_atual = st.session_state['menu_atual']
+idx_principal = MENU_PRINCIPAL.index(menu_atual) if menu_atual in MENU_PRINCIPAL else None
+idx_secundario = MENU_SECUNDARIO.index(menu_atual) if menu_atual in MENU_SECUNDARIO else None
+
+# Menu principal (análise)
+menu_principal = st.segmented_control(
+    "navegação principal",
+    MENU_PRINCIPAL,
+    default=menu_atual if menu_atual in MENU_PRINCIPAL else None,
+    label_visibility="collapsed",
+    key="menu_principal"
+)
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Menu secundário (utilitários) - mesmo estilo, logo abaixo
+st.markdown('<div class="header-nav">', unsafe_allow_html=True)
+menu_secundario = st.segmented_control(
+    "navegação secundária",
+    MENU_SECUNDARIO,
+    default=menu_atual if menu_atual in MENU_SECUNDARIO else None,
+    label_visibility="collapsed",
+    key="menu_secundario"
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
-if menu != st.session_state['menu_atual']:
-    st.session_state['menu_atual'] = menu
-    st.rerun()
+# Determinar o menu selecionado (prioriza a seleção mais recente)
+menu = None
+if menu_principal is not None:
+    menu = menu_principal
+    if menu != st.session_state['menu_atual']:
+        st.session_state['menu_atual'] = menu
+        st.rerun()
+elif menu_secundario is not None:
+    menu = menu_secundario
+    if menu != st.session_state['menu_atual']:
+        st.session_state['menu_atual'] = menu
+        st.rerun()
+else:
+    menu = st.session_state['menu_atual']
 
 st.markdown("---")
 
@@ -4724,306 +4775,294 @@ elif menu == "Carteira 4.966":
         if info and not info.get("erro"):
             st.caption(f"Status do cache: {info}")
 
-elif menu == "Taxas de Juros":
+elif menu == "Taxas de Juros por Produto":
     # =========================================================================
-    # ABA TAXAS DE JUROS - Gráfico de linha com multiselect de peers/produtos
+    # ABA TAXAS DE JUROS POR PRODUTO - Visualização por segmento PF/PJ
     # =========================================================================
     from utils.ifdata_cache import (
         get_manager,
-        buscar_modalidades_taxas_juros,
-        buscar_instituicoes_taxas_juros,
         formatar_nome_modalidade,
-        MODALIDADES_CONHECIDAS,
     )
 
-    st.markdown("### Taxas de Juros por Produto e Instituição Financeira")
-    st.caption("Dados extraídos da API do Banco Central do Brasil - Taxas de juros diárias por modalidade de crédito")
+    st.markdown("### Taxas de Juros por Produto")
+    st.caption("Dados do Banco Central do Brasil - Taxas de juros por modalidade de crédito e instituição financeira")
 
     # Mostrar informação sobre periodicidade em expander
-    with st.expander("ℹ️ Sobre a periodicidade dos dados", expanded=False):
+    with st.expander("ℹ️ Sobre os dados", expanded=False):
         st.markdown("""
-        **Periodicidade dos dados:**
+        **Fonte:** API do Banco Central do Brasil - Taxas de Juros
 
-        Os dados são divulgados em janelas de **5 dias úteis consecutivos** (rolling window).
-        Por exemplo: 12/01/2026 a 16/01/2026 representa os dados agregados desse período.
+        **Periodicidade:** Janelas de 5 dias úteis consecutivos (rolling window).
 
-        Cada instituição pode aparecer ou não em determinado período, dependendo se
-        realizou operações naquela modalidade de crédito.
+        **Posição:** Campo que indica o ranking da instituição para aquele produto/período.
+        Posição 1 = menor taxa (melhor para o cliente).
 
-        Para construção de séries temporais, utiliza-se a **data final (Fim Período)**
-        como data de referência.
+        **Segmentos:**
+        - **PF (Pessoa Física):** Produtos de crédito para pessoas físicas
+        - **PJ (Pessoa Jurídica):** Produtos de crédito para empresas
+
+        Para atualizar os dados, vá em **Atualizar Base** → **Taxas de Juros (API BCB)**.
         """)
 
-    # Inicializar session state
-    if 'taxas_juros_dados' not in st.session_state:
-        st.session_state['taxas_juros_dados'] = None
+    # Carregar dados do cache
+    manager = get_manager()
+    cache_taxas = manager.get_cache("taxas_juros")
 
-    # Funções com cache
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def carregar_modalidades_taxas():
-        modalidades = buscar_modalidades_taxas_juros(dias_amostra=60)
-        return modalidades if modalidades else MODALIDADES_CONHECIDAS
+    # Verificar se há dados no cache
+    resultado_cache = cache_taxas.carregar_local()
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def carregar_instituicoes_taxas():
-        return buscar_instituicoes_taxas_juros(dias_amostra=60)
+    if not resultado_cache.sucesso or resultado_cache.dados is None or resultado_cache.dados.empty:
+        st.warning("⚠️ Cache de Taxas de Juros não encontrado ou vazio.")
+        st.info("👉 Vá em **Atualizar Base** → selecione **Taxas de Juros (API BCB)** → extraia os dados.")
+    else:
+        df_taxas_completo = resultado_cache.dados.copy()
 
-    # Carregar dados iniciais
-    with st.spinner("Carregando produtos disponíveis..."):
-        modalidades_disponiveis = carregar_modalidades_taxas()
+        # Converter datas se necessário
+        if 'Fim Período' in df_taxas_completo.columns:
+            df_taxas_completo['Fim Período'] = pd.to_datetime(df_taxas_completo['Fim Período'])
+        if 'Início Período' in df_taxas_completo.columns:
+            df_taxas_completo['Início Período'] = pd.to_datetime(df_taxas_completo['Início Período'])
 
-    with st.spinner("Carregando instituições..."):
-        instituicoes_disponiveis = carregar_instituicoes_taxas()
-
-    # Interface de configuração
-    st.markdown("---")
-
-    # Seleção de período
-    col_periodo1, col_periodo2 = st.columns(2)
-
-    hoje = datetime.now()
-    data_minima = hoje - timedelta(days=365*2)
-
-    with col_periodo1:
-        data_inicio = st.date_input(
-            "Período Inicial",
-            value=hoje - timedelta(days=180),
-            min_value=data_minima.date(),
-            max_value=hoje.date(),
-            key="taxas_juros_data_inicio",
-            help="Data de início para busca dos dados"
-        )
-
-    with col_periodo2:
-        data_fim = st.date_input(
-            "Período Final",
-            value=hoje.date(),
-            min_value=data_minima.date(),
-            max_value=hoje.date(),
-            key="taxas_juros_data_fim",
-            help="Data final para busca dos dados"
-        )
-
-    # Seleção de produtos (múltiplos)
-    st.markdown("##### Produtos (Modalidades de Crédito)")
-
-    # Formatar nomes para exibição
-    modalidades_formatadas = {m: formatar_nome_modalidade(m) for m in modalidades_disponiveis}
-    opcoes_modalidades = sorted(list(modalidades_formatadas.values()))
-    mapa_reverso = {v: k for k, v in modalidades_formatadas.items()}
-
-    produtos_selecionados_formatados = st.multiselect(
-        "Selecione os produtos (até 4)",
-        options=opcoes_modalidades,
-        default=[],
-        max_selections=4,
-        key="taxas_juros_produtos",
-        help="Selecione de 1 a 4 produtos para visualizar no gráfico."
-    )
-
-    produtos_selecionados = [mapa_reverso[p] for p in produtos_selecionados_formatados]
-
-    # Seleção de instituições (peers)
-    st.markdown("##### Instituições Financeiras (Peers)")
-
-    # Ordenar instituições: com alias primeiro, depois sem alias
-    dict_aliases = st.session_state.get('dict_aliases', {})
-    instituicoes_ordenadas = ordenar_bancos_com_alias(instituicoes_disponiveis, dict_aliases)
-
-    instituicoes_selecionadas = st.multiselect(
-        "Selecione as instituições para comparar",
-        options=instituicoes_ordenadas,
-        default=[],
-        key="taxas_juros_instituicoes_sel",
-        help="Selecione as instituições para visualizar no gráfico."
-    )
-
-    # Tipo de taxa
-    tipo_taxa = st.radio(
-        "Tipo de taxa",
-        ["Taxa Mensal (%)", "Taxa Anual (%)"],
-        horizontal=True,
-        key="taxas_juros_tipo_taxa"
-    )
-
-    # Botão de busca
-    st.markdown("---")
-
-    col_btn, col_info = st.columns([1, 3])
-
-    with col_btn:
-        buscar_dados = st.button(
-            "🔍 Buscar e Visualizar",
-            type="primary",
-            key="taxas_juros_buscar",
-            use_container_width=True
-        )
-
-    with col_info:
-        if produtos_selecionados:
-            st.caption(f"Produtos: {len(produtos_selecionados)}")
-        else:
-            st.caption("Selecione ao menos 1 produto")
-
-        if instituicoes_selecionadas:
-            st.caption(f"Instituições: {len(instituicoes_selecionadas)}")
-        else:
-            st.caption("Selecione ao menos 1 instituição")
-
-    # Executar busca e visualização
-    if buscar_dados:
-        if not produtos_selecionados:
-            st.warning("Selecione ao menos 1 produto.")
-        elif not instituicoes_selecionadas:
-            st.warning("Selecione ao menos 1 instituição.")
-        elif data_inicio > data_fim:
-            st.error("Data inicial não pode ser maior que a data final.")
-        else:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            def update_progress(pct, msg):
-                progress_bar.progress(pct)
-                status_text.text(msg)
-
-            # Usar o cache manager para extrair dados
-            manager = get_manager()
-            cache_taxas = manager.get_cache("taxas_juros")
-
-            with st.spinner("Extraindo dados do Banco Central..."):
-                resultado = cache_taxas.extrair_com_filtros(
-                    data_inicio=data_inicio.strftime('%Y-%m-%d'),
-                    data_fim=data_fim.strftime('%Y-%m-%d'),
-                    modalidades=produtos_selecionados,
-                    instituicoes=instituicoes_selecionadas,
-                    progress_callback=update_progress
-                )
-
-            progress_bar.empty()
-            status_text.empty()
-
-            if resultado.sucesso and resultado.dados is not None and not resultado.dados.empty:
-                st.session_state['taxas_juros_dados'] = resultado.dados
-
-                # Salvar no cache local
-                manager.salvar("taxas_juros", resultado.dados, fonte="api")
-
-                st.success(f"✅ {len(resultado.dados)} registros extraídos!")
-            else:
-                st.warning("Nenhum dado encontrado para os filtros selecionados.")
-                st.session_state['taxas_juros_dados'] = None
-
-    # Exibir gráfico e dados se disponíveis
-    if st.session_state.get('taxas_juros_dados') is not None:
-        df_taxas = st.session_state['taxas_juros_dados']
+        # Informações do cache
+        info_cache = manager.info("taxas_juros")
+        col_info1, col_info2, col_info3 = st.columns(3)
+        with col_info1:
+            st.metric("Registros no cache", f"{len(df_taxas_completo):,}")
+        with col_info2:
+            if 'Produto' in df_taxas_completo.columns:
+                st.metric("Produtos", df_taxas_completo['Produto'].nunique())
+        with col_info3:
+            if 'Instituição Financeira' in df_taxas_completo.columns:
+                st.metric("Instituições", df_taxas_completo['Instituição Financeira'].nunique())
 
         st.markdown("---")
-        st.markdown("#### 📈 Evolução das Taxas de Juros")
 
-        # Preparar dados para o gráfico
-        df_grafico = df_taxas.copy()
-        df_grafico['Data'] = pd.to_datetime(df_grafico['Fim Período'])
+        # =============================================================
+        # FILTROS GLOBAIS
+        # =============================================================
+        st.markdown("#### ⚙️ Configurações")
 
-        # Criar identificador único para cada série (produto + instituição)
-        df_grafico['Serie'] = df_grafico['Produto'].apply(formatar_nome_modalidade) + ' - ' + df_grafico['Instituição Financeira']
+        col_periodo1, col_periodo2, col_tipo = st.columns([2, 2, 2])
 
-        # Coluna de valor baseada no tipo de taxa selecionado
-        coluna_valor = tipo_taxa
+        # Obter range de datas disponíveis
+        datas_disponiveis = df_taxas_completo['Fim Período'].dropna().unique()
+        data_min_disp = pd.to_datetime(datas_disponiveis.min())
+        data_max_disp = pd.to_datetime(datas_disponiveis.max())
 
-        # Agregar por data e série (média se houver duplicados)
-        df_plot = df_grafico.groupby(['Data', 'Serie'])[coluna_valor].mean().reset_index()
-
-        # Criar gráfico de linha
-        fig = px.line(
-            df_plot,
-            x='Data',
-            y=coluna_valor,
-            color='Serie',
-            title=f'Evolução das Taxas de Juros ({tipo_taxa})',
-            labels={
-                'Data': 'Data',
-                coluna_valor: tipo_taxa,
-                'Serie': 'Produto / Instituição'
-            },
-            template='plotly_white'
-        )
-
-        fig.update_layout(
-            height=500,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=-0.3,
-                xanchor="center",
-                x=0.5
-            ),
-            xaxis_title="Data",
-            yaxis_title=tipo_taxa,
-            hovermode='x unified'
-        )
-
-        fig.update_traces(mode='lines+markers', marker=dict(size=4))
-
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Tabs para dados e exportação
-        tab_dados, tab_export = st.tabs(["📋 Dados", "📥 Exportar"])
-
-        with tab_dados:
-            # Formatar datas para exibição
-            df_display = df_taxas.copy()
-            df_display['Início Período'] = pd.to_datetime(df_display['Início Período']).dt.strftime('%d/%m/%Y')
-            df_display['Fim Período'] = pd.to_datetime(df_display['Fim Período']).dt.strftime('%d/%m/%Y')
-
-            # Estatísticas
-            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-            with col_stat1:
-                st.metric("Registros", len(df_taxas))
-            with col_stat2:
-                st.metric("Instituições", df_taxas['Instituição Financeira'].nunique())
-            with col_stat3:
-                st.metric("Produtos", df_taxas['Produto'].nunique())
-            with col_stat4:
-                st.metric("Períodos", df_taxas['Fim Período'].nunique())
-
-            st.dataframe(
-                df_display,
-                use_container_width=True,
-                height=300,
-                hide_index=True
+        with col_periodo1:
+            data_inicio = st.date_input(
+                "Período Inicial",
+                value=data_max_disp - timedelta(days=180),
+                min_value=data_min_disp.date(),
+                max_value=data_max_disp.date(),
+                key="taxas_juros_data_inicio_view",
+                format="DD/MM/YYYY"
             )
 
-        with tab_export:
-            st.markdown("##### Exportar Dados")
+        with col_periodo2:
+            data_fim = st.date_input(
+                "Período Final",
+                value=data_max_disp.date(),
+                min_value=data_min_disp.date(),
+                max_value=data_max_disp.date(),
+                key="taxas_juros_data_fim_view",
+                format="DD/MM/YYYY"
+            )
 
-            col_exp1, col_exp2 = st.columns(2)
+        with col_tipo:
+            tipo_taxa = st.radio(
+                "Tipo de taxa",
+                ["Taxa Mensal (%)", "Taxa Anual (%)"],
+                horizontal=True,
+                key="taxas_juros_tipo_taxa_view"
+            )
 
-            with col_exp1:
-                csv_data = df_taxas.to_csv(index=False, sep=';', decimal=',')
-                st.download_button(
-                    label="⬇️ Baixar CSV",
-                    data=csv_data,
-                    file_name=f"taxas_juros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    key="taxas_juros_download_csv"
-                )
+        st.caption(f"Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
 
-            with col_exp2:
-                buffer_excel = io.BytesIO()
-                with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                    df_taxas.to_excel(writer, index=False, sheet_name='dados')
-                buffer_excel.seek(0)
+        # Filtrar dados pelo período selecionado
+        df_filtrado = df_taxas_completo[
+            (df_taxas_completo['Fim Período'] >= pd.to_datetime(data_inicio)) &
+            (df_taxas_completo['Fim Período'] <= pd.to_datetime(data_fim))
+        ].copy()
 
-                st.download_button(
-                    label="⬇️ Baixar Excel",
-                    data=buffer_excel.getvalue(),
-                    file_name=f"taxas_juros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="taxas_juros_download_excel"
-                )
+        if df_filtrado.empty:
+            st.warning("Nenhum dado encontrado para o período selecionado.")
+        else:
+            # =============================================================
+            # SEPARAR POR SEGMENTO (PF / PJ)
+            # =============================================================
+            segmentos_disponiveis = []
+            if 'Segmento' in df_filtrado.columns:
+                segmentos_disponiveis = sorted(df_filtrado['Segmento'].dropna().unique().tolist())
 
-    else:
-        st.info("👆 Selecione produtos, instituições e período, depois clique em **Buscar e Visualizar**.")
+            # Se não houver coluna Segmento, tratar todos como único grupo
+            if not segmentos_disponiveis:
+                segmentos_disponiveis = ['Todos']
+                df_filtrado['Segmento'] = 'Todos'
+
+            # Criar tabs para PF e PJ
+            tabs_segmento = st.tabs([f"📊 Produtos {seg}" for seg in segmentos_disponiveis])
+
+            for idx_seg, segmento in enumerate(segmentos_disponiveis):
+                with tabs_segmento[idx_seg]:
+                    # Filtrar por segmento
+                    df_segmento = df_filtrado[df_filtrado['Segmento'] == segmento].copy()
+
+                    if df_segmento.empty:
+                        st.info(f"Nenhum dado disponível para {segmento}")
+                        continue
+
+                    # Obter produtos disponíveis neste segmento
+                    produtos_segmento = sorted(df_segmento['Produto'].dropna().unique().tolist())
+
+                    st.markdown(f"**{len(produtos_segmento)} produtos disponíveis em {segmento}**")
+
+                    # Criar tabs ou expanders para cada produto
+                    if len(produtos_segmento) > 0:
+                        tabs_produtos = st.tabs([formatar_nome_modalidade(p)[:30] for p in produtos_segmento])
+
+                        for idx_prod, produto in enumerate(produtos_segmento):
+                            with tabs_produtos[idx_prod]:
+                                df_produto = df_segmento[df_segmento['Produto'] == produto].copy()
+
+                                if df_produto.empty:
+                                    st.info("Sem dados para este produto")
+                                    continue
+
+                                st.markdown(f"##### {formatar_nome_modalidade(produto)}")
+
+                                # =============================================================
+                                # AUTO-SELEÇÃO TOP 10 POR POSIÇÃO NA DATA FINAL
+                                # =============================================================
+                                # Obter a data final mais recente nos dados filtrados
+                                data_ref = df_produto['Fim Período'].max()
+
+                                # Filtrar dados da data de referência
+                                df_data_ref = df_produto[df_produto['Fim Período'] == data_ref]
+
+                                # Obter Top 10 por posição (menor posição = melhor)
+                                top_10_bancos = []
+                                if 'Posição' in df_data_ref.columns and not df_data_ref.empty:
+                                    df_sorted = df_data_ref.sort_values('Posição', ascending=True)
+                                    top_10_bancos = df_sorted['Instituição Financeira'].head(10).tolist()
+                                else:
+                                    # Fallback: pegar os 10 primeiros por ordem alfabética
+                                    top_10_bancos = sorted(df_produto['Instituição Financeira'].unique().tolist())[:10]
+
+                                # Lista de todas as instituições disponíveis para este produto
+                                todas_instituicoes = sorted(df_produto['Instituição Financeira'].unique().tolist())
+
+                                # Ordenar com aliases primeiro
+                                dict_aliases = st.session_state.get('dict_aliases', {})
+                                todas_instituicoes_ord = ordenar_bancos_com_alias(todas_instituicoes, dict_aliases)
+
+                                # Multiselect com default = top 10
+                                key_multiselect = f"inst_{segmento}_{idx_prod}"
+                                instituicoes_selecionadas = st.multiselect(
+                                    "Instituições (Top 10 por posição pré-selecionadas, máx 20)",
+                                    options=todas_instituicoes_ord,
+                                    default=[b for b in top_10_bancos if b in todas_instituicoes_ord],
+                                    max_selections=20,
+                                    key=key_multiselect,
+                                    help=f"Top 10 baseado na posição de {data_ref.strftime('%d/%m/%Y')}. Altere manualmente se desejar."
+                                )
+
+                                if not instituicoes_selecionadas:
+                                    st.warning("Selecione ao menos uma instituição.")
+                                    continue
+
+                                # Filtrar dados pelas instituições selecionadas
+                                df_plot = df_produto[df_produto['Instituição Financeira'].isin(instituicoes_selecionadas)].copy()
+
+                                # Preparar dados para o gráfico
+                                df_plot['Data'] = pd.to_datetime(df_plot['Fim Período'])
+                                coluna_valor = tipo_taxa
+
+                                # Agregar por data e instituição
+                                df_agg = df_plot.groupby(['Data', 'Instituição Financeira'])[coluna_valor].mean().reset_index()
+
+                                # Criar gráfico de linha
+                                fig = px.line(
+                                    df_agg,
+                                    x='Data',
+                                    y=coluna_valor,
+                                    color='Instituição Financeira',
+                                    title=f'{formatar_nome_modalidade(produto)} - {tipo_taxa}',
+                                    labels={
+                                        'Data': 'Data',
+                                        coluna_valor: tipo_taxa,
+                                        'Instituição Financeira': 'Instituição'
+                                    },
+                                    template='plotly_white'
+                                )
+
+                                fig.update_layout(
+                                    height=400,
+                                    legend=dict(
+                                        orientation="h",
+                                        yanchor="bottom",
+                                        y=-0.4,
+                                        xanchor="center",
+                                        x=0.5
+                                    ),
+                                    xaxis_title="",
+                                    yaxis_title=tipo_taxa,
+                                    hovermode='x unified',
+                                    margin=dict(b=100)
+                                )
+
+                                fig.update_traces(mode='lines+markers', marker=dict(size=3))
+                                fig.update_xaxes(tickformat="%d/%m/%y")
+
+                                st.plotly_chart(fig, use_container_width=True)
+
+                                # Mini tabela com estatísticas
+                                with st.expander("📋 Dados e estatísticas"):
+                                    # Estatísticas por instituição na data mais recente
+                                    df_stats = df_data_ref[df_data_ref['Instituição Financeira'].isin(instituicoes_selecionadas)]
+                                    if not df_stats.empty:
+                                        df_stats_display = df_stats[['Instituição Financeira', 'Posição', 'Taxa Mensal (%)', 'Taxa Anual (%)']].copy()
+                                        df_stats_display = df_stats_display.sort_values('Posição')
+                                        st.caption(f"Ranking em {data_ref.strftime('%d/%m/%Y')}:")
+                                        st.dataframe(df_stats_display, use_container_width=True, hide_index=True)
+
+            # =============================================================
+            # EXPORTAÇÃO GLOBAL
+            # =============================================================
+            st.markdown("---")
+            st.markdown("#### 📥 Exportar Dados")
+
+            with st.expander("Exportar dados filtrados"):
+                # Formatar datas para exibição
+                df_export = df_filtrado.copy()
+                df_export['Início Período'] = pd.to_datetime(df_export['Início Período']).dt.strftime('%d/%m/%Y')
+                df_export['Fim Período'] = pd.to_datetime(df_export['Fim Período']).dt.strftime('%d/%m/%Y')
+
+                col_exp1, col_exp2 = st.columns(2)
+
+                with col_exp1:
+                    csv_data = df_filtrado.to_csv(index=False, sep=';', decimal=',')
+                    st.download_button(
+                        label="⬇️ Baixar CSV",
+                        data=csv_data,
+                        file_name=f"taxas_juros_{data_inicio.strftime('%Y%m%d')}_{data_fim.strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        key="taxas_juros_download_csv"
+                    )
+
+                with col_exp2:
+                    buffer_excel = io.BytesIO()
+                    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                        df_filtrado.to_excel(writer, index=False, sheet_name='dados')
+                    buffer_excel.seek(0)
+
+                    st.download_button(
+                        label="⬇️ Baixar Excel",
+                        data=buffer_excel.getvalue(),
+                        file_name=f"taxas_juros_{data_inicio.strftime('%Y%m%d')}_{data_fim.strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="taxas_juros_download_excel"
+                    )
 
 elif menu == "Crie sua métrica!":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
@@ -5848,7 +5887,7 @@ elif menu == "Crie sua métrica!":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Atualização Base":
+elif menu == "Atualizar Base":
     st.markdown("## Atualização Base")
     st.markdown("painel de controle unificado para extração de dados do IFData/BCB")
     st.markdown("---")
@@ -5967,6 +6006,7 @@ elif menu == "Atualização Base":
             "carteira_pf": "Carteira PF (Rel. 11) - TODAS as variáveis",
             "carteira_pj": "Carteira PJ (Rel. 13) - TODAS as variáveis",
             "carteira_instrumentos": "Carteira Instrumentos 4.966 (Rel. 16) - TODAS as variáveis",
+            "taxas_juros": "Taxas de Juros (API BCB) - TODOS produtos/instituições",
         }
 
         cache_selecionado = st.selectbox(
@@ -5982,6 +6022,9 @@ elif menu == "Atualização Base":
             st.info(f"Cache atual: {info_selecionado.get('total_periodos', 0)} períodos, {info_selecionado.get('total_registros', 0):,} registros")
         else:
             st.warning(f"Cache '{cache_selecionado}' não existe ainda")
+
+        # Flag para identificar se é extração de taxas de juros
+        is_taxas_juros = (cache_selecionado == "taxas_juros")
 
         # =============================================================
         # MODO DE ATUALIZAÇÃO
@@ -6004,31 +6047,70 @@ elif menu == "Atualização Base":
         # =============================================================
         st.markdown("#### 3. Selecione o período de extração")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            ano_i = st.selectbox("ano inicial", range(2015, 2029), index=8, key="ano_i_unificado")
-            mes_i = st.selectbox("trimestre inicial", ['03', '06', '09', '12'], key="mes_i_unificado")
-        with col2:
-            ano_f = st.selectbox("ano final", range(2015, 2029), index=10, key="ano_f_unificado")
-            mes_f = st.selectbox("trimestre final", ['03', '06', '09', '12'], index=2, key="mes_f_unificado")
+        # Taxas de Juros usa seleção de data (diário), demais usam trimestral
+        if is_taxas_juros:
+            st.caption("⚠️ Taxas de Juros: extração completa de TODOS os produtos e TODAS as instituições")
 
-        periodos_extrair = gerar_periodos_cache(ano_i, mes_i, ano_f, mes_f)
-        st.caption(f"Serão extraídos {len(periodos_extrair)} períodos: {periodos_extrair[0][4:6]}/{periodos_extrair[0][:4]} até {periodos_extrair[-1][4:6]}/{periodos_extrair[-1][:4]}")
+            col_data1, col_data2 = st.columns(2)
+
+            hoje = datetime.now()
+            data_minima_tj = hoje - timedelta(days=365*3)  # 3 anos de histórico
+
+            with col_data1:
+                data_inicio_tj = st.date_input(
+                    "Data inicial",
+                    value=hoje - timedelta(days=365),  # 1 ano atrás por padrão
+                    min_value=data_minima_tj.date(),
+                    max_value=hoje.date(),
+                    key="taxas_juros_data_inicio_extracao",
+                    format="DD/MM/YYYY"
+                )
+
+            with col_data2:
+                data_fim_tj = st.date_input(
+                    "Data final",
+                    value=hoje.date(),
+                    min_value=data_minima_tj.date(),
+                    max_value=hoje.date(),
+                    key="taxas_juros_data_fim_extracao",
+                    format="DD/MM/YYYY"
+                )
+
+            st.caption(f"Período selecionado: {data_inicio_tj.strftime('%d/%m/%Y')} até {data_fim_tj.strftime('%d/%m/%Y')}")
+            st.info("A extração inclui paginação completa ($skip/$top) para garantir que todos os dados sejam capturados sem truncamento.")
+
+            # Não precisa de periodos_extrair para taxas_juros
+            periodos_extrair = None
+
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                ano_i = st.selectbox("ano inicial", range(2015, 2029), index=8, key="ano_i_unificado")
+                mes_i = st.selectbox("trimestre inicial", ['03', '06', '09', '12'], key="mes_i_unificado")
+            with col2:
+                ano_f = st.selectbox("ano final", range(2015, 2029), index=10, key="ano_f_unificado")
+                mes_f = st.selectbox("trimestre final", ['03', '06', '09', '12'], index=2, key="mes_f_unificado")
+
+            periodos_extrair = gerar_periodos_cache(ano_i, mes_i, ano_f, mes_f)
+            st.caption(f"Serão extraídos {len(periodos_extrair)} períodos: {periodos_extrair[0][4:6]}/{periodos_extrair[0][:4]} até {periodos_extrair[-1][4:6]}/{periodos_extrair[-1][:4]}")
 
         # =============================================================
         # CONFIGURAÇÕES AVANÇADAS
         # =============================================================
-        with st.expander("configurações avançadas"):
-            intervalo_save = st.slider(
-                "salvar a cada N períodos",
-                min_value=1,
-                max_value=10,
-                value=4,
-                help="O cache será salvo parcialmente a cada N períodos extraídos para evitar perda de dados",
-                key="intervalo_save"
-            )
+        if not is_taxas_juros:
+            with st.expander("configurações avançadas"):
+                intervalo_save = st.slider(
+                    "salvar a cada N períodos",
+                    min_value=1,
+                    max_value=10,
+                    value=4,
+                    help="O cache será salvo parcialmente a cada N períodos extraídos para evitar perda de dados",
+                    key="intervalo_save"
+                )
 
-            st.caption("Nota: a extração usa Tipo de Instituição 1 (Conglomerados Prudenciais e Instituições Independentes)")
+                st.caption("Nota: a extração usa Tipo de Instituição 1 (Conglomerados Prudenciais e Instituições Independentes)")
+        else:
+            intervalo_save = 1  # Não usado para taxas de juros
 
         # =============================================================
         # CONFIGURAÇÃO DO TOKEN GITHUB (para publicação)
@@ -6063,7 +6145,10 @@ elif menu == "Atualização Base":
         # =============================================================
         st.markdown("#### 4. Executar extração")
 
-        if 'dict_aliases' in st.session_state:
+        # Para taxas de juros, não precisa de aliases; para outros, precisa
+        pode_extrair = is_taxas_juros or ('dict_aliases' in st.session_state)
+
+        if pode_extrair:
 
             if st.button(f"Extrair dados de {opcoes_cache[cache_selecionado]}", type="primary", use_container_width=True, key="btn_extrair_unificado"):
 
@@ -6071,131 +6156,223 @@ elif menu == "Atualização Base":
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 save_status = st.empty()
+                log_container = st.container()
                 error_container = st.container()
                 erros_encontrados = []
+                logs_extracao = []
 
-                def callback_progresso(i, total, periodo):
-                    progress_bar.progress((i + 1) / total)
-                    status_text.text(f"extraindo {periodo[4:6]}/{periodo[:4]} ({i + 1}/{total})")
+                # =============================================================
+                # EXTRAÇÃO ESPECIAL PARA TAXAS DE JUROS
+                # =============================================================
+                if is_taxas_juros:
+                    from utils.ifdata_cache import TaxasJurosCache
 
-                def callback_salvamento(info):
-                    save_status.text(f"salvando... {info}")
+                    def callback_progresso_tj(progress, message):
+                        progress_bar.progress(min(progress, 1.0))
+                        status_text.text(message)
 
-                def callback_erro(periodo, mensagem):
-                    erros_encontrados.append(f"{periodo[4:6]}/{periodo[:4]}: {mensagem}")
-                    with error_container:
-                        st.warning(f"Erro em {periodo[4:6]}/{periodo[:4]}: {mensagem[:100]}...")
+                    def callback_log_tj(message):
+                        logs_extracao.append(message)
+                        with log_container:
+                            st.caption(f"📝 {message}")
 
-                st.info(f"iniciando extração de {len(periodos_extrair)} períodos para '{cache_selecionado}'. Salvamento a cada {intervalo_save} períodos.")
+                    st.info(f"Iniciando extração de Taxas de Juros de {data_inicio_tj.strftime('%d/%m/%Y')} até {data_fim_tj.strftime('%d/%m/%Y')}")
 
-                try:
-                    # Usar o gerenciador unificado para extração
-                    resultado = cache_manager.extrair_periodos_com_salvamento(
-                        tipo=cache_selecionado,
-                        periodos=periodos_extrair,
-                        modo=modo_atualizacao,
-                        intervalo_salvamento=intervalo_save,
-                        callback_progresso=callback_progresso,
-                        callback_salvamento=callback_salvamento,
-                        callback_erro=callback_erro,
-                        dict_aliases=st.session_state.get('dict_aliases', {})
-                    )
+                    try:
+                        # Obter o cache de taxas de juros
+                        cache_taxas = cache_manager.get_cache("taxas_juros")
 
-                    # Limpar UI de progresso
-                    progress_bar.empty()
-                    status_text.empty()
-                    save_status.empty()
+                        if cache_taxas is None:
+                            st.error("Cache de Taxas de Juros não configurado corretamente")
+                        else:
+                            # Executar extração completa com paginação
+                            resultado = cache_taxas.extrair_completo(
+                                data_inicio=data_inicio_tj.strftime('%Y-%m-%d'),
+                                data_fim=data_fim_tj.strftime('%Y-%m-%d'),
+                                progress_callback=callback_progresso_tj,
+                                log_callback=callback_log_tj
+                            )
 
-                    if resultado.sucesso:
-                        st.success(f"Extração concluída: {resultado.mensagem}")
+                            # Limpar UI de progresso
+                            progress_bar.empty()
+                            status_text.empty()
 
-                        # Mostrar estatísticas
-                        metadata = resultado.metadata or {}
-                        col_stat1, col_stat2, col_stat3 = st.columns(3)
-                        with col_stat1:
-                            st.metric("Períodos extraídos", f"{metadata.get('periodos_extraidos', 0)}/{metadata.get('periodos_total', 0)}")
-                        with col_stat2:
-                            st.metric("Registros totais", f"{metadata.get('total_registros', 0):,}")
-                        with col_stat3:
-                            st.metric("Modo", metadata.get('modo', 'N/A'))
+                            if resultado.sucesso:
+                                # Salvar cache
+                                save_status.text("Salvando cache...")
 
-                        # Mostrar erros se houver
-                        if metadata.get('erros'):
-                            with st.expander(f"erros encontrados ({len(metadata['erros'])})", expanded=False):
-                                for erro in metadata['erros']:
-                                    st.caption(f"- {erro}")
+                                # Se modo overwrite, limpar antes
+                                if modo_atualizacao == "overwrite":
+                                    cache_taxas.limpar_local()
 
-                        # =============================================================
-                        # DOWNLOAD IMEDIATO DO CACHE
-                        # =============================================================
-                        st.markdown("---")
-                        st.markdown("#### Download do cache")
-                        st.caption("Faça download imediato do cache para backup caso a publicação no GitHub falhe")
+                                # Salvar os dados
+                                save_result = cache_taxas.salvar_local(resultado.dados, resultado.metadata)
 
-                        col_dl1, col_dl2 = st.columns(2)
+                                save_status.empty()
 
-                        with col_dl1:
-                            # Download com fallback (parquet/csv/pickle)
-                            download_payload = cache_manager.get_dados_para_download(cache_selecionado)
-                            if download_payload:
-                                st.download_button(
-                                    label=f"Download ({download_payload['label']})",
-                                    data=download_payload["data"],
-                                    file_name=f"{cache_selecionado}_cache{download_payload['ext']}",
-                                    mime=download_payload["mime"],
-                                    key="download_parquet"
-                                )
-                                if download_payload["label"].lower() != "parquet":
-                                    st.caption("fallback usado por indisponibilidade do parquet")
+                                if save_result.sucesso:
+                                    st.success(f"✅ Extração e salvamento concluídos: {resultado.mensagem}")
 
-                        with col_dl2:
-                            # Download CSV
-                            dados_csv = cache_manager.get_dados_para_download_csv(cache_selecionado)
-                            if dados_csv:
-                                st.download_button(
-                                    label="Download (CSV)",
-                                    data=dados_csv,
-                                    file_name=f"{cache_selecionado}_cache.csv",
-                                    mime="text/csv",
-                                    key="download_csv"
-                                )
+                                    # Mostrar estatísticas
+                                    meta = resultado.metadata or {}
+                                    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                                    with col_stat1:
+                                        st.metric("Total de linhas", f"{meta.get('total_registros', 0):,}")
+                                    with col_stat2:
+                                        st.metric("Produtos", meta.get('produtos_unicos', 0))
+                                    with col_stat3:
+                                        st.metric("Instituições", meta.get('instituicoes_unicas', 0))
+                                    with col_stat4:
+                                        st.metric("Períodos (datas)", meta.get('periodos_unicos', 0))
 
-                        # Atualizar session_state para caches principais
-                        if cache_selecionado == "principal" and resultado.dados is not None:
-                            # Converter para formato antigo se necessário
-                            from utils.ifdata_cache import PrincipalCache
-                            pc = PrincipalCache(cache_manager.base_dir)
-                            dados_dict = pc.carregar_formato_antigo()
-                            if dados_dict:
-                                if 'dados_periodos' in st.session_state and st.session_state['dados_periodos'] and modo_atualizacao == "incremental":
-                                    st.session_state['dados_periodos'].update(dados_dict)
+                                    # Verificar truncamento
+                                    if meta.get('truncado'):
+                                        st.warning("⚠️ AVISO: Possível truncamento detectado! Verifique se todos os dados foram extraídos.")
+                                    else:
+                                        st.success("✅ Extração completa sem truncamento")
+
+                                    # Mostrar logs em expander
+                                    with st.expander("📋 Log de extração", expanded=False):
+                                        for log_line in logs_extracao:
+                                            st.text(log_line)
                                 else:
-                                    st.session_state['dados_periodos'] = dados_dict
-                                st.session_state['cache_fonte'] = 'extração local'
+                                    st.error(f"Erro ao salvar cache: {save_result.mensagem}")
+                            else:
+                                st.error(f"Erro na extração: {resultado.mensagem}")
 
-                        elif cache_selecionado == "capital" and resultado.dados is not None:
-                            from utils.ifdata_cache import CapitalCache
-                            cc = CapitalCache(cache_manager.base_dir)
-                            dados_dict = cc.carregar_formato_antigo()
-                            if dados_dict:
-                                st.session_state['dados_capital'] = dados_dict
-
-                    else:
-                        st.error(f"Extração falhou: {resultado.mensagem}")
-                        if resultado.metadata and resultado.metadata.get('erros'):
-                            with st.expander("detalhes dos erros"):
-                                for erro in resultado.metadata['erros']:
-                                    st.caption(f"- {erro}")
-
-                except Exception as e:
-                    progress_bar.empty()
-                    status_text.empty()
-                    save_status.empty()
-                    st.error(f"Erro durante extração: {str(e)}")
-
-                    import traceback
-                    with st.expander("traceback completo"):
+                    except Exception as e:
+                        progress_bar.empty()
+                        status_text.empty()
+                        st.error(f"Erro durante extração: {e}")
+                        import traceback
                         st.code(traceback.format_exc())
+
+                # =============================================================
+                # EXTRAÇÃO PADRÃO PARA OUTROS CACHES
+                # =============================================================
+                else:
+                    def callback_progresso(i, total, periodo):
+                        progress_bar.progress((i + 1) / total)
+                        status_text.text(f"extraindo {periodo[4:6]}/{periodo[:4]} ({i + 1}/{total})")
+
+                    def callback_salvamento(info):
+                        save_status.text(f"salvando... {info}")
+
+                    def callback_erro(periodo, mensagem):
+                        erros_encontrados.append(f"{periodo[4:6]}/{periodo[:4]}: {mensagem}")
+                        with error_container:
+                            st.warning(f"Erro em {periodo[4:6]}/{periodo[:4]}: {mensagem[:100]}...")
+
+                    st.info(f"iniciando extração de {len(periodos_extrair)} períodos para '{cache_selecionado}'. Salvamento a cada {intervalo_save} períodos.")
+
+                    try:
+                        # Usar o gerenciador unificado para extração
+                        resultado = cache_manager.extrair_periodos_com_salvamento(
+                            tipo=cache_selecionado,
+                            periodos=periodos_extrair,
+                            modo=modo_atualizacao,
+                            intervalo_salvamento=intervalo_save,
+                            callback_progresso=callback_progresso,
+                            callback_salvamento=callback_salvamento,
+                            callback_erro=callback_erro,
+                            dict_aliases=st.session_state.get('dict_aliases', {})
+                        )
+
+                        # Limpar UI de progresso
+                        progress_bar.empty()
+                        status_text.empty()
+                        save_status.empty()
+
+                        if resultado.sucesso:
+                            st.success(f"Extração concluída: {resultado.mensagem}")
+
+                            # Mostrar estatísticas
+                            metadata = resultado.metadata or {}
+                            col_stat1, col_stat2, col_stat3 = st.columns(3)
+                            with col_stat1:
+                                st.metric("Períodos extraídos", f"{metadata.get('periodos_extraidos', 0)}/{metadata.get('periodos_total', 0)}")
+                            with col_stat2:
+                                st.metric("Registros totais", f"{metadata.get('total_registros', 0):,}")
+                            with col_stat3:
+                                st.metric("Modo", metadata.get('modo', 'N/A'))
+
+                            # Mostrar erros se houver
+                            if metadata.get('erros'):
+                                with st.expander(f"erros encontrados ({len(metadata['erros'])})", expanded=False):
+                                    for erro in metadata['erros']:
+                                        st.caption(f"- {erro}")
+
+                            # =============================================================
+                            # DOWNLOAD IMEDIATO DO CACHE
+                            # =============================================================
+                            st.markdown("---")
+                            st.markdown("#### Download do cache")
+                            st.caption("Faça download imediato do cache para backup caso a publicação no GitHub falhe")
+
+                            col_dl1, col_dl2 = st.columns(2)
+
+                            with col_dl1:
+                                # Download com fallback (parquet/csv/pickle)
+                                download_payload = cache_manager.get_dados_para_download(cache_selecionado)
+                                if download_payload:
+                                    st.download_button(
+                                        label=f"Download ({download_payload['label']})",
+                                        data=download_payload["data"],
+                                        file_name=f"{cache_selecionado}_cache{download_payload['ext']}",
+                                        mime=download_payload["mime"],
+                                        key="download_parquet"
+                                    )
+                                    if download_payload["label"].lower() != "parquet":
+                                        st.caption("fallback usado por indisponibilidade do parquet")
+
+                            with col_dl2:
+                                # Download CSV
+                                dados_csv = cache_manager.get_dados_para_download_csv(cache_selecionado)
+                                if dados_csv:
+                                    st.download_button(
+                                        label="Download (CSV)",
+                                        data=dados_csv,
+                                        file_name=f"{cache_selecionado}_cache.csv",
+                                        mime="text/csv",
+                                        key="download_csv"
+                                    )
+
+                            # Atualizar session_state para caches principais
+                            if cache_selecionado == "principal" and resultado.dados is not None:
+                                # Converter para formato antigo se necessário
+                                from utils.ifdata_cache import PrincipalCache
+                                pc = PrincipalCache(cache_manager.base_dir)
+                                dados_dict = pc.carregar_formato_antigo()
+                                if dados_dict:
+                                    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos'] and modo_atualizacao == "incremental":
+                                        st.session_state['dados_periodos'].update(dados_dict)
+                                    else:
+                                        st.session_state['dados_periodos'] = dados_dict
+                                    st.session_state['cache_fonte'] = 'extração local'
+
+                            elif cache_selecionado == "capital" and resultado.dados is not None:
+                                from utils.ifdata_cache import CapitalCache
+                                cc = CapitalCache(cache_manager.base_dir)
+                                dados_dict = cc.carregar_formato_antigo()
+                                if dados_dict:
+                                    st.session_state['dados_capital'] = dados_dict
+
+                        else:
+                            st.error(f"Extração falhou: {resultado.mensagem}")
+                            if resultado.metadata and resultado.metadata.get('erros'):
+                                with st.expander("detalhes dos erros"):
+                                    for erro in resultado.metadata['erros']:
+                                        st.caption(f"- {erro}")
+
+                    except Exception as e:
+                        progress_bar.empty()
+                        status_text.empty()
+                        save_status.empty()
+                        st.error(f"Erro durante extração: {str(e)}")
+
+                        import traceback
+                        with st.expander("traceback completo"):
+                            st.code(traceback.format_exc())
 
         else:
             st.warning("carregue os aliases primeiro (verifique a conexão com Google Sheets)")
