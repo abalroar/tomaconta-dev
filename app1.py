@@ -2356,30 +2356,8 @@ elif menu == "Painel":
                 df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
 
             bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
-
-            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                aliases_set = set(st.session_state['dict_aliases'].values())
-
-                bancos_com_alias = []
-                bancos_sem_alias = []
-
-                for banco in bancos_todos:
-                    if banco in aliases_set:
-                        bancos_com_alias.append(banco)
-                    else:
-                        bancos_sem_alias.append(banco)
-
-                def sort_key(nome):
-                    primeiro_char = nome[0].lower() if nome else 'z'
-                    if primeiro_char.isdigit():
-                        return (1, nome.lower())
-                    return (0, nome.lower())
-
-                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-                bancos_todos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-            else:
-                bancos_todos = sorted(bancos_todos)
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_todos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
             indicador_col = indicadores_disponiveis[indicador_label]
             coluna_selecao = indicador_col
@@ -2908,31 +2886,8 @@ elif menu == "Capital Regulatório":
                     df_periodo_cap = df_periodo_cap[df_periodo_cap['Instituição'].isin(bancos_do_peer_cap)]
 
                 bancos_todos_cap = df_periodo_cap['Instituição'].dropna().unique().tolist()
-
-                # Ordenar bancos: aliases primeiro, depois por nome
-                if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                    aliases_set = set(st.session_state['dict_aliases'].values())
-
-                    bancos_com_alias = []
-                    bancos_sem_alias = []
-
-                    for banco in bancos_todos_cap:
-                        if banco in aliases_set:
-                            bancos_com_alias.append(banco)
-                        else:
-                            bancos_sem_alias.append(banco)
-
-                    def sort_key_cap(nome):
-                        primeiro_char = nome[0].lower() if nome else 'z'
-                        if primeiro_char.isdigit():
-                            return (1, nome.lower())
-                        return (0, nome.lower())
-
-                    bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key_cap)
-                    bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key_cap)
-                    bancos_todos_cap = bancos_com_alias_sorted + bancos_sem_alias_sorted
-                else:
-                    bancos_todos_cap = sorted(bancos_todos_cap)
+                dict_aliases = st.session_state.get('dict_aliases', {})
+                bancos_todos_cap = ordenar_bancos_com_alias(bancos_todos_cap, dict_aliases)
 
                 # Definir bancos default
                 bancos_default_cap = bancos_do_peer_cap[:10] if bancos_do_peer_cap else []
@@ -3222,33 +3177,8 @@ elif menu == "Histórico Individual":
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
-                aliases_set = set(st.session_state['dict_aliases'].values())
-
-                bancos_com_alias = []
-                bancos_sem_alias = []
-
-                for banco in bancos_todos:
-                    # Verifica se o banco é um alias (está nos valores do dicionário)
-                    if banco in aliases_set:
-                        bancos_com_alias.append(banco)
-                    else:
-                        bancos_sem_alias.append(banco)
-
-                # Ordenação: letras antes de números, case-insensitive
-                def sort_key(nome):
-                    primeiro_char = nome[0].lower() if nome else 'z'
-                    if primeiro_char.isdigit():
-                        return (1, nome.lower())
-                    return (0, nome.lower())
-
-                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-                bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
-            else:
-                bancos_disponiveis = sorted(bancos_todos)
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_disponiveis = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
             if len(bancos_disponiveis) > 0:
                 banco_selecionado = st.selectbox("selecione uma instituição", bancos_disponiveis, key="banco_individual")
@@ -3376,33 +3306,8 @@ elif menu == "Histórico Peers":
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
-                aliases_set = set(st.session_state['dict_aliases'].values())
-
-                bancos_com_alias = []
-                bancos_sem_alias = []
-
-                for banco in bancos_todos:
-                    # Verifica se o banco é um alias (está nos valores do dicionário)
-                    if banco in aliases_set:
-                        bancos_com_alias.append(banco)
-                    else:
-                        bancos_sem_alias.append(banco)
-
-                # Ordenação: letras antes de números, case-insensitive
-                def sort_key(nome):
-                    primeiro_char = nome[0].lower() if nome else 'z'
-                    if primeiro_char.isdigit():
-                        return (1, nome.lower())
-                    return (0, nome.lower())
-
-                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-                bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
-            else:
-                bancos_disponiveis = sorted(bancos_todos)
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_disponiveis = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
             if len(bancos_disponiveis) > 0:
                 col_select, col_vars, col_periodo = st.columns([2, 2, 2])
@@ -3621,35 +3526,10 @@ elif menu == "Scatter Plot":
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos = ordenar_periodos(df['Período'].unique(), reverso=True)
 
-        # Lista de todos os bancos disponíveis com a mesma ordenação de "Análise Individual"
+        # Lista de todos os bancos disponíveis com ordenação por alias
         bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-            # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
-            aliases_set = set(st.session_state['dict_aliases'].values())
-
-            bancos_com_alias = []
-            bancos_sem_alias = []
-
-            for banco in bancos_todos:
-                # Verifica se o banco é um alias (está nos valores do dicionário)
-                if banco in aliases_set:
-                    bancos_com_alias.append(banco)
-                else:
-                    bancos_sem_alias.append(banco)
-
-            # Ordenação: letras antes de números, case-insensitive
-            def sort_key(nome):
-                primeiro_char = nome[0].lower() if nome else 'z'
-                if primeiro_char.isdigit():
-                    return (1, nome.lower())
-                return (0, nome.lower())
-
-            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-        else:
-            todos_bancos = sorted(bancos_todos)
+        dict_aliases = st.session_state.get('dict_aliases', {})
+        todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         # Primeira linha: variáveis dos eixos e tamanho
         col1, col2, col3, col4 = st.columns(4)
@@ -4051,31 +3931,10 @@ elif menu == "Deltas (Antes e Depois)":
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
-        # Lista de todos os bancos disponíveis
+        # Lista de todos os bancos disponíveis com ordenação por alias
         bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-            aliases_set = set(st.session_state['dict_aliases'].values())
-            bancos_com_alias = []
-            bancos_sem_alias = []
-
-            for banco in bancos_todos:
-                if banco in aliases_set:
-                    bancos_com_alias.append(banco)
-                else:
-                    bancos_sem_alias.append(banco)
-
-            def sort_key(nome):
-                primeiro_char = nome[0].lower() if nome else 'z'
-                if primeiro_char.isdigit():
-                    return (1, nome.lower())
-                return (0, nome.lower())
-
-            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-        else:
-            todos_bancos = sorted(bancos_todos)
+        dict_aliases = st.session_state.get('dict_aliases', {})
+        todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         # ===== LINHA 1: Seleção de variáveis =====
         st.markdown("**variáveis para análise de deltas**")
@@ -4968,25 +4827,8 @@ elif menu == "Taxas de Juros":
     st.markdown("##### Instituições Financeiras (Peers)")
 
     # Ordenar instituições: com alias primeiro, depois sem alias
-    instituicoes_ordenadas = instituicoes_disponiveis.copy()
-    if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-        # Criar mapeamento reverso de alias -> nome original
-        aliases_reverso = {v: k for k, v in st.session_state['dict_aliases'].items()}
-        aliases_set = set(st.session_state['dict_aliases'].values())
-
-        # Separar instituições com e sem correspondência de alias
-        inst_com_alias = []
-        inst_sem_alias = []
-
-        for inst in instituicoes_disponiveis:
-            # Verificar se o nome da instituição tem correspondência no sistema de aliases
-            # (pode não ser exatamente igual, mas tentamos aproximar)
-            if inst in aliases_set or inst in st.session_state['dict_aliases']:
-                inst_com_alias.append(inst)
-            else:
-                inst_sem_alias.append(inst)
-
-        instituicoes_ordenadas = sorted(inst_com_alias) + sorted(inst_sem_alias)
+    dict_aliases = st.session_state.get('dict_aliases', {})
+    instituicoes_ordenadas = ordenar_bancos_com_alias(instituicoes_disponiveis, dict_aliases)
 
     instituicoes_selecionadas = st.multiselect(
         "Selecione as instituições para comparar",
@@ -5191,31 +5033,10 @@ elif menu == "Crie sua métrica!":
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
-        # Lista de todos os bancos disponíveis
+        # Lista de todos os bancos disponíveis com ordenação por alias
         bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-            aliases_set = set(st.session_state['dict_aliases'].values())
-            bancos_com_alias = []
-            bancos_sem_alias = []
-
-            for banco in bancos_todos:
-                if banco in aliases_set:
-                    bancos_com_alias.append(banco)
-                else:
-                    bancos_sem_alias.append(banco)
-
-            def sort_key_brincar(nome):
-                primeiro_char = nome[0].lower() if nome else 'z'
-                if primeiro_char.isdigit():
-                    return (1, nome.lower())
-                return (0, nome.lower())
-
-            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key_brincar)
-            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key_brincar)
-            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-        else:
-            todos_bancos = sorted(bancos_todos)
+        dict_aliases = st.session_state.get('dict_aliases', {})
+        todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         st.markdown("### construtor de métricas derivadas")
         st.caption("monte uma métrica personalizada combinando variáveis com operações matemáticas")
