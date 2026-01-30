@@ -1720,9 +1720,6 @@ with col_header:
         </div>
     """, unsafe_allow_html=True)
 
-# Menu principal de análise
-st.markdown('<div class="header-nav">', unsafe_allow_html=True)
-
 # Lista de opções do menu principal (análise)
 MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
 
@@ -1743,12 +1740,16 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
     else:
         st.session_state['menu_atual'] = "Sobre"
 
-# Determinar qual menu está ativo e qual item está selecionado
+# Inicializar estado anterior dos menus para detectar mudanças
+if '_menu_principal_anterior' not in st.session_state:
+    st.session_state['_menu_principal_anterior'] = None
+if '_menu_secundario_anterior' not in st.session_state:
+    st.session_state['_menu_secundario_anterior'] = None
+
 menu_atual = st.session_state['menu_atual']
-idx_principal = MENU_PRINCIPAL.index(menu_atual) if menu_atual in MENU_PRINCIPAL else None
-idx_secundario = MENU_SECUNDARIO.index(menu_atual) if menu_atual in MENU_SECUNDARIO else None
 
 # Menu principal (análise)
+st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu_principal = st.segmented_control(
     "navegação principal",
     MENU_PRINCIPAL,
@@ -1756,7 +1757,6 @@ menu_principal = st.segmented_control(
     label_visibility="collapsed",
     key="menu_principal"
 )
-
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Menu secundário (utilitários) - mesmo estilo, logo abaixo
@@ -1770,20 +1770,33 @@ menu_secundario = st.segmented_control(
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Determinar o menu selecionado (prioriza a seleção mais recente)
-menu = None
-if menu_principal is not None:
+# Detectar qual menu mudou comparando com o estado anterior
+menu_principal_mudou = (menu_principal is not None and
+                        menu_principal != st.session_state['_menu_principal_anterior'])
+menu_secundario_mudou = (menu_secundario is not None and
+                         menu_secundario != st.session_state['_menu_secundario_anterior'])
+
+# Atualizar estado anterior
+st.session_state['_menu_principal_anterior'] = menu_principal
+st.session_state['_menu_secundario_anterior'] = menu_secundario
+
+# Determinar o menu selecionado baseado em qual mudou
+menu = menu_atual  # Default: manter o atual
+
+if menu_principal_mudou and menu_principal is not None:
+    # Menu principal foi clicado
     menu = menu_principal
     if menu != st.session_state['menu_atual']:
         st.session_state['menu_atual'] = menu
+        st.session_state['_menu_secundario_anterior'] = None  # Reset secundário
         st.rerun()
-elif menu_secundario is not None:
+elif menu_secundario_mudou and menu_secundario is not None:
+    # Menu secundário foi clicado
     menu = menu_secundario
     if menu != st.session_state['menu_atual']:
         st.session_state['menu_atual'] = menu
+        st.session_state['_menu_principal_anterior'] = None  # Reset principal
         st.rerun()
-else:
-    menu = st.session_state['menu_atual']
 
 st.markdown("---")
 
