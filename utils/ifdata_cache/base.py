@@ -103,10 +103,9 @@ class BaseCache(ABC):
 
     def existe(self) -> bool:
         """Verifica se cache local existe (parquet ou pickle)."""
-        tem_metadata = self.arquivo_metadata.exists()
         tem_parquet = self.arquivo_dados.exists()
         tem_pickle = self.arquivo_dados_pickle.exists()
-        return tem_metadata and (tem_parquet or tem_pickle)
+        return tem_parquet or tem_pickle
 
     def carregar_local(self) -> CacheResult:
         """Carrega dados do cache local (suporta parquet e pickle)."""
@@ -146,9 +145,41 @@ class BaseCache(ABC):
                     fonte="nenhum"
                 )
 
-            # Carregar metadata
-            with open(self.arquivo_metadata, "r") as f:
-                metadata = json.load(f)
+            # Carregar metadata (ou gerar se estiver ausente)
+            if self.arquivo_metadata.exists():
+                with open(self.arquivo_metadata, "r") as f:
+                    metadata = json.load(f)
+            else:
+                metadata = {
+                    "timestamp_salvamento": datetime.fromtimestamp(
+                        self.arquivo_dados.stat().st_mtime
+                        if self.arquivo_dados.exists()
+                        else self.arquivo_dados_pickle.stat().st_mtime
+                    ).isoformat(),
+                    "fonte": "cache_local",
+                    "total_registros": len(df),
+                    "colunas": list(df.columns),
+                    "formato": formato,
+                }
+
+                col_periodo = None
+                if "Período" in df.columns:
+                    col_periodo = "Período"
+                elif "Periodo" in df.columns:
+                    col_periodo = "Periodo"
+
+                if col_periodo:
+                    periodos = sorted(df[col_periodo].unique().tolist())
+                    metadata["periodos"] = [str(p) for p in periodos]
+                    metadata["total_periodos"] = len(periodos)
+
+                self._log("warning", "Metadata ausente; gerada automaticamente")
+                try:
+                    self._garantir_diretorio()
+                    with open(self.arquivo_metadata, "w") as f:
+                        json.dump(metadata, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    self._log("warning", f"Falha ao gravar metadata gerada: {e}")
 
             # Validar dados
             valido, msg = self._validar_dados(df)
@@ -374,9 +405,17 @@ class BaseCache(ABC):
         if dados.empty:
             return False, "DataFrame vazio"
 
-        # Verificar colunas obrigatorias
+        # Verificar colunas obrigatorias (aceita variantes comuns)
+        colunas_disponiveis = set(dados.columns)
+        equivalentes = {
+            "Período": "Periodo",
+            "Periodo": "Período",
+        }
         for col in self.config.colunas_obrigatorias:
-            if col not in dados.columns:
+            if col not in colunas_disponiveis:
+                equivalente = equivalentes.get(col)
+                if equivalente and equivalente in colunas_disponiveis:
+                    continue
                 return False, f"Coluna obrigatoria ausente: {col}"
 
         return True, "OK"
