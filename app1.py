@@ -1074,15 +1074,30 @@ def verificar_caches_github() -> dict:
     """Verifica quais caches existem no GitHub Releases.
 
     Retorna dict com status de cada cache no GitHub (sem autenticação, apenas leitura pública).
+    Verifica todos os 8 tipos de cache disponíveis.
     """
     repo = os.getenv("TOMACONTA_RELEASE_REPO", "abalroar/tomaconta")
     tag = "v1.0-cache"
+
+    # Todos os tipos de cache
+    tipos_cache = ['principal', 'capital', 'ativo', 'passivo', 'dre',
+                   'carteira_pf', 'carteira_pj', 'carteira_instrumentos']
+
     result = {
         'release_existe': False,
-        'cache_principal': {'existe': False, 'tamanho': 0, 'tamanho_fmt': 'N/A'},
-        'cache_capital': {'existe': False, 'tamanho': 0, 'tamanho_fmt': 'N/A'},
-        'erro': None
+        'repo': repo,
+        'tag': tag,
+        'erro': None,
+        'caches': {}
     }
+
+    # Inicializar todos os caches como não existentes
+    for tipo in tipos_cache:
+        result['caches'][tipo] = {'existe': False, 'tamanho': 0, 'tamanho_fmt': 'N/A'}
+
+    # Manter compatibilidade com código antigo
+    result['cache_principal'] = result['caches']['principal']
+    result['cache_capital'] = result['caches']['capital']
 
     try:
         release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
@@ -1101,11 +1116,22 @@ def verificar_caches_github() -> dict:
         for asset in release_data.get('assets', []):
             size = asset.get('size', 0)
             size_fmt = f"{size / 1024 / 1024:.1f} MB" if size > 1024*1024 else f"{size / 1024:.1f} KB"
+            nome_asset = asset.get('name', '')
 
-            if asset['name'].startswith('principal_dados'):
-                result['cache_principal'] = {'existe': True, 'tamanho': size, 'tamanho_fmt': size_fmt}
-            elif asset['name'].startswith('capital_dados'):
-                result['cache_capital'] = {'existe': True, 'tamanho': size, 'tamanho_fmt': size_fmt}
+            # Identificar tipo de cache pelo nome do asset
+            for tipo in tipos_cache:
+                if nome_asset.startswith(f'{tipo}_dados'):
+                    result['caches'][tipo] = {
+                        'existe': True,
+                        'tamanho': size,
+                        'tamanho_fmt': size_fmt,
+                        'nome_asset': nome_asset
+                    }
+                    break
+
+        # Atualizar referências de compatibilidade
+        result['cache_principal'] = result['caches']['principal']
+        result['cache_capital'] = result['caches']['capital']
 
     except requests.exceptions.Timeout:
         result['erro'] = "Timeout ao verificar GitHub"
@@ -5268,9 +5294,12 @@ elif menu == "Atualização Base":
         st.error("aliases não encontrados")
 
     # =============================================================
-    # STATUS DE TODOS OS CACHES
+    # STATUS DE TODOS OS CACHES (LOCAL + GITHUB)
     # =============================================================
     st.markdown("### Status dos Caches")
+
+    # Verificar status no GitHub Releases
+    github_status = verificar_caches_github()
 
     with st.expander("ver status de todos os caches", expanded=True):
         caches_disponiveis = cache_manager.listar_caches()
@@ -5282,17 +5311,64 @@ elif menu == "Atualização Base":
             info = cache_manager.info(tipo_cache)
             cache_info = caches_info.get(tipo_cache, {})
 
+            # Determinar fonte do cache
+            fonte_cache = "-"
+            if info.get("existe", False):
+                fonte_metadata = info.get("fonte", "")
+                if "github" in str(fonte_metadata).lower():
+                    fonte_cache = "☁️ GitHub"
+                elif fonte_metadata:
+                    fonte_cache = "💾 Local"
+                else:
+                    fonte_cache = "💾 Local"
+
             status_data.append({
                 "Cache": cache_info.get("nome_exibicao", tipo_cache),
                 "Relatório": cache_info.get("relatorio", "?"),
-                "Existe": "Sim" if info.get("existe", False) else "Não",
+                "Existe Local": "✅" if info.get("existe", False) else "❌",
+                "Fonte": fonte_cache,
                 "Períodos": info.get("total_periodos", 0) if info.get("existe") else "-",
                 "Registros": info.get("total_registros", 0) if info.get("existe") else "-",
-                "Tipo": "Todas vars." if cache_info.get("todas_variaveis") else "Vars. selecionadas",
+                "Tipo": "Todas vars." if cache_info.get("todas_variaveis") else "Selecionadas",
             })
 
         df_status = pd.DataFrame(status_data)
         st.dataframe(df_status, use_container_width=True, hide_index=True)
+
+        # Mostrar status do GitHub Releases
+        st.markdown("---")
+        st.markdown(f"**Status no GitHub Releases ({github_status.get('tag', 'v1.0-cache')}):**")
+        st.caption(f"Repositório: `{github_status.get('repo', 'N/A')}`")
+
+        if github_status.get('release_existe'):
+            # Criar tabela de status do GitHub
+            gh_data = []
+            nomes_exibicao = {
+                'principal': 'Resumo', 'capital': 'Capital', 'ativo': 'Ativo',
+                'passivo': 'Passivo', 'dre': 'DRE', 'carteira_pf': 'Carteira PF',
+                'carteira_pj': 'Carteira PJ', 'carteira_instrumentos': 'Instrumentos'
+            }
+            for tipo, info in github_status.get('caches', {}).items():
+                gh_data.append({
+                    "Cache": nomes_exibicao.get(tipo, tipo),
+                    "GitHub": "☁️ Sim" if info.get('existe') else "❌ Não",
+                    "Tamanho": info.get('tamanho_fmt', '-') if info.get('existe') else '-'
+                })
+
+            df_gh = pd.DataFrame(gh_data)
+            st.dataframe(df_gh, use_container_width=True, hide_index=True)
+
+            # Resumo rápido
+            total_no_github = sum(1 for c in github_status.get('caches', {}).values() if c.get('existe'))
+            total_caches = len(github_status.get('caches', {}))
+            if total_no_github == total_caches:
+                st.success(f"✅ Todos os {total_caches} caches estão publicados no GitHub")
+            elif total_no_github > 0:
+                st.info(f"📊 {total_no_github}/{total_caches} caches publicados no GitHub")
+            else:
+                st.warning("⚠️ Nenhum cache publicado no GitHub ainda")
+        else:
+            st.error(f"GitHub Release não acessível: {github_status.get('erro', 'erro desconhecido')}")
 
     st.markdown("---")
     st.markdown("### Extração de Dados (Admin)")
@@ -5380,22 +5456,39 @@ elif menu == "Atualização Base":
             st.caption("Nota: a extração usa Tipo de Instituição 1 (Conglomerados Prudenciais e Instituições Independentes)")
 
         # =============================================================
+        # CONFIGURAÇÃO DO TOKEN GITHUB (para publicação)
+        # =============================================================
+        st.markdown("#### Token GitHub (para publicação)")
+
+        # Verificar se há token nos secrets do Streamlit
+        token_from_secrets = None
+        try:
+            token_from_secrets = st.secrets.get("GITHUB_TOKEN")
+        except Exception:
+            pass
+
+        if token_from_secrets:
+            st.success("✅ Token GitHub configurado via Streamlit Secrets")
+            gh_token_final = token_from_secrets
+        else:
+            st.info("💡 Configure `GITHUB_TOKEN` nos Secrets do Streamlit Cloud para upload automático")
+            gh_token_manual = st.text_input(
+                "ou insira token manualmente (permissão 'repo')",
+                type="password",
+                key="gh_token_unificado",
+                help="Token com permissão 'repo'. Configure nos Secrets para não precisar digitar."
+            )
+            gh_token_final = gh_token_manual if gh_token_manual else None
+
+        # Armazenar no session_state para usar em outras partes
+        st.session_state['_gh_token_unificado'] = gh_token_final
+
+        # =============================================================
         # BOTÃO DE EXTRAÇÃO
         # =============================================================
         st.markdown("#### 4. Executar extração")
 
         if 'dict_aliases' in st.session_state:
-
-            # Informação sobre token do GitHub (apenas para publicação posterior)
-            with st.expander("informações sobre GitHub token"):
-                st.caption("O token do GitHub NÃO é necessário para extração de dados.")
-                st.caption("Ele será necessário apenas se você quiser publicar o cache no GitHub Releases.")
-                gh_token = st.text_input(
-                    "github token (opcional, para publicação)",
-                    type="password",
-                    key="gh_token_unificado",
-                    help="Token com permissão 'repo'. Necessário apenas para publicar no GitHub."
-                )
 
             if st.button(f"Extrair dados de {opcoes_cache[cache_selecionado]}", type="primary", use_container_width=True, key="btn_extrair_unificado"):
 
@@ -5537,19 +5630,30 @@ elif menu == "Atualização Base":
         # =============================================================
         st.markdown("---")
         st.markdown("### Publicar cache no GitHub")
-        st.caption("Envia o cache local para GitHub Releases para uso permanente")
+        st.caption("Envia o cache local para GitHub Releases (tag v1.0-cache) para uso permanente")
 
-        if st.button("enviar cache para github", use_container_width=True, key="btn_enviar_github_unificado"):
-            with st.spinner("enviando cache para github releases..."):
-                sucesso, mensagem = upload_cache_github(
-                    cache_manager,
-                    cache_selecionado,
-                    gh_token if 'gh_token' in dir() and gh_token else None
-                )
-                if sucesso:
-                    st.success(mensagem)
-                else:
-                    st.error(mensagem)
+        # Recuperar token do session_state
+        token_para_upload = st.session_state.get('_gh_token_unificado')
+
+        if not token_para_upload:
+            st.warning("⚠️ Nenhum token GitHub disponível. Configure nos Secrets ou insira manualmente acima.")
+
+        col_pub1, col_pub2 = st.columns([3, 1])
+        with col_pub1:
+            if st.button(f"📤 Enviar '{cache_selecionado}' para GitHub", use_container_width=True, key="btn_enviar_github_unificado", disabled=not token_para_upload):
+                with st.spinner(f"enviando cache '{cache_selecionado}' para github releases..."):
+                    sucesso, mensagem = upload_cache_github(
+                        cache_manager,
+                        cache_selecionado,
+                        token_para_upload
+                    )
+                    if sucesso:
+                        st.success(f"✅ {mensagem}")
+                        st.balloons()
+                    else:
+                        st.error(f"❌ {mensagem}")
+        with col_pub2:
+            st.caption(f"Token: {'✅' if token_para_upload else '❌'}")
 
         # =============================================================
         # SEÇÃO LEGACY: EXTRAÇÃO PRINCIPAL (COMPATIBILIDADE)
