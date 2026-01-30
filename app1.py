@@ -5300,75 +5300,77 @@ elif menu == "Atualização Base":
 
     # Verificar status no GitHub Releases
     github_status = verificar_caches_github()
+    gh_caches = github_status.get('caches', {})
 
     with st.expander("ver status de todos os caches", expanded=True):
         caches_disponiveis = cache_manager.listar_caches()
         caches_info = CACHES_INFO
 
-        # Criar tabela de status
+        # Criar tabela UNIFICADA de status (Local + GitHub + Persistência)
         status_data = []
         for tipo_cache in caches_disponiveis:
             info = cache_manager.info(tipo_cache)
             cache_info = caches_info.get(tipo_cache, {})
+            gh_info = gh_caches.get(tipo_cache, {})
 
-            # Determinar fonte do cache
-            fonte_cache = "-"
-            if info.get("existe", False):
-                fonte_metadata = info.get("fonte", "")
-                if "github" in str(fonte_metadata).lower():
-                    fonte_cache = "☁️ GitHub"
-                elif fonte_metadata:
-                    fonte_cache = "💾 Local"
-                else:
-                    fonte_cache = "💾 Local"
+            existe_local = info.get("existe", False)
+            existe_github = gh_info.get("existe", False)
+
+            # Determinar situação de PERSISTÊNCIA (o que importa no Streamlit Cloud)
+            if existe_github:
+                persistencia = "☁️ Persistido"  # Vai sobreviver ao restart
+            elif existe_local:
+                persistencia = "⚠️ Efêmero"  # Vai sumir no restart
+            else:
+                persistencia = "❌ Ausente"
 
             status_data.append({
                 "Cache": cache_info.get("nome_exibicao", tipo_cache),
-                "Relatório": cache_info.get("relatorio", "?"),
-                "Existe Local": "✅" if info.get("existe", False) else "❌",
-                "Fonte": fonte_cache,
-                "Períodos": info.get("total_periodos", 0) if info.get("existe") else "-",
-                "Registros": info.get("total_registros", 0) if info.get("existe") else "-",
-                "Tipo": "Todas vars." if cache_info.get("todas_variaveis") else "Selecionadas",
+                "Local": "✅" if existe_local else "❌",
+                "GitHub": "☁️" if existe_github else "❌",
+                "Persistência": persistencia,
+                "Períodos": info.get("total_periodos", 0) if existe_local else "-",
+                "Registros": info.get("total_registros", 0) if existe_local else "-",
+                "Tamanho GH": gh_info.get("tamanho_fmt", "-") if existe_github else "-",
             })
 
         df_status = pd.DataFrame(status_data)
         st.dataframe(df_status, use_container_width=True, hide_index=True)
 
-        # Mostrar status do GitHub Releases
+        # Legenda
+        st.caption("""
+        **Legenda:**
+        - **Local**: Existe no filesystem (efêmero no Streamlit Cloud)
+        - **GitHub**: Publicado no GitHub Releases (persistente)
+        - **☁️ Persistido**: Dados seguros, serão recuperados após restart
+        - **⚠️ Efêmero**: Só existe local, será perdido no restart - PUBLIQUE!
+        """)
+
+        # Resumo e alertas
+        total_local = sum(1 for s in status_data if s["Local"] == "✅")
+        total_github = sum(1 for s in status_data if s["GitHub"] == "☁️")
+        total_efemero = sum(1 for s in status_data if s["Persistência"] == "⚠️ Efêmero")
+
         st.markdown("---")
-        st.markdown(f"**Status no GitHub Releases ({github_status.get('tag', 'v1.0-cache')}):**")
-        st.caption(f"Repositório: `{github_status.get('repo', 'N/A')}`")
-
-        if github_status.get('release_existe'):
-            # Criar tabela de status do GitHub
-            gh_data = []
-            nomes_exibicao = {
-                'principal': 'Resumo', 'capital': 'Capital', 'ativo': 'Ativo',
-                'passivo': 'Passivo', 'dre': 'DRE', 'carteira_pf': 'Carteira PF',
-                'carteira_pj': 'Carteira PJ', 'carteira_instrumentos': 'Instrumentos'
-            }
-            for tipo, info in github_status.get('caches', {}).items():
-                gh_data.append({
-                    "Cache": nomes_exibicao.get(tipo, tipo),
-                    "GitHub": "☁️ Sim" if info.get('existe') else "❌ Não",
-                    "Tamanho": info.get('tamanho_fmt', '-') if info.get('existe') else '-'
-                })
-
-            df_gh = pd.DataFrame(gh_data)
-            st.dataframe(df_gh, use_container_width=True, hide_index=True)
-
-            # Resumo rápido
-            total_no_github = sum(1 for c in github_status.get('caches', {}).values() if c.get('existe'))
-            total_caches = len(github_status.get('caches', {}))
-            if total_no_github == total_caches:
-                st.success(f"✅ Todos os {total_caches} caches estão publicados no GitHub")
-            elif total_no_github > 0:
-                st.info(f"📊 {total_no_github}/{total_caches} caches publicados no GitHub")
+        col_r1, col_r2, col_r3 = st.columns(3)
+        with col_r1:
+            st.metric("Cache Local", f"{total_local}/8")
+        with col_r2:
+            st.metric("GitHub Releases", f"{total_github}/8")
+        with col_r3:
+            if total_efemero > 0:
+                st.metric("⚠️ Efêmeros", f"{total_efemero}", delta="Publicar!", delta_color="inverse")
             else:
-                st.warning("⚠️ Nenhum cache publicado no GitHub ainda")
+                st.metric("✅ Efêmeros", "0")
+
+        if total_efemero > 0:
+            caches_efemeros = [s["Cache"] for s in status_data if s["Persistência"] == "⚠️ Efêmero"]
+            st.warning(f"⚠️ **Atenção:** Os caches a seguir existem apenas localmente e serão perdidos no restart: **{', '.join(caches_efemeros)}**. Publique-os no GitHub!")
+
+        if not github_status.get('release_existe'):
+            st.error(f"❌ Release não acessível: {github_status.get('erro', 'erro desconhecido')}")
         else:
-            st.error(f"GitHub Release não acessível: {github_status.get('erro', 'erro desconhecido')}")
+            st.caption(f"📦 Repositório: `{github_status.get('repo')}` | Tag: `{github_status.get('tag')}`")
 
     st.markdown("---")
     st.markdown("### Extração de Dados (Admin)")
