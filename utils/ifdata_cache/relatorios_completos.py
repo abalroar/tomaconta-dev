@@ -45,27 +45,77 @@ class RelatorioCompletoCache(BaseCache):
         super().__init__(config, base_dir)
         self.relatorio_num = relatorio_num
 
-        # URLs do GitHub
-        self.github_data_url = f"{self.config.github_url_base}/{self.config.nome}_cache.pkl"
+        # URLs em ordem de prioridade:
+        # 1. Parquet do repositório tomaconta-dev
+        self.github_raw_url = f"https://raw.githubusercontent.com/abalroar/tomaconta-dev/main/data/cache/{self.config.nome}/dados.parquet"
+        # 2. Pickle dos releases tomaconta-dev
+        self.github_release_url = f"{self.config.github_url_base}/{self.config.nome}_cache.pkl"
 
     def baixar_remoto(self) -> CacheResult:
-        """Baixa dados do GitHub Releases."""
+        """Baixa dados do GitHub (tenta repositório primeiro, depois releases)."""
         self._log("info", "Tentando baixar do GitHub...")
 
+        # 1. Tentar parquet do repositório
+        resultado = self._baixar_parquet_repo()
+        if resultado.sucesso:
+            return resultado
+
+        # 2. Fallback: tentar pickle dos releases
+        resultado = self._baixar_pickle_releases()
+        if resultado.sucesso:
+            return resultado
+
+        return CacheResult(
+            sucesso=False,
+            mensagem=f"Cache {self.config.nome} não encontrado no GitHub (tentou repositório e releases)",
+            fonte="nenhum"
+        )
+
+    def _baixar_parquet_repo(self) -> CacheResult:
+        """Baixa parquet do repositório GitHub."""
         try:
-            response = requests.get(self.github_data_url, timeout=120)
+            self._log("info", f"Tentando parquet do repositório: {self.github_raw_url}")
+            response = requests.get(self.github_raw_url, timeout=120)
 
             if response.status_code == 404:
-                self._log("warning", f"Cache {self.config.nome} não encontrado no GitHub (404)")
-                return CacheResult(
-                    sucesso=False,
-                    mensagem=f"Cache {self.config.nome} não existe no GitHub",
-                    fonte="nenhum"
-                )
+                self._log("warning", f"Parquet {self.config.nome} não encontrado no repositório")
+                return CacheResult(sucesso=False, mensagem="Parquet não existe no repositório", fonte="nenhum")
 
             response.raise_for_status()
 
-            # Carregar pickle (formato antigo)
+            import io
+            try:
+                df = pd.read_parquet(io.BytesIO(response.content))
+                self._log("info", f"Baixado parquet do repositório: {len(df)} registros")
+                return CacheResult(
+                    sucesso=True,
+                    mensagem=f"Baixado do repositório: {len(df)} registros",
+                    dados=df,
+                    fonte="github_repo"
+                )
+            except ImportError:
+                self._log("warning", "pyarrow não disponível para ler parquet")
+                return CacheResult(sucesso=False, mensagem="pyarrow não disponível", fonte="nenhum")
+
+        except requests.RequestException as e:
+            self._log("error", f"Erro ao baixar do repositório: {e}")
+            return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+        except Exception as e:
+            self._log("error", f"Erro: {e}")
+            return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+
+    def _baixar_pickle_releases(self) -> CacheResult:
+        """Baixa pickle do GitHub Releases."""
+        try:
+            self._log("info", f"Tentando pickle dos releases: {self.github_release_url}")
+            response = requests.get(self.github_release_url, timeout=120)
+
+            if response.status_code == 404:
+                self._log("warning", f"Cache {self.config.nome} não encontrado nos releases (404)")
+                return CacheResult(sucesso=False, mensagem="Cache não existe nos releases", fonte="nenhum")
+
+            response.raise_for_status()
+
             import pickle
             import io
 
@@ -88,43 +138,27 @@ class RelatorioCompletoCache(BaseCache):
                 if dfs:
                     df_final = pd.concat(dfs, ignore_index=True)
                 else:
-                    return CacheResult(
-                        sucesso=False,
-                        mensagem="Arquivo do GitHub vazio",
-                        fonte="nenhum"
-                    )
+                    return CacheResult(sucesso=False, mensagem="Arquivo do GitHub vazio", fonte="nenhum")
             elif isinstance(dados_dict, pd.DataFrame):
                 df_final = dados_dict
             else:
-                return CacheResult(
-                    sucesso=False,
-                    mensagem=f"Formato inesperado: {type(dados_dict)}",
-                    fonte="nenhum"
-                )
+                return CacheResult(sucesso=False, mensagem=f"Formato inesperado: {type(dados_dict)}", fonte="nenhum")
 
-            self._log("info", f"Baixado do GitHub: {len(df_final)} registros")
+            self._log("info", f"Baixado pickle dos releases: {len(df_final)} registros")
 
             return CacheResult(
                 sucesso=True,
-                mensagem=f"Baixado do GitHub: {len(df_final)} registros",
+                mensagem=f"Baixado dos releases: {len(df_final)} registros",
                 dados=df_final,
-                fonte="github"
+                fonte="github_releases"
             )
 
         except requests.RequestException as e:
             self._log("error", f"Erro de rede: {e}")
-            return CacheResult(
-                sucesso=False,
-                mensagem=f"Erro de rede: {e}",
-                fonte="nenhum"
-            )
+            return CacheResult(sucesso=False, mensagem=f"Erro de rede: {e}", fonte="nenhum")
         except Exception as e:
             self._log("error", f"Erro ao processar: {e}")
-            return CacheResult(
-                sucesso=False,
-                mensagem=f"Erro: {e}",
-                fonte="nenhum"
-            )
+            return CacheResult(sucesso=False, mensagem=f"Erro: {e}", fonte="nenhum")
 
     def extrair_periodo(
         self,
