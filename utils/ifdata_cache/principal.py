@@ -42,22 +42,83 @@ class PrincipalCache(BaseCache):
 
     def __init__(self, base_dir: Path):
         super().__init__(PRINCIPAL_CONFIG, base_dir)
-        self.github_data_url = f"{self.config.github_url_base}/dados_cache.pkl"
+        # URLs em ordem de prioridade:
+        # 1. Parquet do repositório tomaconta-dev
+        self.github_raw_url = "https://raw.githubusercontent.com/abalroar/tomaconta-dev/main/data/cache/principal/dados.parquet"
+        # 2. Pickle dos releases tomaconta-dev
+        self.github_release_dev_url = "https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache/dados_cache.pkl"
+        # 3. Pickle dos releases tomaconta (original)
+        self.github_release_url = f"{self.config.github_url_base}/dados_cache.pkl"
 
     def baixar_remoto(self) -> CacheResult:
-        """Baixa dados do GitHub Releases."""
+        """Baixa dados do GitHub (tenta múltiplas fontes em ordem de prioridade)."""
         self._log("info", "Tentando baixar do GitHub...")
 
+        # 1. Tentar parquet do repositório tomaconta-dev
+        resultado = self._baixar_parquet_repo()
+        if resultado.sucesso:
+            return resultado
+
+        # 2. Tentar pickle dos releases tomaconta-dev
+        resultado = self._baixar_pickle_releases(self.github_release_dev_url, "tomaconta-dev")
+        if resultado.sucesso:
+            return resultado
+
+        # 3. Fallback: pickle dos releases tomaconta (original)
+        resultado = self._baixar_pickle_releases(self.github_release_url, "tomaconta")
+        if resultado.sucesso:
+            return resultado
+
+        return CacheResult(
+            sucesso=False,
+            mensagem="Cache não encontrado no GitHub (tentou repositório e releases de tomaconta-dev e tomaconta)",
+            fonte="nenhum"
+        )
+
+    def _baixar_parquet_repo(self) -> CacheResult:
+        """Baixa parquet do repositório GitHub."""
         try:
-            response = requests.get(self.github_data_url, timeout=120)
+            self._log("info", f"Tentando parquet do repositório: {self.github_raw_url}")
+            response = requests.get(self.github_raw_url, timeout=120)
 
             if response.status_code == 404:
-                self._log("warning", "Cache não encontrado no GitHub (404)")
+                self._log("warning", "Parquet não encontrado no repositório")
+                return CacheResult(sucesso=False, mensagem="Parquet não existe no repositório", fonte="nenhum")
+
+            response.raise_for_status()
+
+            # Salvar temporariamente e carregar com pandas
+            import io
+            try:
+                df = pd.read_parquet(io.BytesIO(response.content))
+                self._log("info", f"Baixado parquet do repositório: {len(df)} registros")
                 return CacheResult(
-                    sucesso=False,
-                    mensagem="Cache não existe no GitHub",
-                    fonte="nenhum"
+                    sucesso=True,
+                    mensagem=f"Baixado do repositório: {len(df)} registros",
+                    dados=df,
+                    fonte="github_repo"
                 )
+            except ImportError:
+                # pyarrow não disponível - tentar pickle
+                self._log("warning", "pyarrow não disponível para ler parquet")
+                return CacheResult(sucesso=False, mensagem="pyarrow não disponível", fonte="nenhum")
+
+        except requests.RequestException as e:
+            self._log("error", f"Erro ao baixar do repositório: {e}")
+            return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+        except Exception as e:
+            self._log("error", f"Erro: {e}")
+            return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+
+    def _baixar_pickle_releases(self, url: str, repo_nome: str = "") -> CacheResult:
+        """Baixa pickle do GitHub Releases (formato antigo)."""
+        try:
+            self._log("info", f"Tentando pickle dos releases ({repo_nome}): {url}")
+            response = requests.get(url, timeout=120)
+
+            if response.status_code == 404:
+                self._log("warning", "Cache não encontrado no GitHub Releases (404)")
+                return CacheResult(sucesso=False, mensagem="Cache não existe nos releases", fonte="nenhum")
 
             response.raise_for_status()
 
@@ -80,27 +141,19 @@ class PrincipalCache(BaseCache):
                 if dfs:
                     df_final = pd.concat(dfs, ignore_index=True)
                 else:
-                    return CacheResult(
-                        sucesso=False,
-                        mensagem="Arquivo do GitHub vazio",
-                        fonte="nenhum"
-                    )
+                    return CacheResult(sucesso=False, mensagem="Arquivo do GitHub vazio", fonte="nenhum")
             elif isinstance(dados_dict, pd.DataFrame):
                 df_final = dados_dict
             else:
-                return CacheResult(
-                    sucesso=False,
-                    mensagem=f"Formato inesperado: {type(dados_dict)}",
-                    fonte="nenhum"
-                )
+                return CacheResult(sucesso=False, mensagem=f"Formato inesperado: {type(dados_dict)}", fonte="nenhum")
 
-            self._log("info", f"Baixado do GitHub: {len(df_final)} registros")
+            self._log("info", f"Baixado pickle dos releases ({repo_nome}): {len(df_final)} registros")
 
             return CacheResult(
                 sucesso=True,
-                mensagem=f"Baixado do GitHub: {len(df_final)} registros",
+                mensagem=f"Baixado dos releases ({repo_nome}): {len(df_final)} registros",
                 dados=df_final,
-                fonte="github"
+                fonte=f"github_releases_{repo_nome}"
             )
 
         except requests.RequestException as e:
