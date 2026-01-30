@@ -1726,10 +1726,9 @@ MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatte
 # Lista de opções do menu secundário (utilitários)
 MENU_SECUNDARIO = ["Sobre", "Atualizar Base", "Glossário"]
 
-# Todos os menus combinados para validação
 TODOS_MENUS = MENU_PRINCIPAL + MENU_SECUNDARIO
 
-# Validar e corrigir menu_atual se necessário
+# Validar menu_atual
 if st.session_state['menu_atual'] not in TODOS_MENUS:
     if st.session_state['menu_atual'] == "Taxas de Juros":
         st.session_state['menu_atual'] = "Taxas de Juros por Produto"
@@ -1740,49 +1739,50 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
 
 menu_atual = st.session_state['menu_atual']
 
-# Limpar estado do widget do menu que NÃO contém o item atual
-# Isso força o widget a usar o default=None no próximo render
-if menu_atual in MENU_PRINCIPAL:
-    if 'menu_secundario' in st.session_state:
-        del st.session_state['menu_secundario']
-elif menu_atual in MENU_SECUNDARIO:
-    if 'menu_principal' in st.session_state:
-        del st.session_state['menu_principal']
+# Proteção contra loop infinito de reruns
+if '_rerun_count' not in st.session_state:
+    st.session_state['_rerun_count'] = 0
 
 # Menu principal (análise)
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu_principal = st.segmented_control(
-    "navegação principal",
+    "menu principal",
     MENU_PRINCIPAL,
     default=menu_atual if menu_atual in MENU_PRINCIPAL else None,
     label_visibility="collapsed",
-    key="menu_principal"
+    key="nav_main"
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Menu secundário (utilitários)
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu_secundario = st.segmented_control(
-    "navegação secundária",
+    "menu secundário",
     MENU_SECUNDARIO,
     default=menu_atual if menu_atual in MENU_SECUNDARIO else None,
     label_visibility="collapsed",
-    key="menu_secundario"
+    key="nav_sec"
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Determinar qual menu foi selecionado
-# Prioridade: se algum widget tem valor diferente do atual, usar esse
+# Determinar menu selecionado
 menu = menu_atual
 
-if menu_principal is not None and menu_principal != menu_atual:
-    menu = menu_principal
-    st.session_state['menu_atual'] = menu
-    st.rerun()
-elif menu_secundario is not None and menu_secundario != menu_atual:
-    menu = menu_secundario
-    st.session_state['menu_atual'] = menu
-    st.rerun()
+# Detectar mudança (apenas se não estamos em loop)
+if st.session_state['_rerun_count'] < 3:
+    if menu_principal is not None and menu_principal != menu_atual and menu_principal in MENU_PRINCIPAL:
+        menu = menu_principal
+        st.session_state['menu_atual'] = menu
+        st.session_state['_rerun_count'] += 1
+        st.rerun()
+    elif menu_secundario is not None and menu_secundario != menu_atual and menu_secundario in MENU_SECUNDARIO:
+        menu = menu_secundario
+        st.session_state['menu_atual'] = menu
+        st.session_state['_rerun_count'] += 1
+        st.rerun()
+
+# Reset contador após render bem-sucedido
+st.session_state['_rerun_count'] = 0
 
 st.markdown("---")
 
