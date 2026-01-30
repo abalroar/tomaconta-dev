@@ -2278,10 +2278,11 @@ elif menu == "Painel":
             col_periodo, col_indicador, col_tipo, col_media = st.columns([1.2, 2, 1.3, 1.8])
             with col_periodo:
                 periodo_resumo = st.selectbox(
-                    "período (trimestre)",
+                    "período",
                     periodos,
                     index=0,
-                    key="periodo_resumo"
+                    key="periodo_resumo",
+                    format_func=periodo_para_exibicao
                 )
             with col_indicador:
                 indicador_label = st.selectbox(
@@ -2766,10 +2767,11 @@ elif menu == "Capital Regulatório":
                 )
             with col_periodo_cap:
                 periodo_capital = st.selectbox(
-                    "período (trimestre)",
+                    "período",
                     periodos_capital,
                     index=0,
-                    key="periodo_capital"
+                    key="periodo_capital",
+                    format_func=periodo_para_exibicao
                 )
             with col_media_cap:
                 tipo_media_cap_label = st.selectbox(
@@ -3269,14 +3271,16 @@ elif menu == "Histórico Individual":
                             "período inicial",
                             periodos_dropdown,
                             index=len(periodos_dropdown) - 1,
-                            key="periodo_ini_individual"
+                            key="periodo_ini_individual",
+                            format_func=periodo_para_exibicao
                         )
                     with col_p2:
                         periodo_final = st.selectbox(
                             "período final",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_fin_individual"
+                            key="periodo_fin_individual",
+                            format_func=periodo_para_exibicao
                         )
                     with col_p3:
                         if len(periodos_disponiveis) >= 2:
@@ -3461,13 +3465,15 @@ elif menu == "Histórico Peers":
                         "período inicial",
                         periodos_dropdown,
                         index=len(periodos_dropdown) - 1,
-                        key="periodo_ini_serie_historica"
+                        key="periodo_ini_serie_historica",
+                        format_func=periodo_para_exibicao
                     )
                     periodo_final = st.selectbox(
                         "período final",
                         periodos_dropdown,
                         index=0,
-                        key="periodo_fin_serie_historica"
+                        key="periodo_fin_serie_historica",
+                        format_func=periodo_para_exibicao
                     )
 
                 bancos_do_peer = []
@@ -3501,14 +3507,16 @@ elif menu == "Histórico Peers":
                                     "período inicial",
                                     periodos_dropdown,
                                     index=len(periodos_dropdown) - 1,
-                                    key="periodo_ini_lucro_liquido"
+                                    key="periodo_ini_lucro_liquido",
+                                    format_func=periodo_para_exibicao
                                 )
                             with col_lucro_fim:
                                 periodo_final_lucro = st.selectbox(
                                     "período final",
                                     periodos_dropdown,
                                     index=0,
-                                    key="periodo_fin_lucro_liquido"
+                                    key="periodo_fin_lucro_liquido",
+                                    format_func=periodo_para_exibicao
                                 )
                             idx_lucro_ini = periodos_disponiveis.index(periodo_inicial_lucro)
                             idx_lucro_fin = periodos_disponiveis.index(periodo_final_lucro)
@@ -3655,7 +3663,7 @@ elif menu == "Scatter Plot":
             default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
             var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
         with col4:
-            periodo_scatter = st.selectbox("período", periodos, index=0)
+            periodo_scatter = st.selectbox("período", periodos, index=0, format_func=periodo_para_exibicao)
 
         # Segunda linha: Top N e variável de ordenação
         col_t1, col_t2, col_t3 = st.columns([1, 1, 2])
@@ -3804,7 +3812,8 @@ elif menu == "Scatter Plot":
                 "período inicial",
                 periodos,
                 index=idx_inicial,
-                key="periodo_inicial_n2"
+                key="periodo_inicial_n2",
+                format_func=periodo_para_exibicao
             )
         with col_p4:
             # Período subsequente (mais recente por padrão)
@@ -3812,7 +3821,8 @@ elif menu == "Scatter Plot":
                 "período subsequente",
                 periodos,
                 index=0,
-                key="periodo_subseq_n2"
+                key="periodo_subseq_n2",
+                format_func=periodo_para_exibicao
             )
 
         # Segunda linha: Top N e tamanho
@@ -4102,14 +4112,16 @@ elif menu == "Deltas (Antes e Depois)":
                 "período inicial",
                 periodos_dropdown,
                 index=indice_inicial_delta,
-                key="periodo_inicial_delta"
+                key="periodo_inicial_delta",
+                format_func=periodo_para_exibicao
             )
         with col_p2:
             periodo_subsequente_delta = st.selectbox(
                 "período subsequente",
                 periodos_dropdown,
                 index=0,
-                key="periodo_subsequente_delta"
+                key="periodo_subsequente_delta",
+                format_func=periodo_para_exibicao
             )
         with col_tipo_var:
             tipo_variacao = st.radio(
@@ -5429,7 +5441,8 @@ elif menu == "Crie sua métrica!":
                             "período",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_scatter_brincar"
+                            key="periodo_scatter_brincar",
+                            format_func=periodo_para_exibicao
                         )
 
                     with col_eixo_x:
@@ -5610,14 +5623,16 @@ elif menu == "Crie sua métrica!":
                             "período inicial",
                             periodos_dropdown,
                             index=indice_inicial_brincar,
-                            key="periodo_inicial_brincar"
+                            key="periodo_inicial_brincar",
+                            format_func=periodo_para_exibicao
                         )
                     with col_p2:
                         periodo_subsequente_brincar = st.selectbox(
                             "período subsequente",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_subsequente_brincar"
+                            key="periodo_subsequente_brincar",
+                            format_func=periodo_para_exibicao
                         )
                     with col_tipo_var:
                         tipo_variacao_brincar = st.radio(
@@ -5851,7 +5866,8 @@ elif menu == "Crie sua métrica!":
                             "período",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_ranking_brincar"
+                            key="periodo_ranking_brincar",
+                            format_func=periodo_para_exibicao
                         )
 
                     with col_ordem:
