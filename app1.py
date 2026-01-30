@@ -6,7 +6,7 @@ import json
 import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Tuple, Optional
 import time
 
@@ -1654,7 +1654,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Atualização Base", "Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Crie sua métrica!", "Glossário"],
+    ["Sobre", "Atualização Base", "Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Taxas de Juros", "Crie sua métrica!", "Glossário"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -4782,6 +4782,364 @@ elif menu == "Carteira 4.966":
         info = manager.info("carteira_instrumentos")
         if info and not info.get("erro"):
             st.caption(f"Status do cache: {info}")
+
+elif menu == "Taxas de Juros":
+    # =========================================================================
+    # ABA TAXAS DE JUROS - Dados de Taxas de Juros por Produto e Instituição
+    # =========================================================================
+    from utils.taxas_juros_extractor import (
+        buscar_modalidades_disponiveis,
+        buscar_todas_instituicoes,
+        extrair_taxas_juros,
+        criar_tabela_pivot_taxas,
+        formatar_nome_modalidade,
+        get_info_periodicidade,
+        MODALIDADES_CONHECIDAS,
+    )
+
+    st.markdown("### Taxas de Juros por Produto e Instituição Financeira")
+    st.caption("Dados extraídos da API do Banco Central do Brasil - Taxas de juros diárias por modalidade de crédito")
+
+    # Mostrar informação sobre periodicidade em expander
+    with st.expander("ℹ️ Sobre a periodicidade dos dados", expanded=False):
+        st.markdown("""
+        **Periodicidade dos dados:**
+
+        Os dados são divulgados em janelas de **5 dias úteis consecutivos** (rolling window).
+        Por exemplo: 12/01/2026 a 16/01/2026 representa os dados agregados desse período.
+
+        Cada instituição pode aparecer ou não em determinado período, dependendo se
+        realizou operações naquela modalidade de crédito.
+
+        Para construção de séries temporais, utiliza-se a **data final (Fim Período)**
+        como data de referência.
+
+        **Colunas disponíveis:**
+        - **Posição**: Ranking da instituição para aquele produto/período
+        - **Instituição Financeira**: Nome da instituição
+        - **Taxa Mensal (%)**: Taxa de juros ao mês
+        - **Taxa Anual (%)**: Taxa de juros ao ano
+        """)
+
+    # Inicializar session state para cache de dados
+    if 'taxas_juros_modalidades' not in st.session_state:
+        st.session_state['taxas_juros_modalidades'] = None
+    if 'taxas_juros_instituicoes' not in st.session_state:
+        st.session_state['taxas_juros_instituicoes'] = None
+    if 'taxas_juros_dados' not in st.session_state:
+        st.session_state['taxas_juros_dados'] = None
+
+    # Função para carregar modalidades com cache
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def carregar_modalidades_cached():
+        modalidades, _ = buscar_modalidades_disponiveis(dias_amostra=60)
+        return modalidades if modalidades else MODALIDADES_CONHECIDAS
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def carregar_instituicoes_cached():
+        return buscar_todas_instituicoes(dias_amostra=60)
+
+    # Carregar dados iniciais
+    with st.spinner("Carregando produtos disponíveis..."):
+        modalidades_disponiveis = carregar_modalidades_cached()
+
+    # Interface de seleção
+    st.markdown("---")
+    st.markdown("#### 🔧 Configuração da Consulta")
+
+    # Seleção de período
+    col_periodo1, col_periodo2 = st.columns(2)
+
+    hoje = datetime.now()
+    data_minima = hoje - timedelta(days=365*2)  # 2 anos atrás
+
+    with col_periodo1:
+        data_inicio = st.date_input(
+            "Período Inicial",
+            value=hoje - timedelta(days=90),
+            min_value=data_minima.date(),
+            max_value=hoje.date(),
+            key="taxas_juros_data_inicio",
+            help="Data de início para busca dos dados"
+        )
+
+    with col_periodo2:
+        data_fim = st.date_input(
+            "Período Final",
+            value=hoje.date(),
+            min_value=data_minima.date(),
+            max_value=hoje.date(),
+            key="taxas_juros_data_fim",
+            help="Data final para busca dos dados (padrão: hoje)"
+        )
+
+    # Seleção de produtos (múltiplos)
+    st.markdown("##### Produtos (Modalidades de Crédito)")
+
+    # Formatar nomes para exibição
+    modalidades_formatadas = {m: formatar_nome_modalidade(m) for m in modalidades_disponiveis}
+    opcoes_modalidades = list(modalidades_formatadas.values())
+    mapa_reverso = {v: k for k, v in modalidades_formatadas.items()}
+
+    produtos_selecionados_formatados = st.multiselect(
+        "Selecione até 4 produtos",
+        options=opcoes_modalidades,
+        default=[],
+        max_selections=4,
+        key="taxas_juros_produtos",
+        help="Selecione de 1 a 4 produtos para consultar. Deixe vazio para consultar todos."
+    )
+
+    # Converter de volta para nomes originais
+    produtos_selecionados = [mapa_reverso[p] for p in produtos_selecionados_formatados]
+
+    # Seleção de instituições
+    st.markdown("##### Instituições Financeiras")
+
+    # Carregar instituições
+    with st.spinner("Carregando instituições..."):
+        instituicoes_disponiveis = carregar_instituicoes_cached()
+
+    modo_instituicao = st.radio(
+        "Modo de seleção",
+        ["Todas as instituições", "Selecionar instituições específicas"],
+        key="taxas_juros_modo_inst",
+        horizontal=True
+    )
+
+    instituicoes_selecionadas = None
+    if modo_instituicao == "Selecionar instituições específicas":
+        instituicoes_selecionadas = st.multiselect(
+            "Selecione as instituições",
+            options=instituicoes_disponiveis,
+            default=[],
+            key="taxas_juros_instituicoes_sel",
+            help="Selecione as instituições desejadas. Deixe vazio para trazer todas."
+        )
+        if not instituicoes_selecionadas:
+            instituicoes_selecionadas = None
+
+    # Botão de busca
+    st.markdown("---")
+
+    col_btn, col_info = st.columns([1, 3])
+
+    with col_btn:
+        buscar_dados = st.button(
+            "🔍 Buscar Dados",
+            type="primary",
+            key="taxas_juros_buscar",
+            use_container_width=True
+        )
+
+    with col_info:
+        if produtos_selecionados:
+            st.caption(f"Produtos selecionados: {len(produtos_selecionados)}")
+        else:
+            st.caption("Nenhum produto selecionado (todos serão consultados)")
+
+        if instituicoes_selecionadas:
+            st.caption(f"Instituições selecionadas: {len(instituicoes_selecionadas)}")
+        else:
+            st.caption("Todas as instituições serão consultadas")
+
+    # Executar busca
+    if buscar_dados:
+        if data_inicio > data_fim:
+            st.error("Data inicial não pode ser maior que a data final.")
+        else:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            def update_progress(pct, msg):
+                progress_bar.progress(pct)
+                status_text.text(msg)
+
+            with st.spinner("Extraindo dados do Banco Central..."):
+                df_taxas = extrair_taxas_juros(
+                    data_inicio=data_inicio.strftime('%Y-%m-%d'),
+                    data_fim=data_fim.strftime('%Y-%m-%d'),
+                    modalidades=produtos_selecionados if produtos_selecionados else None,
+                    instituicoes=instituicoes_selecionadas,
+                    progress_callback=update_progress
+                )
+
+            progress_bar.empty()
+            status_text.empty()
+
+            if not df_taxas.empty:
+                st.session_state['taxas_juros_dados'] = df_taxas
+                st.success(f"✅ {len(df_taxas)} registros extraídos com sucesso!")
+            else:
+                st.warning("Nenhum dado encontrado para os filtros selecionados.")
+                st.session_state['taxas_juros_dados'] = None
+
+    # Exibir dados se disponíveis
+    if st.session_state.get('taxas_juros_dados') is not None:
+        df_taxas = st.session_state['taxas_juros_dados']
+
+        st.markdown("---")
+        st.markdown("#### 📊 Dados Extraídos")
+
+        # Tabs para diferentes visualizações
+        tab_dados, tab_pivot = st.tabs(["📋 Dados Completos", "📈 Tabela por Data"])
+
+        with tab_dados:
+            # Filtros adicionais
+            col_filtro1, col_filtro2 = st.columns(2)
+
+            with col_filtro1:
+                produtos_unicos = df_taxas['Produto'].unique().tolist()
+                filtro_produto = st.selectbox(
+                    "Filtrar por Produto",
+                    options=["Todos"] + produtos_unicos,
+                    key="taxas_juros_filtro_produto"
+                )
+
+            with col_filtro2:
+                inst_unicos = df_taxas['Instituição Financeira'].unique().tolist()
+                filtro_inst = st.selectbox(
+                    "Filtrar por Instituição",
+                    options=["Todas"] + sorted(inst_unicos),
+                    key="taxas_juros_filtro_inst"
+                )
+
+            # Aplicar filtros
+            df_display = df_taxas.copy()
+            if filtro_produto != "Todos":
+                df_display = df_display[df_display['Produto'] == filtro_produto]
+            if filtro_inst != "Todas":
+                df_display = df_display[df_display['Instituição Financeira'] == filtro_inst]
+
+            # Formatar datas para exibição
+            df_display_formatted = df_display.copy()
+            df_display_formatted['Início Período'] = pd.to_datetime(df_display_formatted['Início Período']).dt.strftime('%d/%m/%Y')
+            df_display_formatted['Fim Período'] = pd.to_datetime(df_display_formatted['Fim Período']).dt.strftime('%d/%m/%Y')
+
+            # Exibir estatísticas
+            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+            with col_stat1:
+                st.metric("Total de Registros", len(df_display))
+            with col_stat2:
+                st.metric("Instituições", df_display['Instituição Financeira'].nunique())
+            with col_stat3:
+                st.metric("Produtos", df_display['Produto'].nunique())
+            with col_stat4:
+                periodos = df_display['Fim Período'].nunique()
+                st.metric("Períodos", periodos)
+
+            # Exibir tabela
+            st.dataframe(
+                df_display_formatted,
+                use_container_width=True,
+                height=400,
+                hide_index=True
+            )
+
+            # Exportação CSV
+            st.markdown("##### 📥 Exportar Dados")
+
+            col_exp1, col_exp2 = st.columns(2)
+
+            with col_exp1:
+                # CSV
+                csv_data = df_display.to_csv(index=False, sep=';', decimal=',')
+                st.download_button(
+                    label="⬇️ Baixar CSV",
+                    data=csv_data,
+                    file_name=f"taxas_juros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="taxas_juros_download_csv"
+                )
+
+            with col_exp2:
+                # Excel
+                buffer_excel = io.BytesIO()
+                with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                    df_display.to_excel(writer, index=False, sheet_name='dados')
+                buffer_excel.seek(0)
+
+                st.download_button(
+                    label="⬇️ Baixar Excel",
+                    data=buffer_excel.getvalue(),
+                    file_name=f"taxas_juros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="taxas_juros_download_excel"
+                )
+
+        with tab_pivot:
+            st.markdown("##### Tabela Pivotada (Datas x Instituições)")
+
+            # Seleção de produto para pivot
+            produtos_unicos = df_taxas['Produto'].unique().tolist()
+
+            if len(produtos_unicos) > 1:
+                produto_pivot = st.selectbox(
+                    "Selecione o produto para a tabela pivotada",
+                    options=produtos_unicos,
+                    key="taxas_juros_pivot_produto"
+                )
+            else:
+                produto_pivot = produtos_unicos[0] if produtos_unicos else None
+
+            # Seleção de taxa
+            tipo_taxa = st.radio(
+                "Tipo de taxa",
+                ["Taxa Mensal (%)", "Taxa Anual (%)"],
+                horizontal=True,
+                key="taxas_juros_tipo_taxa"
+            )
+
+            if produto_pivot:
+                df_produto = df_taxas[df_taxas['Produto'] == produto_pivot]
+                df_pivot = criar_tabela_pivot_taxas(df_produto, valor_coluna=tipo_taxa)
+
+                if not df_pivot.empty:
+                    # Formatar data
+                    df_pivot_display = df_pivot.copy()
+                    df_pivot_display['Data'] = pd.to_datetime(df_pivot_display['Data']).dt.strftime('%d/%m/%Y')
+
+                    st.dataframe(
+                        df_pivot_display,
+                        use_container_width=True,
+                        height=400,
+                        hide_index=True
+                    )
+
+                    # Exportar tabela pivotada
+                    st.markdown("##### 📥 Exportar Tabela Pivotada")
+
+                    col_piv1, col_piv2 = st.columns(2)
+
+                    with col_piv1:
+                        csv_pivot = df_pivot.to_csv(index=False, sep=';', decimal=',')
+                        st.download_button(
+                            label="⬇️ Baixar CSV (Pivotada)",
+                            data=csv_pivot,
+                            file_name=f"taxas_juros_pivot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            key="taxas_juros_download_csv_pivot"
+                        )
+
+                    with col_piv2:
+                        buffer_pivot = io.BytesIO()
+                        with pd.ExcelWriter(buffer_pivot, engine='openpyxl') as writer:
+                            df_pivot.to_excel(writer, index=False, sheet_name='pivot')
+                        buffer_pivot.seek(0)
+
+                        st.download_button(
+                            label="⬇️ Baixar Excel (Pivotada)",
+                            data=buffer_pivot.getvalue(),
+                            file_name=f"taxas_juros_pivot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="taxas_juros_download_excel_pivot"
+                        )
+                else:
+                    st.info("Não há dados suficientes para criar a tabela pivotada.")
+
+    else:
+        # Mensagem inicial
+        st.info("👆 Configure os filtros acima e clique em **Buscar Dados** para extrair as taxas de juros.")
 
 elif menu == "Crie sua métrica!":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
