@@ -6,6 +6,7 @@ Produz dados no formato exato que os gráficos do app1.py esperam.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -42,36 +43,40 @@ class PrincipalCache(BaseCache):
 
     def __init__(self, base_dir: Path):
         super().__init__(PRINCIPAL_CONFIG, base_dir)
+        release_repo = os.getenv("TOMACONTA_RELEASE_REPO", "abalroar/tomaconta")
+        raw_repo = os.getenv("TOMACONTA_RAW_REPO", "abalroar/tomaconta-dev")
+        release_base = f"https://github.com/{release_repo}/releases/download/v1.0-cache"
+
         # URLs em ordem de prioridade:
-        # 1. Parquet do repositório tomaconta-dev
-        self.github_raw_url = "https://raw.githubusercontent.com/abalroar/tomaconta-dev/main/data/cache/principal/dados.parquet"
-        # 2. Pickle dos releases tomaconta-dev
-        self.github_release_dev_url = "https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache/dados_cache.pkl"
-        # 3. Pickle dos releases tomaconta (original)
-        self.github_release_url = f"{self.config.github_url_base}/dados_cache.pkl"
+        # 1. Parquet do repositório raw (configurável)
+        self.github_raw_url = f"https://raw.githubusercontent.com/{raw_repo}/main/data/cache/principal/dados.parquet"
+        # 2. Parquet dos releases (prod por padrão)
+        self.github_release_parquet_url = f"{release_base}/principal_dados.parquet"
+        # 3. Pickle dos releases (compat legado)
+        self.github_release_url = f"{release_base}/dados_cache.pkl"
 
     def baixar_remoto(self) -> CacheResult:
         """Baixa dados do GitHub (tenta múltiplas fontes em ordem de prioridade)."""
         self._log("info", "Tentando baixar do GitHub...")
 
-        # 1. Tentar parquet do repositório tomaconta-dev
+        # 1. Tentar parquet do repositório raw
         resultado = self._baixar_parquet_repo()
         if resultado.sucesso:
             return resultado
 
-        # 2. Tentar pickle dos releases tomaconta-dev
-        resultado = self._baixar_pickle_releases(self.github_release_dev_url, "tomaconta-dev")
+        # 2. Tentar parquet dos releases
+        resultado = self._baixar_parquet_release()
         if resultado.sucesso:
             return resultado
 
-        # 3. Fallback: pickle dos releases tomaconta (original)
-        resultado = self._baixar_pickle_releases(self.github_release_url, "tomaconta")
+        # 3. Fallback: pickle dos releases
+        resultado = self._baixar_pickle_releases(self.github_release_url, "releases")
         if resultado.sucesso:
             return resultado
 
         return CacheResult(
             sucesso=False,
-            mensagem="Cache não encontrado no GitHub (tentou repositório e releases de tomaconta-dev e tomaconta)",
+            mensagem="Cache não encontrado no GitHub (tentou repositório raw e releases)",
             fonte="nenhum"
         )
 
@@ -106,6 +111,39 @@ class PrincipalCache(BaseCache):
         except requests.RequestException as e:
             self._log("error", f"Erro ao baixar do repositório: {e}")
             return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+        except Exception as e:
+            self._log("error", f"Erro: {e}")
+            return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+
+    def _baixar_parquet_release(self) -> CacheResult:
+        """Baixa parquet do GitHub Releases."""
+        try:
+            self._log("info", f"Tentando parquet dos releases: {self.github_release_parquet_url}")
+            response = requests.get(self.github_release_parquet_url, timeout=120)
+
+            if response.status_code == 404:
+                self._log("warning", "Parquet não encontrado nos releases")
+                return CacheResult(sucesso=False, mensagem="Parquet não existe nos releases", fonte="nenhum")
+
+            response.raise_for_status()
+
+            import io
+            try:
+                df = pd.read_parquet(io.BytesIO(response.content))
+                self._log("info", f"Baixado parquet dos releases: {len(df)} registros")
+                return CacheResult(
+                    sucesso=True,
+                    mensagem=f"Baixado dos releases: {len(df)} registros",
+                    dados=df,
+                    fonte="github_releases"
+                )
+            except ImportError:
+                self._log("warning", "pyarrow não disponível para ler parquet")
+                return CacheResult(sucesso=False, mensagem="pyarrow não disponível", fonte="nenhum")
+
+        except requests.RequestException as e:
+            self._log("error", f"Erro de rede: {e}")
+            return CacheResult(sucesso=False, mensagem=f"Erro de rede: {e}", fonte="nenhum")
         except Exception as e:
             self._log("error", f"Erro: {e}")
             return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
