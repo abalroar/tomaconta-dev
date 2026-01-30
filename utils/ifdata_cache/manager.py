@@ -77,6 +77,13 @@ CACHES_INFO = {
         "relatorio": 16,
         "todas_variaveis": True,
     },
+    "taxas_juros": {
+        "nome_exibicao": "Taxas de Juros (API BCB)",
+        "descricao": "Taxas de juros por produto e instituição financeira",
+        "relatorio": None,  # API diferente do IFData
+        "todas_variaveis": True,
+        "periodicidade": "diaria",  # Janelas de 5 dias úteis
+    },
 }
 
 
@@ -109,6 +116,7 @@ class CacheManager:
             CarteiraPJCache,
             CarteiraInstrumentosCache,
         )
+        from .taxas_juros import TaxasJurosCache
 
         # Caches principais (variáveis selecionadas)
         self.registrar(PrincipalCache(self.base_dir))
@@ -121,6 +129,9 @@ class CacheManager:
         self.registrar(CarteiraPFCache(self.base_dir))
         self.registrar(CarteiraPJCache(self.base_dir))
         self.registrar(CarteiraInstrumentosCache(self.base_dir))
+
+        # Cache de Taxas de Juros (API BCB diferente)
+        self.registrar(TaxasJurosCache(self.base_dir))
 
     def registrar(self, cache: BaseCache):
         """Registra um novo tipo de cache.

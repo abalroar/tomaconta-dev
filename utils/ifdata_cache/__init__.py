@@ -70,6 +70,15 @@ from .relatorios_completos import (
     listar_relatorios_completos,
 )
 
+# Cache de Taxas de Juros
+from .taxas_juros import (
+    TaxasJurosCache,
+    buscar_modalidades_disponiveis as buscar_modalidades_taxas_juros,
+    buscar_instituicoes_disponiveis as buscar_instituicoes_taxas_juros,
+    formatar_nome_modalidade,
+    MODALIDADES_CONHECIDAS,
+)
+
 # Extrator autônomo (novo sistema)
 from .extractor import (
     extrair_cadastro,
@@ -166,6 +175,12 @@ __all__ = [
     "CarteiraPJCache",
     "CarteiraInstrumentosCache",
     "listar_relatorios_completos",
+    # Implementacoes - Taxas de Juros
+    "TaxasJurosCache",
+    "buscar_modalidades_taxas_juros",
+    "buscar_instituicoes_taxas_juros",
+    "formatar_nome_modalidade",
+    "MODALIDADES_CONHECIDAS",
     # Extrator autônomo
     "extrair_cadastro",
     "extrair_valores",
