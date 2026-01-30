@@ -5609,7 +5609,7 @@ elif menu == "Atualização Base":
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 save_status = st.empty()
-                error_log = st.empty()
+                error_container = st.container()
                 erros_encontrados = []
 
                 def callback_progresso(i, total, periodo):
@@ -5618,6 +5618,11 @@ elif menu == "Atualização Base":
 
                 def callback_salvamento(info):
                     save_status.text(f"salvando... {info}")
+
+                def callback_erro(periodo, mensagem):
+                    erros_encontrados.append(f"{periodo[4:6]}/{periodo[:4]}: {mensagem}")
+                    with error_container:
+                        st.warning(f"Erro em {periodo[4:6]}/{periodo[:4]}: {mensagem[:100]}...")
 
                 st.info(f"iniciando extração de {len(periodos_extrair)} períodos para '{cache_selecionado}'. Salvamento a cada {intervalo_save} períodos.")
 
@@ -5630,6 +5635,7 @@ elif menu == "Atualização Base":
                         intervalo_salvamento=intervalo_save,
                         callback_progresso=callback_progresso,
                         callback_salvamento=callback_salvamento,
+                        callback_erro=callback_erro,
                         dict_aliases=st.session_state.get('dict_aliases', {})
                     )
 

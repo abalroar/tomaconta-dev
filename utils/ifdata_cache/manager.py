@@ -341,6 +341,7 @@ class CacheManager:
         intervalo_salvamento: int = 4,
         callback_progresso: Optional[Callable[[int, int, str], None]] = None,
         callback_salvamento: Optional[Callable[[str], None]] = None,
+        callback_erro: Optional[Callable[[str, str], None]] = None,
         dict_aliases: Optional[Dict[str, str]] = None,
         **kwargs
     ) -> CacheResult:
@@ -410,6 +411,8 @@ class CacheManager:
                 else:
                     erros.append(f"{periodo}: {resultado.mensagem}")
                     logger.warning(f"[CACHE:{tipo.upper()}] Falha em {periodo}: {resultado.mensagem}")
+                    if callback_erro:
+                        callback_erro(periodo, resultado.mensagem)
 
                 # Rate limiting
                 time.sleep(1.5)
@@ -417,6 +420,8 @@ class CacheManager:
             except Exception as e:
                 erros.append(f"{periodo}: {str(e)}")
                 logger.error(f"[CACHE:{tipo.upper()}] Erro em {periodo}: {e}")
+                if callback_erro:
+                    callback_erro(periodo, str(e))
 
                 # Salvamento de emergência
                 if dados_extraidos:

@@ -102,11 +102,14 @@ class BaseCache(ABC):
     # =========================================================================
 
     def existe(self) -> bool:
-        """Verifica se cache local existe."""
-        return self.arquivo_dados.exists() and self.arquivo_metadata.exists()
+        """Verifica se cache local existe (parquet ou pickle)."""
+        tem_metadata = self.arquivo_metadata.exists()
+        tem_parquet = self.arquivo_dados.exists()
+        tem_pickle = self.arquivo_dados_pickle.exists()
+        return tem_metadata and (tem_parquet or tem_pickle)
 
     def carregar_local(self) -> CacheResult:
-        """Carrega dados do cache local."""
+        """Carrega dados do cache local (suporta parquet e pickle)."""
         if not self.existe():
             return CacheResult(
                 sucesso=False,
@@ -115,8 +118,33 @@ class BaseCache(ABC):
             )
 
         try:
-            # Carregar dados
-            df = pd.read_parquet(self.arquivo_dados)
+            # Determinar formato e carregar dados
+            if self.arquivo_dados.exists():
+                # Tentar parquet
+                try:
+                    df = pd.read_parquet(self.arquivo_dados)
+                    formato = "parquet"
+                except ImportError:
+                    # pyarrow não disponível mas arquivo existe
+                    if self.arquivo_dados_pickle.exists():
+                        import pickle
+                        with open(self.arquivo_dados_pickle, 'rb') as f:
+                            df = pickle.load(f)
+                        formato = "pickle"
+                    else:
+                        raise ImportError("pyarrow não disponível e não há fallback pickle")
+            elif self.arquivo_dados_pickle.exists():
+                # Usar pickle
+                import pickle
+                with open(self.arquivo_dados_pickle, 'rb') as f:
+                    df = pickle.load(f)
+                formato = "pickle"
+            else:
+                return CacheResult(
+                    sucesso=False,
+                    mensagem="Arquivo de dados não encontrado",
+                    fonte="nenhum"
+                )
 
             # Carregar metadata
             with open(self.arquivo_metadata, "r") as f:
@@ -149,13 +177,22 @@ class BaseCache(ABC):
                 fonte="nenhum"
             )
 
+    @property
+    def arquivo_dados_pickle(self) -> Path:
+        """Caminho do arquivo de dados em formato pickle (fallback)."""
+        return self.cache_dir / self.config.arquivo_dados.replace('.parquet', '.pkl')
+
     def salvar_local(
         self,
         dados: pd.DataFrame,
         fonte: str = "desconhecida",
         info_extra: Optional[Dict] = None
     ) -> CacheResult:
-        """Salva dados no cache local."""
+        """Salva dados no cache local.
+
+        Tenta salvar em parquet primeiro. Se falhar (pyarrow não disponível),
+        usa pickle como fallback.
+        """
         # Validar dados
         valido, msg = self._validar_dados(dados)
         if not valido:
@@ -168,8 +205,19 @@ class BaseCache(ABC):
         try:
             self._garantir_diretorio()
 
-            # Salvar dados
-            dados.to_parquet(self.arquivo_dados, index=False)
+            # Tentar salvar em parquet primeiro
+            formato_usado = "parquet"
+            arquivo_salvo = self.arquivo_dados
+            try:
+                dados.to_parquet(self.arquivo_dados, index=False)
+            except ImportError as e:
+                # pyarrow/fastparquet não disponível - usar pickle como fallback
+                self._log("warning", f"Parquet não disponível ({e}), usando pickle como fallback")
+                import pickle
+                arquivo_salvo = self.arquivo_dados_pickle
+                with open(arquivo_salvo, 'wb') as f:
+                    pickle.dump(dados, f)
+                formato_usado = "pickle"
 
             # Criar metadata
             metadata = {
@@ -177,6 +225,7 @@ class BaseCache(ABC):
                 "fonte": fonte,
                 "total_registros": len(dados),
                 "colunas": list(dados.columns),
+                "formato": formato_usado,
             }
 
             # Adicionar periodos se disponivel (verificar ambas as grafias)
@@ -200,15 +249,15 @@ class BaseCache(ABC):
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
 
             # Verificar que foi salvo corretamente
-            if not self.arquivo_dados.exists():
+            if not arquivo_salvo.exists():
                 raise IOError("Arquivo de dados nao foi criado")
 
-            tamanho = self.arquivo_dados.stat().st_size
-            self._log("info", f"Cache salvo: {len(dados)} registros, {tamanho:,} bytes")
+            tamanho = arquivo_salvo.stat().st_size
+            self._log("info", f"Cache salvo ({formato_usado}): {len(dados)} registros, {tamanho:,} bytes")
 
             return CacheResult(
                 sucesso=True,
-                mensagem=f"Salvo com sucesso: {len(dados)} registros",
+                mensagem=f"Salvo com sucesso ({formato_usado}): {len(dados)} registros",
                 dados=dados,
                 metadata=metadata,
                 fonte="cache_local"
@@ -223,13 +272,17 @@ class BaseCache(ABC):
             )
 
     def limpar_local(self) -> CacheResult:
-        """Remove arquivos de cache local."""
+        """Remove arquivos de cache local (parquet e pickle)."""
         removidos = []
 
         try:
             if self.arquivo_dados.exists():
                 self.arquivo_dados.unlink()
                 removidos.append(self.config.arquivo_dados)
+
+            if self.arquivo_dados_pickle.exists():
+                self.arquivo_dados_pickle.unlink()
+                removidos.append(str(self.arquivo_dados_pickle.name))
 
             if self.arquivo_metadata.exists():
                 self.arquivo_metadata.unlink()
