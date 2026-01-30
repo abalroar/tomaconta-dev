@@ -1731,22 +1731,23 @@ TODOS_MENUS = MENU_PRINCIPAL + MENU_SECUNDARIO
 
 # Validar e corrigir menu_atual se necessário
 if st.session_state['menu_atual'] not in TODOS_MENUS:
-    # Migrar "Taxas de Juros" para "Taxas de Juros por Produto"
     if st.session_state['menu_atual'] == "Taxas de Juros":
         st.session_state['menu_atual'] = "Taxas de Juros por Produto"
-    # Migrar "Atualização Base" para "Atualizar Base"
     elif st.session_state['menu_atual'] == "Atualização Base":
         st.session_state['menu_atual'] = "Atualizar Base"
     else:
         st.session_state['menu_atual'] = "Sobre"
 
-# Inicializar estado anterior dos menus para detectar mudanças
-if '_menu_principal_anterior' not in st.session_state:
-    st.session_state['_menu_principal_anterior'] = None
-if '_menu_secundario_anterior' not in st.session_state:
-    st.session_state['_menu_secundario_anterior'] = None
-
 menu_atual = st.session_state['menu_atual']
+
+# Limpar estado do widget do menu que NÃO contém o item atual
+# Isso força o widget a usar o default=None no próximo render
+if menu_atual in MENU_PRINCIPAL:
+    if 'menu_secundario' in st.session_state:
+        del st.session_state['menu_secundario']
+elif menu_atual in MENU_SECUNDARIO:
+    if 'menu_principal' in st.session_state:
+        del st.session_state['menu_principal']
 
 # Menu principal (análise)
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
@@ -1759,7 +1760,7 @@ menu_principal = st.segmented_control(
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Menu secundário (utilitários) - mesmo estilo, logo abaixo
+# Menu secundário (utilitários)
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu_secundario = st.segmented_control(
     "navegação secundária",
@@ -1770,33 +1771,18 @@ menu_secundario = st.segmented_control(
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Detectar qual menu mudou comparando com o estado anterior
-menu_principal_mudou = (menu_principal is not None and
-                        menu_principal != st.session_state['_menu_principal_anterior'])
-menu_secundario_mudou = (menu_secundario is not None and
-                         menu_secundario != st.session_state['_menu_secundario_anterior'])
+# Determinar qual menu foi selecionado
+# Prioridade: se algum widget tem valor diferente do atual, usar esse
+menu = menu_atual
 
-# Atualizar estado anterior
-st.session_state['_menu_principal_anterior'] = menu_principal
-st.session_state['_menu_secundario_anterior'] = menu_secundario
-
-# Determinar o menu selecionado baseado em qual mudou
-menu = menu_atual  # Default: manter o atual
-
-if menu_principal_mudou and menu_principal is not None:
-    # Menu principal foi clicado
+if menu_principal is not None and menu_principal != menu_atual:
     menu = menu_principal
-    if menu != st.session_state['menu_atual']:
-        st.session_state['menu_atual'] = menu
-        st.session_state['_menu_secundario_anterior'] = None  # Reset secundário
-        st.rerun()
-elif menu_secundario_mudou and menu_secundario is not None:
-    # Menu secundário foi clicado
+    st.session_state['menu_atual'] = menu
+    st.rerun()
+elif menu_secundario is not None and menu_secundario != menu_atual:
     menu = menu_secundario
-    if menu != st.session_state['menu_atual']:
-        st.session_state['menu_atual'] = menu
-        st.session_state['_menu_principal_anterior'] = None  # Reset principal
-        st.rerun()
+    st.session_state['menu_atual'] = menu
+    st.rerun()
 
 st.markdown("---")
 
