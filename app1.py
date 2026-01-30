@@ -1739,50 +1739,57 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
 
 menu_atual = st.session_state['menu_atual']
 
-# Proteção contra loop infinito de reruns
-if '_rerun_count' not in st.session_state:
-    st.session_state['_rerun_count'] = 0
+# Callbacks para navegação entre menus (evita conflito)
+def _on_main_menu_change():
+    """Callback quando menu principal é clicado."""
+    sel = st.session_state.get('nav_main')
+    if sel is not None and sel in MENU_PRINCIPAL:
+        st.session_state['menu_atual'] = sel
+        # Limpar seleção do menu secundário
+        if 'nav_sec' in st.session_state:
+            st.session_state['nav_sec'] = None
+
+def _on_sec_menu_change():
+    """Callback quando menu secundário é clicado."""
+    sel = st.session_state.get('nav_sec')
+    if sel is not None and sel in MENU_SECUNDARIO:
+        st.session_state['menu_atual'] = sel
+        # Limpar seleção do menu principal
+        if 'nav_main' in st.session_state:
+            st.session_state['nav_main'] = None
+
+# Configurar valores iniciais nos widgets (antes de renderizar)
+if menu_atual in MENU_PRINCIPAL:
+    st.session_state['nav_main'] = menu_atual
+    st.session_state['nav_sec'] = None
+else:
+    st.session_state['nav_main'] = None
+    st.session_state['nav_sec'] = menu_atual
 
 # Menu principal (análise)
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
-menu_principal = st.segmented_control(
+st.segmented_control(
     "menu principal",
     MENU_PRINCIPAL,
-    default=menu_atual if menu_atual in MENU_PRINCIPAL else None,
     label_visibility="collapsed",
-    key="nav_main"
+    key="nav_main",
+    on_change=_on_main_menu_change
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Menu secundário (utilitários)
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
-menu_secundario = st.segmented_control(
+st.segmented_control(
     "menu secundário",
     MENU_SECUNDARIO,
-    default=menu_atual if menu_atual in MENU_SECUNDARIO else None,
     label_visibility="collapsed",
-    key="nav_sec"
+    key="nav_sec",
+    on_change=_on_sec_menu_change
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Determinar menu selecionado
-menu = menu_atual
-
-# Detectar mudança (apenas se não estamos em loop)
-if st.session_state['_rerun_count'] < 3:
-    if menu_principal is not None and menu_principal != menu_atual and menu_principal in MENU_PRINCIPAL:
-        menu = menu_principal
-        st.session_state['menu_atual'] = menu
-        st.session_state['_rerun_count'] += 1
-        st.rerun()
-    elif menu_secundario is not None and menu_secundario != menu_atual and menu_secundario in MENU_SECUNDARIO:
-        menu = menu_secundario
-        st.session_state['menu_atual'] = menu
-        st.session_state['_rerun_count'] += 1
-        st.rerun()
-
-# Reset contador após render bem-sucedido
-st.session_state['_rerun_count'] = 0
+# Usar menu_atual (já atualizado pelos callbacks)
+menu = st.session_state['menu_atual']
 
 st.markdown("---")
 
@@ -4814,12 +4821,13 @@ elif menu == "Taxas de Juros por Produto":
         st.warning("⚠️ Cache de Taxas de Juros não encontrado ou vazio.")
         st.info("👉 Vá em **Atualizar Base** → selecione **Taxas de Juros (API BCB)** → extraia os dados.")
     else:
-        df_taxas_completo = resultado_cache.dados.copy()
+        # Usar diretamente sem copy (economia de memória)
+        df_taxas_completo = resultado_cache.dados
 
-        # Converter datas se necessário
-        if 'Fim Período' in df_taxas_completo.columns:
+        # Converter datas se necessário (in-place para economia de memória)
+        if 'Fim Período' in df_taxas_completo.columns and not pd.api.types.is_datetime64_any_dtype(df_taxas_completo['Fim Período']):
             df_taxas_completo['Fim Período'] = pd.to_datetime(df_taxas_completo['Fim Período'])
-        if 'Início Período' in df_taxas_completo.columns:
+        if 'Início Período' in df_taxas_completo.columns and not pd.api.types.is_datetime64_any_dtype(df_taxas_completo['Início Período']):
             df_taxas_completo['Início Período'] = pd.to_datetime(df_taxas_completo['Início Período'])
 
         # Informações do cache
@@ -4878,11 +4886,11 @@ elif menu == "Taxas de Juros por Produto":
 
         st.caption(f"Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
 
-        # Filtrar dados pelo período selecionado
+        # Filtrar dados pelo período selecionado (sem copy - economia de memória)
         df_filtrado = df_taxas_completo[
             (df_taxas_completo['Fim Período'] >= pd.to_datetime(data_inicio)) &
             (df_taxas_completo['Fim Período'] <= pd.to_datetime(data_fim))
-        ].copy()
+        ]
 
         if df_filtrado.empty:
             st.warning("Nenhum dado encontrado para o período selecionado.")
@@ -4897,15 +4905,15 @@ elif menu == "Taxas de Juros por Produto":
             # Se não houver coluna Segmento, tratar todos como único grupo
             if not segmentos_disponiveis:
                 segmentos_disponiveis = ['Todos']
-                df_filtrado['Segmento'] = 'Todos'
+                df_filtrado = df_filtrado.assign(Segmento='Todos')
 
             # Criar tabs para PF e PJ
             tabs_segmento = st.tabs([f"📊 Produtos {seg}" for seg in segmentos_disponiveis])
 
             for idx_seg, segmento in enumerate(segmentos_disponiveis):
                 with tabs_segmento[idx_seg]:
-                    # Filtrar por segmento
-                    df_segmento = df_filtrado[df_filtrado['Segmento'] == segmento].copy()
+                    # Filtrar por segmento (sem copy)
+                    df_segmento = df_filtrado[df_filtrado['Segmento'] == segmento]
 
                     if df_segmento.empty:
                         st.info(f"Nenhum dado disponível para {segmento}")
@@ -4922,7 +4930,7 @@ elif menu == "Taxas de Juros por Produto":
 
                         for idx_prod, produto in enumerate(produtos_segmento):
                             with tabs_produtos[idx_prod]:
-                                df_produto = df_segmento[df_segmento['Produto'] == produto].copy()
+                                df_produto = df_segmento[df_segmento['Produto'] == produto]
 
                                 if df_produto.empty:
                                     st.info("Sem dados para este produto")
@@ -4971,10 +4979,10 @@ elif menu == "Taxas de Juros por Produto":
                                     continue
 
                                 # Filtrar dados pelas instituições selecionadas
-                                df_plot = df_produto[df_produto['Instituição Financeira'].isin(instituicoes_selecionadas)].copy()
+                                df_plot = df_produto[df_produto['Instituição Financeira'].isin(instituicoes_selecionadas)]
 
-                                # Preparar dados para o gráfico
-                                df_plot['Data'] = pd.to_datetime(df_plot['Fim Período'])
+                                # Preparar dados para o gráfico (usar assign para evitar warning)
+                                df_plot = df_plot.assign(Data=pd.to_datetime(df_plot['Fim Período']))
                                 coluna_valor = tipo_taxa
 
                                 # Agregar por data e instituição
@@ -5032,14 +5040,10 @@ elif menu == "Taxas de Juros por Produto":
             st.markdown("#### 📥 Exportar Dados")
 
             with st.expander("Exportar dados filtrados"):
-                # Formatar datas para exibição
-                df_export = df_filtrado.copy()
-                df_export['Início Período'] = pd.to_datetime(df_export['Início Período']).dt.strftime('%d/%m/%Y')
-                df_export['Fim Período'] = pd.to_datetime(df_export['Fim Período']).dt.strftime('%d/%m/%Y')
-
                 col_exp1, col_exp2 = st.columns(2)
 
                 with col_exp1:
+                    # Criar cópia apenas quando clicado (lazy)
                     csv_data = df_filtrado.to_csv(index=False, sep=';', decimal=',')
                     st.download_button(
                         label="⬇️ Baixar CSV",
