@@ -193,7 +193,7 @@ def extrair_valores(periodo: str, relatorio: int) -> pd.DataFrame:
 
     Args:
         periodo: Período no formato YYYYMM
-        relatorio: Número do relatório (1, 2, 3, 4, 5, 11, 13, 14)
+        relatorio: Número do relatório (1, 2, 3, 4, 5, 11, 13, 16)
 
     Returns:
         DataFrame com CodInst, NomeColuna, Saldo
@@ -548,7 +548,7 @@ def extrair_relatorio_completo(
 
     Args:
         periodo: Período no formato YYYYMM
-        relatorio: Número do relatório (2, 3, 4, 11, 13, 14)
+        relatorio: Número do relatório (2, 3, 4, 11, 13, 16)
         dict_aliases: Dicionário de aliases
 
     Returns:

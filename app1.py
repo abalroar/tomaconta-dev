@@ -5741,7 +5741,7 @@ elif menu == "Atualização Base":
             "dre": "DRE (Rel. 4) - TODAS as variáveis",
             "carteira_pf": "Carteira PF (Rel. 11) - TODAS as variáveis",
             "carteira_pj": "Carteira PJ (Rel. 13) - TODAS as variáveis",
-            "carteira_instrumentos": "Carteira Instrumentos (Rel. 14) - TODAS as variáveis",
+            "carteira_instrumentos": "Carteira Instrumentos 4.966 (Rel. 16) - TODAS as variáveis",
         }
 
         cache_selecionado = st.selectbox(

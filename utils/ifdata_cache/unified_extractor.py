@@ -289,7 +289,7 @@ def extrair_valores(
 
     Args:
         periodo: Período no formato YYYYMM
-        relatorio: Número do relatório (1, 2, 3, 4, 5, 11, 13, 14)
+        relatorio: Número do relatório (1, 2, 3, 4, 5, 11, 13, 16)
         tipo_instituicao: Tipo de instituição (default: 1 = Conglomerados Prudenciais)
 
     Returns:
