@@ -16,7 +16,7 @@ Relatorios suportados:
 - 5: Informações de Capital (variáveis selecionadas)
 - 11: Carteira de crédito ativa PF - modalidade e prazo
 - 13: Carteira de crédito ativa PJ - modalidade e prazo
-- 14: Carteira de crédito ativa - por carteiras de instrumentos financeiros
+- 16: Carteira de crédito ativa - Instrumentos 4.966 (C1-C5)
 """
 
 import logging
@@ -81,9 +81,9 @@ RELATORIOS_INFO = {
         "descricao": "Carteira de crédito ativa PJ - modalidade e prazo",
         "todas_variaveis": True,
     },
-    14: {
-        "nome": "Carteira Instrumentos",
-        "descricao": "Carteira de crédito ativa - por carteiras de instrumentos financeiros",
+    16: {
+        "nome": "Carteira Instrumentos 4.966",
+        "descricao": "Carteira de crédito ativa - Instrumentos 4.966 (C1-C5)",
         "todas_variaveis": True,
     },
 }

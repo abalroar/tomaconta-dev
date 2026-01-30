@@ -7,7 +7,7 @@ Este módulo implementa caches para os relatórios que extraem TODAS as variáve
 - Relatório 4: Demonstração de Resultado (DRE)
 - Relatório 11: Carteira de crédito ativa PF - modalidade e prazo
 - Relatório 13: Carteira de crédito ativa PJ - modalidade e prazo
-- Relatório 14: Carteira de crédito ativa - por carteiras de instrumentos financeiros
+- Relatório 16: Carteira de crédito ativa - Instrumentos Financeiros Res. 4.966 (C1-C5)
 
 Todos usam a mesma lógica: extrair TODAS as variáveis do relatório da API.
 
@@ -402,10 +402,10 @@ CARTEIRA_PJ_CONFIG = CacheConfig(
     relatorio_tipo=13,
 )
 
-# Relatório 14: Carteira Instrumentos Financeiros
+# Relatório 16: Carteira por Instrumentos Financeiros - Res. 4.966 (C1-C5)
 CARTEIRA_INSTRUMENTOS_CONFIG = CacheConfig(
     nome="carteira_instrumentos",
-    descricao="Carteira de crédito ativa - por instrumentos financeiros (Relatório 14)",
+    descricao="Carteira de crédito ativa - Instrumentos Financeiros Res. 4.966 (Relatório 16)",
     subdir="carteira_instrumentos",
     arquivo_dados="dados.parquet",
     arquivo_metadata="metadata.json",
@@ -413,7 +413,7 @@ CARTEIRA_INSTRUMENTOS_CONFIG = CacheConfig(
     max_idade_horas=168.0,
     colunas_obrigatorias=["Período"],
     api_url="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata",
-    relatorio_tipo=14,
+    relatorio_tipo=16,
 )
 
 
@@ -457,10 +457,10 @@ class CarteiraPJCache(RelatorioCompletoCache):
 
 
 class CarteiraInstrumentosCache(RelatorioCompletoCache):
-    """Cache de Carteira de Crédito - Instrumentos Financeiros (Relatório 14)."""
+    """Cache de Carteira de Crédito - Instrumentos Financeiros Res. 4.966 (Relatório 16)."""
 
     def __init__(self, base_dir: Path):
-        super().__init__(CARTEIRA_INSTRUMENTOS_CONFIG, base_dir, relatorio_num=14)
+        super().__init__(CARTEIRA_INSTRUMENTOS_CONFIG, base_dir, relatorio_num=16)
 
 
 # =============================================================================
@@ -475,5 +475,5 @@ def listar_relatorios_completos() -> List[Dict]:
         {"numero": 4, "nome": "dre", "descricao": "Demonstração de Resultado"},
         {"numero": 11, "nome": "carteira_pf", "descricao": "Carteira de Crédito PF"},
         {"numero": 13, "nome": "carteira_pj", "descricao": "Carteira de Crédito PJ"},
-        {"numero": 14, "nome": "carteira_instrumentos", "descricao": "Carteira - Instrumentos Financeiros"},
+        {"numero": 16, "nome": "carteira_instrumentos", "descricao": "Carteira - Instrumentos 4.966"},
     ]

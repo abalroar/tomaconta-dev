@@ -11,7 +11,7 @@ Caches disponíveis:
 - dre: Demonstração de Resultado (Relatório 4) - todas as variáveis
 - carteira_pf: Carteira de Crédito PF (Relatório 11) - todas as variáveis
 - carteira_pj: Carteira de Crédito PJ (Relatório 13) - todas as variáveis
-- carteira_instrumentos: Carteira - Instrumentos Financeiros (Relatório 14) - todas as variáveis
+- carteira_instrumentos: Carteira - Instrumentos 4.966 (Relatório 16) - todas as variáveis
 """
 
 import logging
@@ -72,9 +72,9 @@ CACHES_INFO = {
         "todas_variaveis": True,
     },
     "carteira_instrumentos": {
-        "nome_exibicao": "Carteira Instrumentos (Relatório 14)",
-        "descricao": "Carteira de crédito - por instrumentos financeiros",
-        "relatorio": 14,
+        "nome_exibicao": "Carteira (Instrumentos 4.966) (Relatório 16)",
+        "descricao": "Carteira de crédito - Instrumentos Financeiros Res. 4.966 (C1-C5)",
+        "relatorio": 16,
         "todas_variaveis": True,
     },
 }

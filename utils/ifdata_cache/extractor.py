@@ -12,7 +12,7 @@ Relatórios suportados:
 - 5: Informações de Capital (variáveis selecionadas)
 - 11: Carteira de crédito ativa PF
 - 13: Carteira de crédito ativa PJ
-- 14: Carteira de crédito ativa - instrumentos financeiros
+- 16: Carteira de crédito ativa - Instrumentos 4.966 (C1-C5)
 
 IMPORTANTE: Este extrator produz dados no formato exato que os gráficos esperam:
 - Coluna "Instituição" (não "NomeInstituicao")
@@ -555,7 +555,7 @@ def extrair_relatorio_completo(
         DataFrame com todas as variáveis ou None
     """
     nome_rel = {2: "Ativo", 3: "Passivo", 4: "DRE",
-                11: "Carteira PF", 13: "Carteira PJ", 14: "Carteira Instrumentos"}
+                11: "Carteira PF", 13: "Carteira PJ", 16: "Carteira Instrumentos 4.966"}
     logger.info(f"Extraindo {nome_rel.get(relatorio, f'Rel.{relatorio}')} para {periodo}...")
 
     df_cad = extrair_cadastro(periodo)
