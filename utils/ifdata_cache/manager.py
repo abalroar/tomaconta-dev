@@ -519,21 +519,60 @@ class CacheManager:
         # Salvar
         return cache.salvar_local(df_final, fonte="api", info_extra={"operacao": info})
 
-    def get_dados_para_download(self, tipo: str) -> Optional[bytes]:
-        """Retorna dados do cache em formato para download (parquet)."""
+    def get_dados_para_download(self, tipo: str) -> Optional[dict]:
+        """Retorna dados do cache para download, com fallback (parquet/csv/pickle)."""
         cache = self._caches.get(tipo)
         if cache is None:
             return None
 
-        resultado = cache.carregar_local()
+        if cache.arquivo_dados.exists():
+            return {
+                "data": cache.arquivo_dados.read_bytes(),
+                "ext": ".parquet",
+                "mime": "application/octet-stream",
+                "label": "Parquet",
+            }
+
+        if cache.arquivo_dados_pickle.exists():
+            return {
+                "data": cache.arquivo_dados_pickle.read_bytes(),
+                "ext": ".pkl",
+                "mime": "application/octet-stream",
+                "label": "Pickle",
+            }
+
+        resultado = cache.carregar()
         if not resultado.sucesso or resultado.dados is None:
             return None
 
-        # Converter para bytes (parquet)
         import io
         buffer = io.BytesIO()
-        resultado.dados.to_parquet(buffer, index=False)
-        return buffer.getvalue()
+        try:
+            resultado.dados.to_parquet(buffer, index=False)
+            return {
+                "data": buffer.getvalue(),
+                "ext": ".parquet",
+                "mime": "application/octet-stream",
+                "label": "Parquet",
+            }
+        except Exception:
+            try:
+                csv_bytes = resultado.dados.to_csv(index=False).encode("utf-8")
+                return {
+                    "data": csv_bytes,
+                    "ext": ".csv",
+                    "mime": "text/csv",
+                    "label": "CSV",
+                }
+            except Exception:
+                buffer = io.BytesIO()
+                resultado.dados.to_pickle(buffer)
+                return {
+                    "data": buffer.getvalue(),
+                    "ext": ".pkl",
+                    "mime": "application/octet-stream",
+                    "label": "Pickle",
+                }
 
     def get_dados_para_download_csv(self, tipo: str) -> Optional[bytes]:
         """Retorna dados do cache em formato CSV para download."""
