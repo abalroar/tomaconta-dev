@@ -236,6 +236,195 @@ class TaxasJurosCache(BaseCache):
             fonte="api"
         )
 
+    def extrair_completo(
+        self,
+        data_inicio: str,
+        data_fim: str,
+        progress_callback=None,
+        log_callback=None
+    ) -> CacheResult:
+        """Extrai dados COMPLETOS da API com paginação.
+
+        Extrai TODOS os produtos e TODAS as instituições disponíveis
+        para o período especificado, com paginação completa.
+
+        Args:
+            data_inicio: Data de início no formato 'YYYY-MM-DD'
+            data_fim: Data de fim no formato 'YYYY-MM-DD'
+            progress_callback: Função(progress: float, message: str)
+            log_callback: Função(message: str) para logs detalhados
+        """
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            self._log("info", msg)
+
+        log(f"Iniciando extração completa de {data_inicio} a {data_fim}")
+        log("Extraindo TODOS os produtos e TODAS as instituições disponíveis")
+
+        all_data = []
+        page = 0
+        page_size = MAX_RECORDS
+        total_fetched = 0
+        has_more = True
+
+        while has_more:
+            skip = page * page_size
+
+            params = {
+                "$format": "json",
+                "$top": page_size,
+                "$skip": skip,
+                "dataInicioPeriodo": f"'{data_inicio}'"
+            }
+
+            try:
+                if progress_callback:
+                    progress_callback(0.1 + (page * 0.05), f"Página {page + 1}: buscando registros {skip + 1} a {skip + page_size}...")
+
+                log(f"Requisição página {page + 1}: $skip={skip}, $top={page_size}")
+
+                response = requests.get(API_URL, params=params, timeout=REQUEST_TIMEOUT * 3)
+
+                if response.status_code != 200:
+                    log(f"ERRO HTTP: {response.status_code}")
+                    return CacheResult(
+                        sucesso=False,
+                        mensagem=f"Erro HTTP: {response.status_code}",
+                        fonte="nenhum"
+                    )
+
+                dados = response.json()
+
+                if 'value' not in dados or not dados['value']:
+                    log(f"Página {page + 1}: nenhum dado retornado (fim dos dados)")
+                    has_more = False
+                    break
+
+                records = dados['value']
+                num_records = len(records)
+                all_data.extend(records)
+                total_fetched += num_records
+
+                log(f"Página {page + 1}: {num_records} registros (total: {total_fetched})")
+
+                # Se retornou menos que o page_size, não há mais páginas
+                if num_records < page_size:
+                    log("Última página detectada (registros < page_size)")
+                    has_more = False
+                else:
+                    page += 1
+                    # Limite de segurança (máximo 50 páginas = 7.5M registros)
+                    if page >= 50:
+                        log("AVISO: Limite de 50 páginas atingido!")
+                        has_more = False
+
+            except requests.exceptions.Timeout:
+                log(f"ERRO: Timeout na página {page + 1}")
+                return CacheResult(
+                    sucesso=False,
+                    mensagem=f"Timeout na página {page + 1}",
+                    fonte="nenhum"
+                )
+            except Exception as e:
+                log(f"ERRO na página {page + 1}: {e}")
+                return CacheResult(
+                    sucesso=False,
+                    mensagem=f"Erro na extração: {e}",
+                    fonte="nenhum"
+                )
+
+        if not all_data:
+            return CacheResult(
+                sucesso=False,
+                mensagem="Nenhum dado retornado pela API",
+                fonte="nenhum"
+            )
+
+        log(f"Total bruto extraído: {len(all_data)} registros")
+
+        if progress_callback:
+            progress_callback(0.7, "Processando dados...")
+
+        # Criar DataFrame
+        df = pd.DataFrame(all_data)
+
+        # Converter datas
+        df['InicioPeriodo'] = pd.to_datetime(df['InicioPeriodo'])
+        df['FimPeriodo'] = pd.to_datetime(df['FimPeriodo'])
+
+        # Filtrar por data final
+        data_fim_dt = pd.to_datetime(data_fim)
+        df_original_len = len(df)
+        df = df[df['FimPeriodo'] <= data_fim_dt]
+        log(f"Filtro por data final: {df_original_len} → {len(df)} registros")
+
+        # Selecionar e renomear colunas
+        colunas_manter = [
+            'InicioPeriodo', 'FimPeriodo', 'Segmento', 'Modalidade',
+            'Posicao', 'InstituicaoFinanceira', 'TaxaJurosAoMes', 'TaxaJurosAoAno', 'cnpj8'
+        ]
+        colunas_existentes = [c for c in colunas_manter if c in df.columns]
+        df = df[colunas_existentes]
+
+        df = df.rename(columns={
+            'InicioPeriodo': 'Início Período',
+            'FimPeriodo': 'Fim Período',
+            'Segmento': 'Segmento',
+            'Modalidade': 'Produto',
+            'Posicao': 'Posição',
+            'InstituicaoFinanceira': 'Instituição Financeira',
+            'TaxaJurosAoMes': 'Taxa Mensal (%)',
+            'TaxaJurosAoAno': 'Taxa Anual (%)',
+            'cnpj8': 'CNPJ'
+        })
+
+        # Ordenar
+        df = df.sort_values(['Fim Período', 'Produto', 'Posição'], ascending=[False, True, True])
+
+        if progress_callback:
+            progress_callback(0.9, "Gerando estatísticas...")
+
+        # Estatísticas para logs
+        produtos_unicos = df['Produto'].nunique() if 'Produto' in df.columns else 0
+        instituicoes_unicas = df['Instituição Financeira'].nunique() if 'Instituição Financeira' in df.columns else 0
+        periodos_unicos = df['Fim Período'].nunique() if 'Fim Período' in df.columns else 0
+
+        # Verificar PF/PJ
+        if 'Segmento' in df.columns:
+            segmentos = df['Segmento'].value_counts().to_dict()
+            log(f"Segmentos: {segmentos}")
+
+        log("=" * 50)
+        log("RESUMO DA EXTRAÇÃO COMPLETA:")
+        log(f"  - Total de linhas: {len(df):,}")
+        log(f"  - Produtos únicos: {produtos_unicos}")
+        log(f"  - Instituições únicas: {instituicoes_unicas}")
+        log(f"  - Períodos únicos (datas): {periodos_unicos}")
+        log(f"  - Páginas processadas: {page + 1}")
+        log(f"  - Truncamento: {'NÃO' if not has_more or page < 49 else 'POSSÍVEL (verificar)'}")
+        log("=" * 50)
+
+        if progress_callback:
+            progress_callback(1.0, f"Extração concluída: {len(df):,} registros")
+
+        return CacheResult(
+            sucesso=True,
+            mensagem=f"Extraídos {len(df):,} registros ({produtos_unicos} produtos, {instituicoes_unicas} instituições, {periodos_unicos} períodos)",
+            dados=df,
+            fonte="api",
+            metadata={
+                "total_registros": len(df),
+                "produtos_unicos": produtos_unicos,
+                "instituicoes_unicas": instituicoes_unicas,
+                "periodos_unicos": periodos_unicos,
+                "paginas_processadas": page + 1,
+                "data_inicio": data_inicio,
+                "data_fim": data_fim,
+                "truncado": has_more and page >= 49
+            }
+        )
+
 
 def buscar_modalidades_disponiveis(dias_amostra: int = 60) -> List[str]:
     """Busca todas as modalidades (produtos) disponíveis na API."""
