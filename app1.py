@@ -1654,7 +1654,7 @@ with col_header:
 st.markdown('<div class="header-nav">', unsafe_allow_html=True)
 menu = st.segmented_control(
     "navegação",
-    ["Sobre", "Atualização Base", "Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Crie sua métrica!", "Glossário"],
+    ["Sobre", "Atualização Base", "Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Crie sua métrica!", "Glossário"],
     default=st.session_state['menu_atual'],
     label_visibility="collapsed"
 )
@@ -4434,6 +4434,354 @@ elif menu == "Deltas (Antes e Depois)":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Carteira 4.966":
+    # =========================================================================
+    # ABA CARTEIRA 4.966 - Classificação de Instrumentos Financeiros (Res. 4.966)
+    # =========================================================================
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_carteira_4966_data():
+        """Carrega dados da Carteira 4.966 (Relatório 16) com cache."""
+        from utils.ifdata_cache import get_manager
+        manager = get_manager()
+        resultado = manager.carregar("carteira_instrumentos")
+        if resultado.sucesso and resultado.dados is not None:
+            return resultado.dados
+        return None
+
+    def periodo_para_exibicao_mes(periodo_trimestre: str) -> str:
+        """Converte período trimestral (1/2025) para formato mês abreviado (mar/25)."""
+        if not periodo_trimestre or '/' not in periodo_trimestre:
+            return periodo_trimestre
+        try:
+            trimestre, ano = periodo_trimestre.split('/')
+            meses_map = {'1': 'mar', '2': 'jun', '3': 'set', '4': 'dez'}
+            mes = meses_map.get(trimestre, trimestre)
+            ano_curto = ano[-2:] if len(ano) == 4 else ano
+            return f"{mes}/{ano_curto}"
+        except:
+            return periodo_trimestre
+
+    def formatar_valor_br(valor, decimais=0):
+        """Formata valor numérico no padrão brasileiro (pontos como separador de milhar)."""
+        if pd.isna(valor) or valor is None:
+            return "-"
+        try:
+            if decimais == 0:
+                return f"{valor:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            else:
+                return f"{valor:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except:
+            return str(valor)
+
+    def formatar_percentual(valor, decimais=1):
+        """Formata percentual com casas decimais."""
+        if pd.isna(valor) or valor is None:
+            return "-"
+        try:
+            return f"{valor * 100:.{decimais}f}%"
+        except:
+            return "-"
+
+    # Mapeamento das linhas da tabela para colunas da API
+    LINHAS_CARTEIRA_4966 = [
+        ("C1", "C1"),
+        ("C2", "C2"),
+        ("C3", "C3"),
+        ("C4", "C4"),
+        ("C5", "C5"),
+        ("Carteira Total", "Total Geral"),
+        ("Carteira Não Informada", "Carteira não Informada ou não se Aplica"),
+        ("Carteira no Exterior", "Total Exterior"),
+        ("Total não Individualizado", "Total não Individualizado"),
+    ]
+
+    df_carteira = load_carteira_4966_data()
+
+    if df_carteira is not None and not df_carteira.empty:
+        # Verificar colunas disponíveis
+        colunas_disponiveis = df_carteira.columns.tolist()
+
+        # Obter lista de instituições e períodos
+        if 'Instituição' in df_carteira.columns:
+            instituicoes = sorted(df_carteira['Instituição'].dropna().unique().tolist())
+        else:
+            instituicoes = []
+
+        col_periodo = 'Período' if 'Período' in df_carteira.columns else 'Periodo'
+        if col_periodo in df_carteira.columns:
+            periodos_disponiveis = ordenar_periodos(df_carteira[col_periodo].dropna().unique(), reverso=True)
+        else:
+            periodos_disponiveis = []
+
+        if instituicoes and periodos_disponiveis:
+            st.markdown("### Carteira de Crédito por Instrumentos Financeiros (Res. 4.966)")
+            st.caption("Classificação conforme estágios de risco de crédito - C1 a C5")
+
+            # Seletores
+            col_inst, col_periodos = st.columns([1, 2])
+
+            with col_inst:
+                instituicao_selecionada = st.selectbox(
+                    "Instituição",
+                    instituicoes,
+                    key="carteira_4966_instituicao"
+                )
+
+            # Filtrar períodos disponíveis para a instituição selecionada
+            df_inst = df_carteira[df_carteira['Instituição'] == instituicao_selecionada]
+            periodos_inst = ordenar_periodos(df_inst[col_periodo].dropna().unique(), reverso=True)
+
+            with col_periodos:
+                periodos_selecionados = st.multiselect(
+                    "Períodos (selecione 2 ou mais para comparação)",
+                    periodos_inst,
+                    default=periodos_inst[:2] if len(periodos_inst) >= 2 else periodos_inst,
+                    key="carteira_4966_periodos",
+                    help="Selecione múltiplos períodos para comparar. O delta será calculado em relação ao período anterior na lista."
+                )
+
+            if periodos_selecionados and len(periodos_selecionados) >= 1:
+                # Ordenar períodos do mais antigo para o mais recente (para cálculo de deltas)
+                periodos_ordenados = ordenar_periodos(periodos_selecionados, reverso=False)
+
+                # Construir dados da tabela
+                dados_tabela = []
+
+                for nome_linha, coluna_api in LINHAS_CARTEIRA_4966:
+                    linha_dados = {"Tipo de Carteira": nome_linha}
+
+                    # Verificar se a coluna existe nos dados
+                    coluna_encontrada = None
+                    for col in colunas_disponiveis:
+                        if col.lower().strip() == coluna_api.lower().strip():
+                            coluna_encontrada = col
+                            break
+
+                    if coluna_encontrada is None:
+                        # Tentar busca parcial
+                        for col in colunas_disponiveis:
+                            if coluna_api.lower() in col.lower():
+                                coluna_encontrada = col
+                                break
+
+                    for i, periodo in enumerate(periodos_ordenados):
+                        df_periodo = df_inst[df_inst[col_periodo] == periodo]
+
+                        if not df_periodo.empty and coluna_encontrada and coluna_encontrada in df_periodo.columns:
+                            valor = df_periodo[coluna_encontrada].iloc[0]
+                        else:
+                            valor = None
+
+                        # Obter Total Geral para calcular percentual
+                        total_geral = None
+                        for col in colunas_disponiveis:
+                            if 'total geral' in col.lower():
+                                if not df_periodo.empty and col in df_periodo.columns:
+                                    total_geral = df_periodo[col].iloc[0]
+                                break
+
+                        periodo_exib = periodo_para_exibicao_mes(periodo)
+                        linha_dados[f"{periodo_exib}"] = valor
+
+                        # Calcular percentual
+                        if valor is not None and total_geral is not None and total_geral != 0:
+                            pct = valor / total_geral
+                        else:
+                            pct = None
+                        linha_dados[f"{periodo_exib} %"] = pct
+
+                    dados_tabela.append(linha_dados)
+
+                df_resultado = pd.DataFrame(dados_tabela)
+
+                # Criar tabela estilizada com HTML
+                st.markdown("---")
+
+                # Construir HTML da tabela
+                html_tabela = """
+                <style>
+                .carteira-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 14px;
+                    margin-top: 10px;
+                }
+                .carteira-table th, .carteira-table td {
+                    border: 1px solid #ddd;
+                    padding: 8px 12px;
+                    text-align: right;
+                }
+                .carteira-table th {
+                    background-color: #f5f5f5;
+                    font-weight: 600;
+                }
+                .carteira-table td:first-child {
+                    text-align: left;
+                    font-weight: 500;
+                }
+                .carteira-table tr.total-row {
+                    background-color: #e8f4e8;
+                    font-weight: bold;
+                }
+                .carteira-table tr.total-row td {
+                    font-weight: bold;
+                }
+                .carteira-table thead tr:first-child th {
+                    background-color: #4a4a4a;
+                    color: white;
+                    text-align: center;
+                }
+                .carteira-table thead tr:nth-child(2) th {
+                    background-color: #6a6a6a;
+                    color: white;
+                }
+                .delta-pos { color: #28a745; }
+                .delta-neg { color: #dc3545; }
+                </style>
+                <table class="carteira-table">
+                <thead>
+                <tr>
+                <th rowspan="2">Tipo de Carteira</th>
+                """
+
+                # Cabeçalhos agrupados por período
+                for periodo in periodos_ordenados:
+                    periodo_exib = periodo_para_exibicao_mes(periodo)
+                    html_tabela += f'<th colspan="2">{periodo_exib}</th>'
+
+                html_tabela += "</tr><tr>"
+
+                for _ in periodos_ordenados:
+                    html_tabela += '<th>Valor</th><th>% Carteira Total</th>'
+
+                html_tabela += "</tr></thead><tbody>"
+
+                # Linhas de dados
+                for idx, row in df_resultado.iterrows():
+                    tipo = row["Tipo de Carteira"]
+                    is_total = tipo == "Carteira Total"
+                    row_class = 'class="total-row"' if is_total else ''
+
+                    html_tabela += f"<tr {row_class}><td>{tipo}</td>"
+
+                    valor_anterior = None
+                    for i, periodo in enumerate(periodos_ordenados):
+                        periodo_exib = periodo_para_exibicao_mes(periodo)
+                        valor = row.get(f"{periodo_exib}")
+                        pct = row.get(f"{periodo_exib} %")
+
+                        valor_fmt = formatar_valor_br(valor)
+                        pct_fmt = formatar_percentual(pct) if pct is not None else "-"
+
+                        # Se for linhas especiais (Não Informada, Exterior, Não Individualizado), não mostrar percentual
+                        if tipo in ["Carteira Não Informada", "Carteira no Exterior", "Total não Individualizado"]:
+                            pct_fmt = "-"
+
+                        # Adicionar delta visual se houver período anterior
+                        delta_html = ""
+                        if i > 0 and valor_anterior is not None and valor is not None:
+                            delta = valor - valor_anterior
+                            if delta > 0:
+                                delta_html = f' <span class="delta-pos">▲</span>'
+                            elif delta < 0:
+                                delta_html = f' <span class="delta-neg">▼</span>'
+
+                        html_tabela += f"<td>{valor_fmt}{delta_html}</td><td>{pct_fmt}</td>"
+                        valor_anterior = valor
+
+                    html_tabela += "</tr>"
+
+                html_tabela += "</tbody></table>"
+
+                st.markdown(html_tabela, unsafe_allow_html=True)
+
+                # Tabela de auditoria (dataframe simples)
+                with st.expander("Dados para auditoria"):
+                    st.dataframe(df_resultado, use_container_width=True)
+
+                # Exportação Excel
+                st.markdown("---")
+
+                def criar_excel_carteira_4966(df, instituicao, periodos):
+                    """Cria arquivo Excel com colunas flattened."""
+                    import io
+                    buffer = io.BytesIO()
+
+                    # Preparar DataFrame para exportação com colunas flattened
+                    df_export = df.copy()
+
+                    # Renomear colunas para formato explícito
+                    colunas_rename = {"Tipo de Carteira": "Tipo de Carteira"}
+                    for periodo in periodos:
+                        periodo_exib = periodo_para_exibicao_mes(periodo)
+                        colunas_rename[f"{periodo_exib}"] = f"{periodo_exib} Valor"
+                        colunas_rename[f"{periodo_exib} %"] = f"{periodo_exib} %"
+
+                    df_export = df_export.rename(columns=colunas_rename)
+
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df_export.to_excel(writer, index=False, sheet_name='Carteira 4.966')
+
+                        # Ajustar largura das colunas
+                        worksheet = writer.sheets['Carteira 4.966']
+                        for i, col in enumerate(df_export.columns):
+                            max_length = max(
+                                df_export[col].astype(str).map(len).max() if len(df_export) > 0 else 0,
+                                len(col)
+                            )
+                            worksheet.column_dimensions[chr(65 + i)].width = min(max_length + 2, 30)
+
+                    buffer.seek(0)
+                    return buffer.getvalue()
+
+                col_btn1, col_btn2 = st.columns(2)
+
+                with col_btn1:
+                    excel_data = criar_excel_carteira_4966(df_resultado, instituicao_selecionada, periodos_ordenados)
+                    periodos_str = "_".join([periodo_para_exibicao_mes(p).replace("/", "-") for p in periodos_ordenados])
+                    st.download_button(
+                        label="Baixar Excel (Tabela Atual)",
+                        data=excel_data,
+                        file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_{periodos_str}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_excel_carteira_4966"
+                    )
+
+                with col_btn2:
+                    # Exportar dados brutos da instituição
+                    df_inst_export = df_inst.copy()
+                    buffer_raw = io.BytesIO()
+                    with pd.ExcelWriter(buffer_raw, engine='openpyxl') as writer:
+                        df_inst_export.to_excel(writer, index=False, sheet_name='Dados Brutos')
+                    buffer_raw.seek(0)
+
+                    st.download_button(
+                        label="Baixar Excel (Dados Brutos)",
+                        data=buffer_raw.getvalue(),
+                        file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_dados_brutos.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_excel_carteira_4966_raw"
+                    )
+
+            else:
+                st.info("Selecione ao menos um período para visualizar os dados.")
+
+        else:
+            st.warning("Dados de Carteira 4.966 não contêm instituições ou períodos válidos.")
+            st.caption(f"Colunas disponíveis: {colunas_disponiveis[:10]}...")
+
+    else:
+        st.warning("Dados da Carteira 4.966 (Relatório 16) não disponíveis.")
+        st.info("Os dados precisam ser extraídos via 'Atualização Base' no painel de administração.")
+
+        # Mostrar informações sobre o cache
+        from utils.ifdata_cache import get_manager
+        manager = get_manager()
+        info = manager.info("carteira_instrumentos")
+        if info and not info.get("erro"):
+            st.caption(f"Status do cache: {info}")
 
 elif menu == "Crie sua métrica!":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:

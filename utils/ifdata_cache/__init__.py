@@ -9,7 +9,7 @@ Arquitetura extensivel que suporta multiplos tipos de cache:
 - dre: Demonstração de Resultado (Relatório 4) - todas as variáveis
 - carteira_pf: Carteira de Crédito PF (Relatório 11) - todas as variáveis
 - carteira_pj: Carteira de Crédito PJ (Relatório 13) - todas as variáveis
-- carteira_instrumentos: Carteira - Instrumentos Financeiros (Relatório 14) - todas as variáveis
+- carteira_instrumentos: Carteira - Instrumentos 4.966 (Relatório 16) - todas as variáveis
 
 Uso basico:
     from utils.ifdata_cache import CacheManager
