@@ -66,7 +66,9 @@ class CapitalCache(BaseCache):
         # URLs em ordem de prioridade:
         # 1. Parquet do repositório tomaconta-dev
         self.github_raw_url = "https://raw.githubusercontent.com/abalroar/tomaconta-dev/main/data/cache/capital/dados.parquet"
-        # 2. Pickle dos releases tomaconta-dev
+        # 2. Parquet dos releases tomaconta-dev
+        self.github_release_parquet_url = "https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache/capital_dados.parquet"
+        # 3. Pickle dos releases tomaconta-dev
         self.github_release_dev_url = "https://github.com/abalroar/tomaconta-dev/releases/download/v1.0-cache/capital_cache.pkl"
         # 3. Pickle dos releases tomaconta (original)
         self.github_release_url = f"{self.config.github_url_base}/capital_cache.pkl"
@@ -80,12 +82,17 @@ class CapitalCache(BaseCache):
         if resultado.sucesso:
             return resultado
 
-        # 2. Tentar pickle dos releases tomaconta-dev
+        # 2. Tentar parquet dos releases tomaconta-dev
+        resultado = self._baixar_parquet_release()
+        if resultado.sucesso:
+            return resultado
+
+        # 3. Tentar pickle dos releases tomaconta-dev
         resultado = self._baixar_pickle_releases(self.github_release_dev_url, "tomaconta-dev")
         if resultado.sucesso:
             return resultado
 
-        # 3. Fallback: pickle dos releases tomaconta (original)
+        # 4. Fallback: pickle dos releases tomaconta (original)
         resultado = self._baixar_pickle_releases(self.github_release_url, "tomaconta")
         if resultado.sucesso:
             return resultado
@@ -125,6 +132,39 @@ class CapitalCache(BaseCache):
         except requests.RequestException as e:
             self._log("error", f"Erro ao baixar do repositório: {e}")
             return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+        except Exception as e:
+            self._log("error", f"Erro: {e}")
+            return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
+
+    def _baixar_parquet_release(self) -> CacheResult:
+        """Baixa parquet do GitHub Releases."""
+        try:
+            self._log("info", f"Tentando parquet dos releases: {self.github_release_parquet_url}")
+            response = requests.get(self.github_release_parquet_url, timeout=120)
+
+            if response.status_code == 404:
+                self._log("warning", "Parquet não encontrado nos releases")
+                return CacheResult(sucesso=False, mensagem="Parquet não existe nos releases", fonte="nenhum")
+
+            response.raise_for_status()
+
+            import io
+            try:
+                df = pd.read_parquet(io.BytesIO(response.content))
+                self._log("info", f"Baixado parquet dos releases: {len(df)} registros")
+                return CacheResult(
+                    sucesso=True,
+                    mensagem=f"Baixado dos releases: {len(df)} registros",
+                    dados=df,
+                    fonte="github_releases"
+                )
+            except ImportError:
+                self._log("warning", "pyarrow não disponível para ler parquet")
+                return CacheResult(sucesso=False, mensagem="pyarrow não disponível", fonte="nenhum")
+
+        except requests.RequestException as e:
+            self._log("error", f"Erro de rede: {e}")
+            return CacheResult(sucesso=False, mensagem=f"Erro de rede: {e}", fonte="nenhum")
         except Exception as e:
             self._log("error", f"Erro: {e}")
             return CacheResult(sucesso=False, mensagem=str(e), fonte="nenhum")
