@@ -2278,10 +2278,11 @@ elif menu == "Painel":
             col_periodo, col_indicador, col_tipo, col_media = st.columns([1.2, 2, 1.3, 1.8])
             with col_periodo:
                 periodo_resumo = st.selectbox(
-                    "período (trimestre)",
+                    "período",
                     periodos,
                     index=0,
-                    key="periodo_resumo"
+                    key="periodo_resumo",
+                    format_func=periodo_para_exibicao
                 )
             with col_indicador:
                 indicador_label = st.selectbox(
@@ -2355,30 +2356,8 @@ elif menu == "Painel":
                 df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
 
             bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
-
-            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                aliases_set = set(st.session_state['dict_aliases'].values())
-
-                bancos_com_alias = []
-                bancos_sem_alias = []
-
-                for banco in bancos_todos:
-                    if banco in aliases_set:
-                        bancos_com_alias.append(banco)
-                    else:
-                        bancos_sem_alias.append(banco)
-
-                def sort_key(nome):
-                    primeiro_char = nome[0].lower() if nome else 'z'
-                    if primeiro_char.isdigit():
-                        return (1, nome.lower())
-                    return (0, nome.lower())
-
-                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-                bancos_todos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-            else:
-                bancos_todos = sorted(bancos_todos)
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_todos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
             indicador_col = indicadores_disponiveis[indicador_label]
             coluna_selecao = indicador_col
@@ -2766,10 +2745,11 @@ elif menu == "Capital Regulatório":
                 )
             with col_periodo_cap:
                 periodo_capital = st.selectbox(
-                    "período (trimestre)",
+                    "período",
                     periodos_capital,
                     index=0,
-                    key="periodo_capital"
+                    key="periodo_capital",
+                    format_func=periodo_para_exibicao
                 )
             with col_media_cap:
                 tipo_media_cap_label = st.selectbox(
@@ -2906,31 +2886,8 @@ elif menu == "Capital Regulatório":
                     df_periodo_cap = df_periodo_cap[df_periodo_cap['Instituição'].isin(bancos_do_peer_cap)]
 
                 bancos_todos_cap = df_periodo_cap['Instituição'].dropna().unique().tolist()
-
-                # Ordenar bancos: aliases primeiro, depois por nome
-                if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                    aliases_set = set(st.session_state['dict_aliases'].values())
-
-                    bancos_com_alias = []
-                    bancos_sem_alias = []
-
-                    for banco in bancos_todos_cap:
-                        if banco in aliases_set:
-                            bancos_com_alias.append(banco)
-                        else:
-                            bancos_sem_alias.append(banco)
-
-                    def sort_key_cap(nome):
-                        primeiro_char = nome[0].lower() if nome else 'z'
-                        if primeiro_char.isdigit():
-                            return (1, nome.lower())
-                        return (0, nome.lower())
-
-                    bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key_cap)
-                    bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key_cap)
-                    bancos_todos_cap = bancos_com_alias_sorted + bancos_sem_alias_sorted
-                else:
-                    bancos_todos_cap = sorted(bancos_todos_cap)
+                dict_aliases = st.session_state.get('dict_aliases', {})
+                bancos_todos_cap = ordenar_bancos_com_alias(bancos_todos_cap, dict_aliases)
 
                 # Definir bancos default
                 bancos_default_cap = bancos_do_peer_cap[:10] if bancos_do_peer_cap else []
@@ -3220,33 +3177,8 @@ elif menu == "Histórico Individual":
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
-                aliases_set = set(st.session_state['dict_aliases'].values())
-
-                bancos_com_alias = []
-                bancos_sem_alias = []
-
-                for banco in bancos_todos:
-                    # Verifica se o banco é um alias (está nos valores do dicionário)
-                    if banco in aliases_set:
-                        bancos_com_alias.append(banco)
-                    else:
-                        bancos_sem_alias.append(banco)
-
-                # Ordenação: letras antes de números, case-insensitive
-                def sort_key(nome):
-                    primeiro_char = nome[0].lower() if nome else 'z'
-                    if primeiro_char.isdigit():
-                        return (1, nome.lower())
-                    return (0, nome.lower())
-
-                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-                bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
-            else:
-                bancos_disponiveis = sorted(bancos_todos)
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_disponiveis = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
             if len(bancos_disponiveis) > 0:
                 banco_selecionado = st.selectbox("selecione uma instituição", bancos_disponiveis, key="banco_individual")
@@ -3269,14 +3201,16 @@ elif menu == "Histórico Individual":
                             "período inicial",
                             periodos_dropdown,
                             index=len(periodos_dropdown) - 1,
-                            key="periodo_ini_individual"
+                            key="periodo_ini_individual",
+                            format_func=periodo_para_exibicao
                         )
                     with col_p2:
                         periodo_final = st.selectbox(
                             "período final",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_fin_individual"
+                            key="periodo_fin_individual",
+                            format_func=periodo_para_exibicao
                         )
                     with col_p3:
                         if len(periodos_disponiveis) >= 2:
@@ -3372,33 +3306,8 @@ elif menu == "Histórico Peers":
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-            if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-                # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
-                aliases_set = set(st.session_state['dict_aliases'].values())
-
-                bancos_com_alias = []
-                bancos_sem_alias = []
-
-                for banco in bancos_todos:
-                    # Verifica se o banco é um alias (está nos valores do dicionário)
-                    if banco in aliases_set:
-                        bancos_com_alias.append(banco)
-                    else:
-                        bancos_sem_alias.append(banco)
-
-                # Ordenação: letras antes de números, case-insensitive
-                def sort_key(nome):
-                    primeiro_char = nome[0].lower() if nome else 'z'
-                    if primeiro_char.isdigit():
-                        return (1, nome.lower())
-                    return (0, nome.lower())
-
-                bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-                bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-                bancos_disponiveis = bancos_com_alias_sorted + bancos_sem_alias_sorted
-            else:
-                bancos_disponiveis = sorted(bancos_todos)
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_disponiveis = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
             if len(bancos_disponiveis) > 0:
                 col_select, col_vars, col_periodo = st.columns([2, 2, 2])
@@ -3461,13 +3370,15 @@ elif menu == "Histórico Peers":
                         "período inicial",
                         periodos_dropdown,
                         index=len(periodos_dropdown) - 1,
-                        key="periodo_ini_serie_historica"
+                        key="periodo_ini_serie_historica",
+                        format_func=periodo_para_exibicao
                     )
                     periodo_final = st.selectbox(
                         "período final",
                         periodos_dropdown,
                         index=0,
-                        key="periodo_fin_serie_historica"
+                        key="periodo_fin_serie_historica",
+                        format_func=periodo_para_exibicao
                     )
 
                 bancos_do_peer = []
@@ -3501,14 +3412,16 @@ elif menu == "Histórico Peers":
                                     "período inicial",
                                     periodos_dropdown,
                                     index=len(periodos_dropdown) - 1,
-                                    key="periodo_ini_lucro_liquido"
+                                    key="periodo_ini_lucro_liquido",
+                                    format_func=periodo_para_exibicao
                                 )
                             with col_lucro_fim:
                                 periodo_final_lucro = st.selectbox(
                                     "período final",
                                     periodos_dropdown,
                                     index=0,
-                                    key="periodo_fin_lucro_liquido"
+                                    key="periodo_fin_lucro_liquido",
+                                    format_func=periodo_para_exibicao
                                 )
                             idx_lucro_ini = periodos_disponiveis.index(periodo_inicial_lucro)
                             idx_lucro_fin = periodos_disponiveis.index(periodo_final_lucro)
@@ -3613,35 +3526,10 @@ elif menu == "Scatter Plot":
         colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos = ordenar_periodos(df['Período'].unique(), reverso=True)
 
-        # Lista de todos os bancos disponíveis com a mesma ordenação de "Análise Individual"
+        # Lista de todos os bancos disponíveis com ordenação por alias
         bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-            # Cria set de aliases (valores do dicionário) - os dados já têm nomes substituídos
-            aliases_set = set(st.session_state['dict_aliases'].values())
-
-            bancos_com_alias = []
-            bancos_sem_alias = []
-
-            for banco in bancos_todos:
-                # Verifica se o banco é um alias (está nos valores do dicionário)
-                if banco in aliases_set:
-                    bancos_com_alias.append(banco)
-                else:
-                    bancos_sem_alias.append(banco)
-
-            # Ordenação: letras antes de números, case-insensitive
-            def sort_key(nome):
-                primeiro_char = nome[0].lower() if nome else 'z'
-                if primeiro_char.isdigit():
-                    return (1, nome.lower())
-                return (0, nome.lower())
-
-            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-        else:
-            todos_bancos = sorted(bancos_todos)
+        dict_aliases = st.session_state.get('dict_aliases', {})
+        todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         # Primeira linha: variáveis dos eixos e tamanho
         col1, col2, col3, col4 = st.columns(4)
@@ -3655,7 +3543,7 @@ elif menu == "Scatter Plot":
             default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
             var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
         with col4:
-            periodo_scatter = st.selectbox("período", periodos, index=0)
+            periodo_scatter = st.selectbox("período", periodos, index=0, format_func=periodo_para_exibicao)
 
         # Segunda linha: Top N e variável de ordenação
         col_t1, col_t2, col_t3 = st.columns([1, 1, 2])
@@ -3804,7 +3692,8 @@ elif menu == "Scatter Plot":
                 "período inicial",
                 periodos,
                 index=idx_inicial,
-                key="periodo_inicial_n2"
+                key="periodo_inicial_n2",
+                format_func=periodo_para_exibicao
             )
         with col_p4:
             # Período subsequente (mais recente por padrão)
@@ -3812,7 +3701,8 @@ elif menu == "Scatter Plot":
                 "período subsequente",
                 periodos,
                 index=0,
-                key="periodo_subseq_n2"
+                key="periodo_subseq_n2",
+                format_func=periodo_para_exibicao
             )
 
         # Segunda linha: Top N e tamanho
@@ -4041,31 +3931,10 @@ elif menu == "Deltas (Antes e Depois)":
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
-        # Lista de todos os bancos disponíveis
+        # Lista de todos os bancos disponíveis com ordenação por alias
         bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-            aliases_set = set(st.session_state['dict_aliases'].values())
-            bancos_com_alias = []
-            bancos_sem_alias = []
-
-            for banco in bancos_todos:
-                if banco in aliases_set:
-                    bancos_com_alias.append(banco)
-                else:
-                    bancos_sem_alias.append(banco)
-
-            def sort_key(nome):
-                primeiro_char = nome[0].lower() if nome else 'z'
-                if primeiro_char.isdigit():
-                    return (1, nome.lower())
-                return (0, nome.lower())
-
-            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key)
-            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key)
-            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-        else:
-            todos_bancos = sorted(bancos_todos)
+        dict_aliases = st.session_state.get('dict_aliases', {})
+        todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         # ===== LINHA 1: Seleção de variáveis =====
         st.markdown("**variáveis para análise de deltas**")
@@ -4102,14 +3971,16 @@ elif menu == "Deltas (Antes e Depois)":
                 "período inicial",
                 periodos_dropdown,
                 index=indice_inicial_delta,
-                key="periodo_inicial_delta"
+                key="periodo_inicial_delta",
+                format_func=periodo_para_exibicao
             )
         with col_p2:
             periodo_subsequente_delta = st.selectbox(
                 "período subsequente",
                 periodos_dropdown,
                 index=0,
-                key="periodo_subsequente_delta"
+                key="periodo_subsequente_delta",
+                format_func=periodo_para_exibicao
             )
         with col_tipo_var:
             tipo_variacao = st.radio(
@@ -4956,25 +4827,8 @@ elif menu == "Taxas de Juros":
     st.markdown("##### Instituições Financeiras (Peers)")
 
     # Ordenar instituições: com alias primeiro, depois sem alias
-    instituicoes_ordenadas = instituicoes_disponiveis.copy()
-    if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-        # Criar mapeamento reverso de alias -> nome original
-        aliases_reverso = {v: k for k, v in st.session_state['dict_aliases'].items()}
-        aliases_set = set(st.session_state['dict_aliases'].values())
-
-        # Separar instituições com e sem correspondência de alias
-        inst_com_alias = []
-        inst_sem_alias = []
-
-        for inst in instituicoes_disponiveis:
-            # Verificar se o nome da instituição tem correspondência no sistema de aliases
-            # (pode não ser exatamente igual, mas tentamos aproximar)
-            if inst in aliases_set or inst in st.session_state['dict_aliases']:
-                inst_com_alias.append(inst)
-            else:
-                inst_sem_alias.append(inst)
-
-        instituicoes_ordenadas = sorted(inst_com_alias) + sorted(inst_sem_alias)
+    dict_aliases = st.session_state.get('dict_aliases', {})
+    instituicoes_ordenadas = ordenar_bancos_com_alias(instituicoes_disponiveis, dict_aliases)
 
     instituicoes_selecionadas = st.multiselect(
         "Selecione as instituições para comparar",
@@ -5179,31 +5033,10 @@ elif menu == "Crie sua métrica!":
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
-        # Lista de todos os bancos disponíveis
+        # Lista de todos os bancos disponíveis com ordenação por alias
         bancos_todos = df['Instituição'].dropna().unique().tolist()
-
-        if 'dict_aliases' in st.session_state and st.session_state['dict_aliases']:
-            aliases_set = set(st.session_state['dict_aliases'].values())
-            bancos_com_alias = []
-            bancos_sem_alias = []
-
-            for banco in bancos_todos:
-                if banco in aliases_set:
-                    bancos_com_alias.append(banco)
-                else:
-                    bancos_sem_alias.append(banco)
-
-            def sort_key_brincar(nome):
-                primeiro_char = nome[0].lower() if nome else 'z'
-                if primeiro_char.isdigit():
-                    return (1, nome.lower())
-                return (0, nome.lower())
-
-            bancos_com_alias_sorted = sorted(bancos_com_alias, key=sort_key_brincar)
-            bancos_sem_alias_sorted = sorted(bancos_sem_alias, key=sort_key_brincar)
-            todos_bancos = bancos_com_alias_sorted + bancos_sem_alias_sorted
-        else:
-            todos_bancos = sorted(bancos_todos)
+        dict_aliases = st.session_state.get('dict_aliases', {})
+        todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         st.markdown("### construtor de métricas derivadas")
         st.caption("monte uma métrica personalizada combinando variáveis com operações matemáticas")
@@ -5429,7 +5262,8 @@ elif menu == "Crie sua métrica!":
                             "período",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_scatter_brincar"
+                            key="periodo_scatter_brincar",
+                            format_func=periodo_para_exibicao
                         )
 
                     with col_eixo_x:
@@ -5610,14 +5444,16 @@ elif menu == "Crie sua métrica!":
                             "período inicial",
                             periodos_dropdown,
                             index=indice_inicial_brincar,
-                            key="periodo_inicial_brincar"
+                            key="periodo_inicial_brincar",
+                            format_func=periodo_para_exibicao
                         )
                     with col_p2:
                         periodo_subsequente_brincar = st.selectbox(
                             "período subsequente",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_subsequente_brincar"
+                            key="periodo_subsequente_brincar",
+                            format_func=periodo_para_exibicao
                         )
                     with col_tipo_var:
                         tipo_variacao_brincar = st.radio(
@@ -5851,7 +5687,8 @@ elif menu == "Crie sua métrica!":
                             "período",
                             periodos_dropdown,
                             index=0,
-                            key="periodo_ranking_brincar"
+                            key="periodo_ranking_brincar",
+                            format_func=periodo_para_exibicao
                         )
 
                     with col_ordem:
