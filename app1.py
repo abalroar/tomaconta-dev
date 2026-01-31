@@ -4783,291 +4783,317 @@ elif menu == "Carteira 4.966":
 
 elif menu == "Taxas de Juros por Produto":
     # =========================================================================
-    # ABA TAXAS DE JUROS POR PRODUTO - Visualização por segmento PF/PJ
-    # Com LAZY LOADING para economia de memória
+    # ABA TAXAS DE JUROS POR PRODUTO - Extração direta da API do BCB
     # =========================================================================
-    from utils.ifdata_cache import (
-        get_manager,
-        formatar_nome_modalidade,
-    )
+    import requests
+
+    # URL da API do BCB
+    API_TAXAS_URL = "https://olinda.bcb.gov.br/olinda/servico/taxaJuros/versao/v2/odata/TaxasJurosDiariaPorInicioPeriodo"
+
+    def formatar_modalidade(nome: str) -> str:
+        """Formata nome da modalidade para exibição."""
+        if not nome:
+            return nome
+        preposicoes = {'de', 'da', 'do', 'das', 'dos', 'e', 'em', 'para', 'com', 'sem', 'por'}
+        palavras = nome.lower().split()
+        resultado = []
+        for i, palavra in enumerate(palavras):
+            if i == 0 or palavra not in preposicoes:
+                resultado.append(palavra.capitalize())
+            else:
+                resultado.append(palavra)
+        return ' '.join(resultado)
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def buscar_taxas_juros_api(data_inicio: str, data_fim: str) -> pd.DataFrame:
+        """Busca dados de taxas de juros diretamente da API do BCB."""
+        params = {
+            "$format": "json",
+            "$top": 150000,
+            "dataInicioPeriodo": f"'{data_inicio}'"
+        }
+
+        try:
+            response = requests.get(API_TAXAS_URL, params=params, timeout=120)
+
+            if response.status_code != 200:
+                return pd.DataFrame()
+
+            dados = response.json()
+
+            if 'value' not in dados or not dados['value']:
+                return pd.DataFrame()
+
+            df = pd.DataFrame(dados['value'])
+
+            # Converter datas
+            df['InicioPeriodo'] = pd.to_datetime(df['InicioPeriodo'])
+            df['FimPeriodo'] = pd.to_datetime(df['FimPeriodo'])
+
+            # Filtrar por data final
+            data_fim_dt = pd.to_datetime(data_fim)
+            df = df[df['FimPeriodo'] <= data_fim_dt]
+
+            # Renomear colunas
+            df = df.rename(columns={
+                'InicioPeriodo': 'Início Período',
+                'FimPeriodo': 'Fim Período',
+                'Segmento': 'Segmento',
+                'Modalidade': 'Produto',
+                'Posicao': 'Posição',
+                'InstituicaoFinanceira': 'Instituição Financeira',
+                'TaxaJurosAoMes': 'Taxa Mensal (%)',
+                'TaxaJurosAoAno': 'Taxa Anual (%)',
+                'cnpj8': 'CNPJ'
+            })
+
+            # Ordenar
+            df = df.sort_values(['Fim Período', 'Produto', 'Posição'], ascending=[False, True, True])
+
+            return df
+
+        except Exception as e:
+            return pd.DataFrame()
 
     st.markdown("### Taxas de Juros por Produto")
-    st.caption("Dados do Banco Central do Brasil - Taxas de juros por modalidade de crédito e instituição financeira")
+    st.caption("Dados extraídos diretamente da API do Banco Central do Brasil")
 
-    # Mostrar informação sobre periodicidade em expander
     with st.expander("ℹ️ Sobre os dados", expanded=False):
         st.markdown("""
         **Fonte:** API do Banco Central do Brasil - Taxas de Juros
 
         **Periodicidade:** Janelas de 5 dias úteis consecutivos (rolling window).
 
-        **Posição:** Campo que indica o ranking da instituição para aquele produto/período.
+        **Posição:** Ranking da instituição para aquele produto/período.
         Posição 1 = menor taxa (melhor para o cliente).
 
         **Segmentos:**
         - **PF (Pessoa Física):** Produtos de crédito para pessoas físicas
         - **PJ (Pessoa Jurídica):** Produtos de crédito para empresas
-
-        Para atualizar os dados, vá em **Atualizar Base** → **Taxas de Juros (API BCB)**.
         """)
 
-    # Verificar se cache existe (sem carregar dados completos)
-    manager = get_manager()
-    cache_taxas = manager.get_cache("taxas_juros")
-    info_cache = manager.info("taxas_juros")
+    st.markdown("---")
 
-    if not info_cache or info_cache.get("erro"):
-        st.warning("⚠️ Cache de Taxas de Juros não encontrado ou vazio.")
-        st.info("👉 Vá em **Atualizar Base** → selecione **Taxas de Juros (API BCB)** → extraia os dados.")
-    else:
-        # Mostrar info do cache sem carregar dados
-        col_info1, col_info2 = st.columns(2)
-        with col_info1:
-            st.metric("Registros no cache", f"{info_cache.get('linhas', 0):,}")
-        with col_info2:
-            ultima_att = info_cache.get('ultima_atualizacao', 'N/A')
-            if ultima_att and ultima_att != 'N/A':
-                try:
-                    dt_att = pd.to_datetime(ultima_att)
-                    ultima_att = dt_att.strftime('%d/%m/%Y %H:%M')
-                except:
-                    pass
-            st.metric("Última atualização", ultima_att)
+    # =============================================================
+    # CONFIGURAÇÕES
+    # =============================================================
+    st.markdown("#### ⚙️ Configurações")
 
-        st.markdown("---")
+    col_periodo1, col_periodo2 = st.columns(2)
 
-        # =============================================================
-        # FILTROS (configurados antes de carregar dados)
-        # =============================================================
-        st.markdown("#### ⚙️ Configurações")
+    from datetime import date
+    data_hoje = date.today()
+    data_default_inicio = data_hoje - timedelta(days=90)
 
-        col_periodo1, col_periodo2, col_tipo = st.columns([2, 2, 2])
+    with col_periodo1:
+        data_inicio = st.date_input(
+            "Período Inicial",
+            value=data_default_inicio,
+            key="taxas_juros_data_inicio",
+            format="DD/MM/YYYY"
+        )
 
-        # Datas default (sem carregar dados)
-        from datetime import date
-        data_hoje = date.today()
-        data_default_inicio = data_hoje - timedelta(days=90)
+    with col_periodo2:
+        data_fim = st.date_input(
+            "Período Final",
+            value=data_hoje,
+            key="taxas_juros_data_fim",
+            format="DD/MM/YYYY"
+        )
 
-        with col_periodo1:
-            data_inicio = st.date_input(
-                "Período Inicial",
-                value=data_default_inicio,
-                key="taxas_juros_data_inicio_view",
-                format="DD/MM/YYYY"
-            )
+    col_seg, col_tipo = st.columns(2)
 
-        with col_periodo2:
-            data_fim = st.date_input(
-                "Período Final",
-                value=data_hoje,
-                key="taxas_juros_data_fim_view",
-                format="DD/MM/YYYY"
-            )
-
-        with col_tipo:
-            tipo_taxa = st.radio(
-                "Tipo de taxa",
-                ["Taxa Mensal (%)", "Taxa Anual (%)"],
-                horizontal=True,
-                key="taxas_juros_tipo_taxa_view"
-            )
-
-        # Seleção de segmento
+    with col_seg:
         segmento_selecionado = st.radio(
             "Segmento",
             ["PF", "PJ"],
             horizontal=True,
-            key="taxas_juros_segmento_view",
+            key="taxas_juros_segmento",
             help="PF = Pessoa Física, PJ = Pessoa Jurídica"
         )
 
-        st.caption(f"Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
+    with col_tipo:
+        tipo_taxa = st.radio(
+            "Tipo de taxa",
+            ["Taxa Mensal (%)", "Taxa Anual (%)"],
+            horizontal=True,
+            key="taxas_juros_tipo_taxa"
+        )
 
-        st.markdown("---")
+    st.caption(f"Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
 
-        # =============================================================
-        # LAZY LOADING - Botão para carregar dados
-        # =============================================================
-        if 'taxas_dados_carregados' not in st.session_state:
-            st.session_state['taxas_dados_carregados'] = False
+    st.markdown("---")
 
-        col_btn, col_status = st.columns([1, 3])
-        with col_btn:
-            if st.button("🔍 Carregar Dados", key="btn_carregar_taxas", type="primary"):
-                st.session_state['taxas_dados_carregados'] = True
+    # =============================================================
+    # BOTÃO PARA BUSCAR DADOS DA API
+    # =============================================================
+    col_btn, col_info = st.columns([1, 3])
 
-        with col_status:
-            if not st.session_state['taxas_dados_carregados']:
-                st.info("Clique em **Carregar Dados** para visualizar os gráficos")
+    with col_btn:
+        buscar = st.button("🔍 Buscar Dados", key="btn_buscar_taxas", type="primary")
 
-        # Só carrega e processa dados após clicar no botão
-        if st.session_state['taxas_dados_carregados']:
-            with st.spinner("Carregando dados..."):
-                resultado_cache = cache_taxas.carregar_local()
+    with col_info:
+        st.info("Clique em **Buscar Dados** para consultar a API do BCB")
 
-            if not resultado_cache.sucesso or resultado_cache.dados is None or resultado_cache.dados.empty:
-                st.error("Erro ao carregar dados do cache.")
-                st.session_state['taxas_dados_carregados'] = False
+    # Buscar dados quando botão clicado
+    if buscar:
+        with st.spinner("Buscando dados na API do BCB..."):
+            df_resultado = buscar_taxas_juros_api(
+                data_inicio.strftime('%Y-%m-%d'),
+                data_fim.strftime('%Y-%m-%d')
+            )
+            if not df_resultado.empty:
+                st.session_state['taxas_df'] = df_resultado
+                st.session_state['taxas_params'] = {
+                    'data_inicio': data_inicio,
+                    'data_fim': data_fim
+                }
             else:
-                df_taxas_completo = resultado_cache.dados
+                st.error("Nenhum dado retornado pela API. Verifique o período selecionado.")
 
-                # Converter datas se necessário
-                if 'Fim Período' in df_taxas_completo.columns and not pd.api.types.is_datetime64_any_dtype(df_taxas_completo['Fim Período']):
-                    df_taxas_completo['Fim Período'] = pd.to_datetime(df_taxas_completo['Fim Período'])
+    # Exibir dados se existirem
+    if 'taxas_df' in st.session_state and not st.session_state['taxas_df'].empty:
+        df_taxas = st.session_state['taxas_df']
 
-                # Filtrar por período
-                df_filtrado = df_taxas_completo[
-                    (df_taxas_completo['Fim Período'] >= pd.to_datetime(data_inicio)) &
-                    (df_taxas_completo['Fim Período'] <= pd.to_datetime(data_fim))
-                ]
+        # Filtrar por segmento
+        if 'Segmento' in df_taxas.columns:
+            df_segmento = df_taxas[df_taxas['Segmento'] == segmento_selecionado]
+        else:
+            df_segmento = df_taxas
 
-                # Filtrar por segmento
-                if 'Segmento' in df_filtrado.columns:
-                    df_segmento = df_filtrado[df_filtrado['Segmento'] == segmento_selecionado]
+        if df_segmento.empty:
+            st.warning(f"Nenhum dado encontrado para {segmento_selecionado}.")
+        else:
+            produtos_disponiveis = sorted(df_segmento['Produto'].dropna().unique().tolist())
+
+            st.success(f"✅ {len(df_segmento):,} registros | {len(produtos_disponiveis)} produtos em {segmento_selecionado}")
+
+            # Seleção de produto
+            produto_selecionado = st.selectbox(
+                "Selecione o Produto",
+                options=produtos_disponiveis,
+                format_func=formatar_modalidade,
+                key="taxas_produto_sel"
+            )
+
+            if produto_selecionado:
+                df_produto = df_segmento[df_segmento['Produto'] == produto_selecionado]
+
+                st.markdown(f"##### {formatar_modalidade(produto_selecionado)}")
+
+                # Data de referência
+                data_ref = df_produto['Fim Período'].max()
+                df_data_ref = df_produto[df_produto['Fim Período'] == data_ref]
+
+                # Top 10 por posição
+                top_10_bancos = []
+                if 'Posição' in df_data_ref.columns and not df_data_ref.empty:
+                    df_sorted = df_data_ref.sort_values('Posição', ascending=True)
+                    top_10_bancos = df_sorted['Instituição Financeira'].head(10).tolist()
                 else:
-                    df_segmento = df_filtrado
+                    top_10_bancos = sorted(df_produto['Instituição Financeira'].unique().tolist())[:10]
 
-                if df_segmento.empty:
-                    st.warning(f"Nenhum dado encontrado para {segmento_selecionado} no período selecionado.")
+                # Lista de instituições
+                todas_instituicoes = sorted(df_produto['Instituição Financeira'].unique().tolist())
+                dict_aliases = st.session_state.get('dict_aliases', {})
+                todas_instituicoes_ord = ordenar_bancos_com_alias(todas_instituicoes, dict_aliases)
+
+                # Multiselect
+                instituicoes_selecionadas = st.multiselect(
+                    "Instituições (Top 10 por posição pré-selecionadas, máx 20)",
+                    options=todas_instituicoes_ord,
+                    default=[b for b in top_10_bancos if b in todas_instituicoes_ord],
+                    max_selections=20,
+                    key="taxas_inst_sel",
+                    help=f"Top 10 baseado na posição de {data_ref.strftime('%d/%m/%Y')}"
+                )
+
+                if not instituicoes_selecionadas:
+                    st.warning("Selecione ao menos uma instituição.")
                 else:
-                    # Obter produtos disponíveis
-                    produtos_disponiveis = sorted(df_segmento['Produto'].dropna().unique().tolist())
+                    # Preparar dados para gráfico
+                    df_plot = df_produto[df_produto['Instituição Financeira'].isin(instituicoes_selecionadas)]
+                    df_plot = df_plot.assign(Data=pd.to_datetime(df_plot['Fim Período']))
+                    coluna_valor = tipo_taxa
 
-                    st.success(f"✅ {len(df_segmento):,} registros carregados | {len(produtos_disponiveis)} produtos em {segmento_selecionado}")
+                    # Agregar
+                    df_agg = df_plot.groupby(['Data', 'Instituição Financeira'])[coluna_valor].mean().reset_index()
 
-                    # Seleção de produto
-                    produto_selecionado = st.selectbox(
-                        "Selecione o Produto",
-                        options=produtos_disponiveis,
-                        format_func=formatar_nome_modalidade,
-                        key="taxas_produto_selecionado"
+                    # Gráfico
+                    fig = px.line(
+                        df_agg,
+                        x='Data',
+                        y=coluna_valor,
+                        color='Instituição Financeira',
+                        title=f'{formatar_modalidade(produto_selecionado)} - {tipo_taxa}',
+                        labels={
+                            'Data': 'Data',
+                            coluna_valor: tipo_taxa,
+                            'Instituição Financeira': 'Instituição'
+                        },
+                        template='plotly_white'
                     )
 
-                    if produto_selecionado:
-                        df_produto = df_segmento[df_segmento['Produto'] == produto_selecionado]
+                    fig.update_layout(
+                        height=450,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=-0.4,
+                            xanchor="center",
+                            x=0.5
+                        ),
+                        xaxis_title="",
+                        yaxis_title=tipo_taxa,
+                        hovermode='x unified',
+                        margin=dict(b=100)
+                    )
 
-                        st.markdown(f"##### {formatar_nome_modalidade(produto_selecionado)}")
+                    fig.update_traces(mode='lines+markers', marker=dict(size=3))
+                    fig.update_xaxes(tickformat="%d/%m/%y")
 
-                        # =============================================================
-                        # AUTO-SELEÇÃO TOP 10 POR POSIÇÃO NA DATA FINAL
-                        # =============================================================
-                        data_ref = df_produto['Fim Período'].max()
-                        df_data_ref = df_produto[df_produto['Fim Período'] == data_ref]
+                    st.plotly_chart(fig, use_container_width=True)
 
-                        # Obter Top 10 por posição
-                        top_10_bancos = []
-                        if 'Posição' in df_data_ref.columns and not df_data_ref.empty:
-                            df_sorted = df_data_ref.sort_values('Posição', ascending=True)
-                            top_10_bancos = df_sorted['Instituição Financeira'].head(10).tolist()
-                        else:
-                            top_10_bancos = sorted(df_produto['Instituição Financeira'].unique().tolist())[:10]
+                    # Estatísticas
+                    with st.expander("📋 Ranking na data mais recente"):
+                        df_stats = df_data_ref[df_data_ref['Instituição Financeira'].isin(instituicoes_selecionadas)]
+                        if not df_stats.empty:
+                            cols_display = ['Instituição Financeira', 'Posição', 'Taxa Mensal (%)', 'Taxa Anual (%)']
+                            cols_disponíveis = [c for c in cols_display if c in df_stats.columns]
+                            df_stats_display = df_stats[cols_disponíveis].copy()
+                            if 'Posição' in df_stats_display.columns:
+                                df_stats_display = df_stats_display.sort_values('Posição')
+                            st.caption(f"Ranking em {data_ref.strftime('%d/%m/%Y')}:")
+                            st.dataframe(df_stats_display, use_container_width=True, hide_index=True)
 
-                        # Lista de instituições
-                        todas_instituicoes = sorted(df_produto['Instituição Financeira'].unique().tolist())
-                        dict_aliases = st.session_state.get('dict_aliases', {})
-                        todas_instituicoes_ord = ordenar_bancos_com_alias(todas_instituicoes, dict_aliases)
+                # Exportação
+                st.markdown("---")
+                with st.expander("📥 Exportar dados"):
+                    col_exp1, col_exp2 = st.columns(2)
 
-                        # Multiselect
-                        instituicoes_selecionadas = st.multiselect(
-                            "Instituições (Top 10 por posição pré-selecionadas, máx 20)",
-                            options=todas_instituicoes_ord,
-                            default=[b for b in top_10_bancos if b in todas_instituicoes_ord],
-                            max_selections=20,
-                            key="taxas_instituicoes_sel",
-                            help=f"Top 10 baseado na posição de {data_ref.strftime('%d/%m/%Y')}"
+                    with col_exp1:
+                        csv_data = df_segmento.to_csv(index=False, sep=';', decimal=',')
+                        st.download_button(
+                            label="⬇️ Baixar CSV",
+                            data=csv_data,
+                            file_name=f"taxas_juros_{segmento_selecionado}_{data_inicio.strftime('%Y%m%d')}_{data_fim.strftime('%Y%m%d')}.csv",
+                            mime="text/csv",
+                            key="taxas_download_csv"
                         )
 
-                        if not instituicoes_selecionadas:
-                            st.warning("Selecione ao menos uma instituição.")
-                        else:
-                            # Filtrar e preparar dados para gráfico
-                            df_plot = df_produto[df_produto['Instituição Financeira'].isin(instituicoes_selecionadas)]
-                            df_plot = df_plot.assign(Data=pd.to_datetime(df_plot['Fim Período']))
-                            coluna_valor = tipo_taxa
+                    with col_exp2:
+                        buffer_excel = io.BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                            df_segmento.to_excel(writer, index=False, sheet_name='dados')
+                        buffer_excel.seek(0)
 
-                            # Agregar
-                            df_agg = df_plot.groupby(['Data', 'Instituição Financeira'])[coluna_valor].mean().reset_index()
-
-                            # Criar gráfico
-                            fig = px.line(
-                                df_agg,
-                                x='Data',
-                                y=coluna_valor,
-                                color='Instituição Financeira',
-                                title=f'{formatar_nome_modalidade(produto_selecionado)} - {tipo_taxa}',
-                                labels={
-                                    'Data': 'Data',
-                                    coluna_valor: tipo_taxa,
-                                    'Instituição Financeira': 'Instituição'
-                                },
-                                template='plotly_white'
-                            )
-
-                            fig.update_layout(
-                                height=450,
-                                legend=dict(
-                                    orientation="h",
-                                    yanchor="bottom",
-                                    y=-0.4,
-                                    xanchor="center",
-                                    x=0.5
-                                ),
-                                xaxis_title="",
-                                yaxis_title=tipo_taxa,
-                                hovermode='x unified',
-                                margin=dict(b=100)
-                            )
-
-                            fig.update_traces(mode='lines+markers', marker=dict(size=3))
-                            fig.update_xaxes(tickformat="%d/%m/%y")
-
-                            st.plotly_chart(fig, use_container_width=True)
-
-                            # Estatísticas
-                            with st.expander("📋 Dados e estatísticas"):
-                                df_stats = df_data_ref[df_data_ref['Instituição Financeira'].isin(instituicoes_selecionadas)]
-                                if not df_stats.empty:
-                                    cols_display = ['Instituição Financeira', 'Posição', 'Taxa Mensal (%)', 'Taxa Anual (%)']
-                                    cols_disponíveis = [c for c in cols_display if c in df_stats.columns]
-                                    df_stats_display = df_stats[cols_disponíveis].copy()
-                                    if 'Posição' in df_stats_display.columns:
-                                        df_stats_display = df_stats_display.sort_values('Posição')
-                                    st.caption(f"Ranking em {data_ref.strftime('%d/%m/%Y')}:")
-                                    st.dataframe(df_stats_display, use_container_width=True, hide_index=True)
-
-                    # =============================================================
-                    # EXPORTAÇÃO
-                    # =============================================================
-                    st.markdown("---")
-                    with st.expander("📥 Exportar dados do segmento"):
-                        col_exp1, col_exp2 = st.columns(2)
-
-                        with col_exp1:
-                            csv_data = df_segmento.to_csv(index=False, sep=';', decimal=',')
-                            st.download_button(
-                                label="⬇️ Baixar CSV",
-                                data=csv_data,
-                                file_name=f"taxas_juros_{segmento_selecionado}_{data_inicio.strftime('%Y%m%d')}_{data_fim.strftime('%Y%m%d')}.csv",
-                                mime="text/csv",
-                                key="taxas_juros_download_csv"
-                            )
-
-                        with col_exp2:
-                            buffer_excel = io.BytesIO()
-                            with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                                df_segmento.to_excel(writer, index=False, sheet_name='dados')
-                            buffer_excel.seek(0)
-
-                            st.download_button(
-                                label="⬇️ Baixar Excel",
-                                data=buffer_excel.getvalue(),
-                                file_name=f"taxas_juros_{segmento_selecionado}_{data_inicio.strftime('%Y%m%d')}_{data_fim.strftime('%Y%m%d')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="taxas_juros_download_excel"
-                            )
-
-                # Liberar memória após uso
-                del resultado_cache
+                        st.download_button(
+                            label="⬇️ Baixar Excel",
+                            data=buffer_excel.getvalue(),
+                            file_name=f"taxas_juros_{segmento_selecionado}_{data_inicio.strftime('%Y%m%d')}_{data_fim.strftime('%Y%m%d')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="taxas_download_excel"
+                        )
 
 elif menu == "Crie sua métrica!":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
