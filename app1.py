@@ -4805,31 +4805,34 @@ elif menu == "Taxas de Juros por Produto":
                 resultado.append(palavra)
         return ' '.join(resultado)
 
-    @st.cache_data(ttl=1800, show_spinner="Buscando dados do BCB...")
-    def buscar_taxas_bcb(data_inicio: str) -> pd.DataFrame:
-        """Busca dados de taxas de juros da API do BCB."""
-        # Formato correto para a API do BCB: parâmetro direto, não OData filter
-        url = f"{API_TAXAS_URL}(dataInicioPeriodo=@dataInicioPeriodo)"
-        params = {
-            "$format": "json",
-            "$top": 100000,
-            "@dataInicioPeriodo": f"'{data_inicio}'"
-        }
+    @st.cache_data(ttl=3600, show_spinner="Buscando dados do BCB (12 meses)...")
+    def buscar_taxas_bcb_historico() -> pd.DataFrame:
+        """Busca dados de taxas de juros dos últimos 12 meses da API do BCB.
+        Retorna apenas a última data de cada mês para otimizar performance."""
+        from datetime import date
+
+        # Data de 13 meses atrás (para garantir 12 meses completos)
+        data_inicio = (date.today() - timedelta(days=400)).strftime('%Y-%m-%d')
+
+        # Tentar diferentes formatos de URL
+        urls_tentar = [
+            f"{API_TAXAS_URL}?$format=json&$top=500000",
+            f"{API_TAXAS_URL}(dataInicioPeriodo=@dataInicioPeriodo)?$format=json&$top=500000&@dataInicioPeriodo='{data_inicio}'",
+        ]
+
+        response = None
+        for url in urls_tentar:
+            try:
+                response = requests.get(url, timeout=120)
+                if response.status_code == 200:
+                    break
+            except:
+                continue
+
+        if response is None or response.status_code != 200:
+            return pd.DataFrame()
 
         try:
-            response = requests.get(url, params=params, timeout=60)
-
-            if response.status_code != 200:
-                # Tentar formato alternativo
-                params_alt = {
-                    "$format": "json",
-                    "$top": 100000
-                }
-                url_alt = f"{API_TAXAS_URL}?$format=json&$top=100000"
-                response = requests.get(url_alt, timeout=60)
-                if response.status_code != 200:
-                    return pd.DataFrame()
-
             dados = response.json()
 
             if 'value' not in dados or not dados['value']:
@@ -4852,23 +4855,33 @@ elif menu == "Taxas de Juros por Produto":
             # Converter datas
             df['Fim Período'] = pd.to_datetime(df['Fim Período'])
 
-            return df
+            # Filtrar últimos 12 meses
+            data_limite = pd.Timestamp.today() - pd.DateOffset(months=12)
+            df = df[df['Fim Período'] >= data_limite]
 
-        except requests.exceptions.Timeout:
-            st.error("Timeout ao conectar com a API do BCB")
-            return pd.DataFrame()
+            # Criar coluna Ano-Mês para agrupar
+            df['AnoMes'] = df['Fim Período'].dt.to_period('M')
+
+            # Para cada combinação (Segmento, Produto, Instituição, AnoMes), pegar a última data
+            idx = df.groupby(['Segmento', 'Produto', 'Instituição Financeira', 'AnoMes'])['Fim Período'].idxmax()
+            df_mensal = df.loc[idx].copy()
+
+            # Criar coluna de data formatada para o gráfico
+            df_mensal['Mês'] = df_mensal['Fim Período'].dt.strftime('%b/%y')
+
+            return df_mensal
+
         except Exception as e:
-            st.error(f"Erro: {e}")
             return pd.DataFrame()
 
     st.markdown("### Taxas de Juros por Produto")
-    st.caption("Dados extraídos diretamente da API do Banco Central do Brasil")
+    st.caption("Histórico dos últimos 12 meses - API do Banco Central do Brasil")
 
     with st.expander("ℹ️ Sobre os dados", expanded=False):
         st.markdown("""
         **Fonte:** API do Banco Central do Brasil - Taxas de Juros
 
-        **Periodicidade:** Janelas de 5 dias úteis consecutivos (rolling window).
+        **Histórico:** Última data disponível de cada mês (últimos 12 meses).
 
         **Posição:** Ranking da instituição para aquele produto/período.
         Posição 1 = menor taxa (melhor para o cliente).
@@ -4877,14 +4890,9 @@ elif menu == "Taxas de Juros por Produto":
     st.markdown("---")
 
     # =============================================================
-    # BUSCAR DADOS
+    # BUSCAR DADOS HISTÓRICOS (12 MESES)
     # =============================================================
-    from datetime import date
-    data_hoje = date.today()
-    data_busca = (data_hoje - timedelta(days=30)).strftime('%Y-%m-%d')
-
-    # Carregar dados automaticamente
-    df_taxas = buscar_taxas_bcb(data_busca)
+    df_taxas = buscar_taxas_bcb_historico()
 
     if df_taxas.empty:
         st.warning("Nenhum dado encontrado. A API do BCB pode estar indisponível.")
@@ -4892,11 +4900,14 @@ elif menu == "Taxas de Juros por Produto":
     else:
         # Data mais recente disponível
         data_mais_recente = df_taxas['Fim Período'].max()
-        df_recente = df_taxas[df_taxas['Fim Período'] == data_mais_recente]
+        meses_disponiveis = df_taxas['AnoMes'].nunique()
 
-        st.success(f"✅ Dados carregados | Data de referência: {data_mais_recente.strftime('%d/%m/%Y')}")
+        st.success(f"✅ {len(df_taxas):,} registros | {meses_disponiveis} meses | Até: {data_mais_recente.strftime('%d/%m/%Y')}")
 
         st.markdown("---")
+
+        # Usar dados da data mais recente para seleção de segmento/produto
+        df_recente = df_taxas[df_taxas['Fim Período'] == data_mais_recente]
 
         # =============================================================
         # DROPDOWN 1: SEGMENTO (PF / PJ)
@@ -4911,12 +4922,12 @@ elif menu == "Taxas de Juros por Produto":
         )
 
         if segmento_sel:
-            df_seg = df_recente[df_recente['Segmento'] == segmento_sel]
+            df_seg_recente = df_recente[df_recente['Segmento'] == segmento_sel]
 
             # =============================================================
             # DROPDOWN 2: PRODUTO (filtrado pelo segmento)
             # =============================================================
-            produtos = sorted(df_seg['Produto'].dropna().unique().tolist())
+            produtos = sorted(df_seg_recente['Produto'].dropna().unique().tolist())
 
             produto_sel = st.selectbox(
                 "2️⃣ Selecione o Produto",
@@ -4926,18 +4937,24 @@ elif menu == "Taxas de Juros por Produto":
             )
 
             if produto_sel:
-                df_prod = df_seg[df_seg['Produto'] == produto_sel]
+                # Filtrar dados históricos para o segmento e produto
+                df_prod_hist = df_taxas[
+                    (df_taxas['Segmento'] == segmento_sel) &
+                    (df_taxas['Produto'] == produto_sel)
+                ]
 
                 st.markdown(f"#### {formatar_modalidade(produto_sel)}")
 
                 # =============================================================
-                # MULTISELECT 3: BANCOS
+                # MULTISELECT 3: BANCOS (baseado na data mais recente)
                 # =============================================================
+                df_prod_recente = df_prod_hist[df_prod_hist['Fim Período'] == data_mais_recente]
+
                 # Ordenar por posição (menor = melhor taxa)
-                if 'Posição' in df_prod.columns:
-                    df_prod_ord = df_prod.sort_values('Posição', ascending=True)
+                if 'Posição' in df_prod_recente.columns and not df_prod_recente.empty:
+                    df_prod_ord = df_prod_recente.sort_values('Posição', ascending=True)
                 else:
-                    df_prod_ord = df_prod.sort_values('Instituição Financeira')
+                    df_prod_ord = df_prod_recente.sort_values('Instituição Financeira')
 
                 bancos_disponiveis = df_prod_ord['Instituição Financeira'].unique().tolist()
 
@@ -4949,10 +4966,10 @@ elif menu == "Taxas de Juros por Produto":
                 bancos_ordenados = ordenar_bancos_com_alias(bancos_disponiveis, dict_aliases)
 
                 bancos_sel = st.multiselect(
-                    "3️⃣ Selecione os Bancos (máx 20)",
+                    "3️⃣ Selecione os Bancos (máx 15)",
                     options=bancos_ordenados,
                     default=[b for b in top_10 if b in bancos_ordenados][:10],
-                    max_selections=20,
+                    max_selections=15,
                     key="tj_bancos",
                     help="Top 10 por menor taxa pré-selecionados"
                 )
@@ -4970,52 +4987,57 @@ elif menu == "Taxas de Juros por Produto":
                         key="tj_tipo_taxa"
                     )
 
-                    # Filtrar dados para os bancos selecionados
-                    df_chart = df_prod[df_prod['Instituição Financeira'].isin(bancos_sel)].copy()
-
-                    # Ordenar por taxa (menor primeiro)
-                    df_chart = df_chart.sort_values(tipo_taxa, ascending=True)
+                    # Filtrar dados históricos para os bancos selecionados
+                    df_chart = df_prod_hist[df_prod_hist['Instituição Financeira'].isin(bancos_sel)].copy()
+                    df_chart = df_chart.sort_values('Fim Período')
 
                     # =============================================================
-                    # GRÁFICO DE BARRAS
+                    # GRÁFICO DE LINHAS - HISTÓRICO 12 MESES
                     # =============================================================
-                    fig = px.bar(
+                    fig = px.line(
                         df_chart,
-                        x='Instituição Financeira',
+                        x='Fim Período',
                         y=tipo_taxa,
                         color='Instituição Financeira',
-                        title=f'{formatar_modalidade(produto_sel)} - {tipo_taxa}',
+                        title=f'{formatar_modalidade(produto_sel)} - {tipo_taxa} (Últimos 12 meses)',
                         labels={
-                            'Instituição Financeira': 'Instituição',
-                            tipo_taxa: tipo_taxa
+                            'Fim Período': 'Data',
+                            tipo_taxa: tipo_taxa,
+                            'Instituição Financeira': 'Instituição'
                         },
                         template='plotly_white',
-                        text=tipo_taxa
+                        markers=True
                     )
 
                     fig.update_layout(
                         height=500,
-                        showlegend=False,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=-0.35,
+                            xanchor="center",
+                            x=0.5
+                        ),
                         xaxis_title="",
                         yaxis_title=tipo_taxa,
-                        xaxis_tickangle=-45,
-                        margin=dict(b=120)
+                        hovermode='x unified',
+                        margin=dict(b=100)
                     )
 
-                    fig.update_traces(
-                        texttemplate='%{text:.2f}%',
-                        textposition='outside'
-                    )
+                    fig.update_xaxes(tickformat="%b/%y")
+                    fig.update_traces(marker=dict(size=6))
 
                     st.plotly_chart(fig, use_container_width=True)
 
                     # =============================================================
-                    # TABELA DE DADOS
+                    # TABELA DE DADOS (data mais recente)
                     # =============================================================
-                    with st.expander("📋 Ver tabela de dados"):
+                    with st.expander("📋 Ver ranking atual"):
+                        df_rank = df_prod_recente[df_prod_recente['Instituição Financeira'].isin(bancos_sel)]
                         cols_mostrar = ['Posição', 'Instituição Financeira', 'Taxa Mensal (%)', 'Taxa Anual (%)']
-                        cols_disp = [c for c in cols_mostrar if c in df_chart.columns]
-                        df_display = df_chart[cols_disp].sort_values('Posição' if 'Posição' in cols_disp else tipo_taxa)
+                        cols_disp = [c for c in cols_mostrar if c in df_rank.columns]
+                        df_display = df_rank[cols_disp].sort_values('Posição' if 'Posição' in cols_disp else tipo_taxa)
+                        st.caption(f"Ranking em {data_mais_recente.strftime('%d/%m/%Y')}:")
                         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
                     # =============================================================
@@ -5024,9 +5046,9 @@ elif menu == "Taxas de Juros por Produto":
                     with st.expander("📥 Exportar dados"):
                         csv_data = df_chart.to_csv(index=False, sep=';', decimal=',')
                         st.download_button(
-                            label="⬇️ Baixar CSV",
+                            label="⬇️ Baixar CSV (histórico)",
                             data=csv_data,
-                            file_name=f"taxas_{segmento_sel}_{produto_sel[:20]}_{data_mais_recente.strftime('%Y%m%d')}.csv",
+                            file_name=f"taxas_hist_{segmento_sel}_{produto_sel[:20]}.csv",
                             mime="text/csv",
                             key="tj_download_csv"
                         )
