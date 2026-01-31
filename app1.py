@@ -4808,18 +4808,27 @@ elif menu == "Taxas de Juros por Produto":
     @st.cache_data(ttl=1800, show_spinner="Buscando dados do BCB...")
     def buscar_taxas_bcb(data_inicio: str) -> pd.DataFrame:
         """Busca dados de taxas de juros da API do BCB."""
+        # Formato correto para a API do BCB: parâmetro direto, não OData filter
+        url = f"{API_TAXAS_URL}(dataInicioPeriodo=@dataInicioPeriodo)"
         params = {
             "$format": "json",
             "$top": 100000,
-            "$filter": f"InicioPeriodo ge '{data_inicio}'"
+            "@dataInicioPeriodo": f"'{data_inicio}'"
         }
 
         try:
-            response = requests.get(API_TAXAS_URL, params=params, timeout=60)
+            response = requests.get(url, params=params, timeout=60)
 
             if response.status_code != 200:
-                st.error(f"Erro HTTP {response.status_code}")
-                return pd.DataFrame()
+                # Tentar formato alternativo
+                params_alt = {
+                    "$format": "json",
+                    "$top": 100000
+                }
+                url_alt = f"{API_TAXAS_URL}?$format=json&$top=100000"
+                response = requests.get(url_alt, timeout=60)
+                if response.status_code != 200:
+                    return pd.DataFrame()
 
             dados = response.json()
 
