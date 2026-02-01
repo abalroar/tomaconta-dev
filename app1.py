@@ -5029,8 +5029,46 @@ elif menu == "DRE":
                         tooltip_por_label
                     )
 
-                    with st.expander("Dados para auditoria"):
-                        st.dataframe(df_filtrado, width='stretch')
+                    st.markdown("#### Exportar DRE (formato simples)")
+                    df_export = []
+                    for entry in entradas_com_label:
+                        label = entry["label"]
+                        linha = {"Item": label}
+                        for periodo in periodos_disponiveis:
+                            cell = df_filtrado[
+                                (df_filtrado["Label"] == label)
+                                & (df_filtrado["PeriodoExib"] == periodo)
+                            ]
+                            if not cell.empty:
+                                ytd_val = cell["ytd"].iloc[0]
+                                yoy_val = cell["yoy"].iloc[0]
+                            else:
+                                ytd_val = pd.NA
+                                yoy_val = pd.NA
+                            linha[f"{periodo} YTD"] = ytd_val
+                            linha[f"{periodo} Δ% YoY"] = yoy_val
+                        df_export.append(linha)
+
+                    df_export = pd.DataFrame(df_export)
+                    buffer_excel = BytesIO()
+                    with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
+                        df_export.to_excel(writer, index=False, sheet_name="DRE")
+                        worksheet = writer.sheets["DRE"]
+                        for idx, col in enumerate(df_export.columns):
+                            max_len = max(
+                                len(str(col)),
+                                df_export[col].astype(str).map(len).max()
+                            )
+                            worksheet.set_column(idx, idx, min(max_len + 2, 40))
+                    buffer_excel.seek(0)
+
+                    st.download_button(
+                        label="Baixar Excel (DRE)",
+                        data=buffer_excel,
+                        file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dre_download_excel"
+                    )
 
 elif menu == "Carteira 4.966":
     # =========================================================================
