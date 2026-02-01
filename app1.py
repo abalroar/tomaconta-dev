@@ -4441,7 +4441,7 @@ elif menu == "Deltas (Antes e Depois)":
 
 elif menu == "DRE":
     st.markdown("### Demonstração de Resultado (DRE)")
-    st.caption("Tabela com YTD irregular, YoY e compatibilidade entre bases antiga e nova.")
+    st.caption("Tabela DRE a partir de Mar/25 com YTD irregular e YoY.")
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_dre_data():
@@ -4450,14 +4450,6 @@ elif menu == "DRE":
         if resultado.sucesso and resultado.dados is not None:
             return resultado.dados, None
         return None, resultado.mensagem
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_ativo_data():
-        manager = get_cache_manager()
-        resultado = manager.carregar("ativo")
-        if resultado.sucesso and resultado.dados is not None:
-            return resultado.dados
-        return None
 
     def normalize_sources(value):
         if value is None:
@@ -4469,30 +4461,156 @@ elif menu == "DRE":
             return [p for p in parts if p]
         return []
 
-    def load_dre_mapping(path: Path):
-        if not path.exists():
-            return []
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            data = data.get("items", [])
-        mapping = []
-        for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            mapping.append({
-                "label": entry.get("label") or entry.get("nome") or "",
-                "sources_new": normalize_sources(entry.get("sources_new") or entry.get("sources")),
-                "sources_old": normalize_sources(entry.get("sources_old")),
-                "fallback_sources_new": normalize_sources(entry.get("fallback_sources_new")),
-                "fallback_sources_old": normalize_sources(entry.get("fallback_sources_old")),
-                "concept": entry.get("concept", "").strip(),
-                "metric": entry.get("metric"),
-                "numerator_labels": normalize_sources(entry.get("numerator_labels")),
-                "format": entry.get("format", "num"),
-                "ytd_note": entry.get("ytd_note", True),
-            })
-        return [m for m in mapping if m["label"]]
+    def load_dre_mapping():
+        return [
+            {
+                "label": "Rec. Aplicações Interfinanceiras Liquidez",
+                "sources": ["Rendas de Aplicações Interfinanceiras de Liquidez (a)"],
+                "concept": "Receitas de aplicações interfinanceiras de liquidez.",
+            },
+            {
+                "label": "Rec. TVMs",
+                "sources": ["Rendas de Títulos e Valores Mobiliários (b)"],
+                "concept": "Receitas de títulos e valores mobiliários.",
+            },
+            {
+                "label": "Rec. Crédito",
+                "sources": ["Rendas de Operações de Crédito (c)"],
+                "concept": "Receitas de operações de crédito.",
+            },
+            {
+                "label": "Rec. Arrendamento Financeiro",
+                "sources": ["Rendas de Arrendamento Financeiro (d)"],
+                "concept": "Receitas de arrendamento financeiro.",
+            },
+            {
+                "label": "Rec. Outras Operações c/ Características de Crédito",
+                "sources": ["Rendas de Outras Operações com Características de Concessão de Crédito (e)"],
+                "concept": "Receitas de outras operações com características de crédito.",
+            },
+            {
+                "label": "Resultado de Intermediação Financeira Bruto",
+                "sources": [
+                    "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
+                    "Rendas de Títulos e Valores Mobiliários (b)",
+                    "Rendas de Operações de Crédito (c)",
+                    "Rendas de Arrendamento Financeiro (d)",
+                    "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
+                ],
+                "concept": "Resultado de intermediação financeira bruto (a+b+c+d+e).",
+            },
+            {
+                "label": "Desp. PDD",
+                "sources": ["Resultado com Perda Esperada (f)"],
+                "concept": "Despesa com perdas esperadas (PDD).",
+            },
+            {
+                "label": "Desp. Captação",
+                "sources": ["Despesas de Captações (g)"],
+                "concept": "Despesas de captação.",
+            },
+            {
+                "label": "Desp. Dívida Elegível a Capital",
+                "sources": ["Despesas de Instrumentos de Dívida Elegíveis a Capital (h)"],
+                "concept": "Despesas com dívida elegível a capital.",
+            },
+            {
+                "label": "Res. Derivativos",
+                "sources": ["Resultado com Derivativos (i)"],
+                "concept": "Resultado com derivativos.",
+            },
+            {
+                "label": "Outros Res. Intermediação Financeira",
+                "sources": ["Outros Resultados de Intermediação Financeira (j)"],
+                "concept": "Outros resultados de intermediação financeira.",
+            },
+            {
+                "label": "Resultado Int. Financeira Líquido",
+                "sources": [
+                    "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
+                    "Rendas de Títulos e Valores Mobiliários (b)",
+                    "Rendas de Operações de Crédito (c)",
+                    "Rendas de Arrendamento Financeiro (d)",
+                    "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
+                    "Resultado com Perda Esperada (f)",
+                    "Despesas de Captações (g)",
+                    "Despesas de Instrumentos de Dívida Elegíveis a Capital (h)",
+                    "Resultado com Derivativos (i)",
+                    "Outros Resultados de Intermediação Financeira (j)",
+                ],
+                "concept": "Resultado de intermediação financeira líquido.",
+            },
+            {
+                "label": "Resultado Transações Pgto",
+                "sources": ["Resultado com Transações de Pagamento (l)"],
+                "concept": "Resultado com transações de pagamento.",
+            },
+            {
+                "label": "Renda Tarifas Bancárias",
+                "sources": ["Rendas de Tarifas Bancárias (m)"],
+                "concept": "Receitas de tarifas bancárias.",
+            },
+            {
+                "label": "Outras Prestações de Serviços",
+                "sources": ["Outras Rendas de Prestação de Serviços (n)"],
+                "concept": "Outras receitas de prestação de serviços.",
+            },
+            {
+                "label": "Desp. Pessoal",
+                "sources": ["Despesas de Pessoal (o)"],
+                "concept": "Despesas com pessoal.",
+            },
+            {
+                "label": "Desp. Adm",
+                "sources": ["Despesas Administrativas (p)"],
+                "concept": "Despesas administrativas.",
+            },
+            {
+                "label": "Desp. PDD Outras Operações",
+                "sources": ["Resultado com Perdas Esperadas de Outras Operações (q)"],
+                "concept": "Perdas esperadas de outras operações.",
+            },
+            {
+                "label": "Desp. JSCP Cooperativas",
+                "sources": ["Despesas de Juros Sobre Capital Próprio de Cooperativas (r)"],
+                "concept": "Juros sobre capital próprio (cooperativas).",
+            },
+            {
+                "label": "Desp. Tributárias",
+                "sources": ["Despesas Tributárias (s)"],
+                "concept": "Despesas tributárias.",
+            },
+            {
+                "label": "Res. Participação Controladas",
+                "sources": ["Resultado de Participações (t)"],
+                "concept": "Resultado de participações em controladas/coligadas.",
+            },
+            {
+                "label": "Outras Receitas",
+                "sources": ["Outras Receitas (u)"],
+                "concept": "Outras receitas.",
+            },
+            {
+                "label": "Outras Despesas",
+                "sources": ["Outras Despesas (v)"],
+                "concept": "Outras despesas.",
+            },
+            {
+                "label": "IR/CSLL",
+                "sources": ["Imposto de Renda e Contribuição Social (y)"],
+                "concept": "Imposto de renda e contribuição social.",
+            },
+            {
+                "label": "Res. Participação Lucro",
+                "sources": ["Participações no Lucro (z)"],
+                "concept": "Participações no lucro.",
+            },
+            {
+                "label": "Lucro Líquido Período Acumulado",
+                "sources": ["Lucro Líquido (aa) = (x) + (y) + (z)"],
+                "concept": "Lucro líquido acumulado no período.",
+            },
+        ]
 
     def find_column(df, source_name: str):
         if source_name in df.columns:
@@ -4612,37 +4730,13 @@ elif menu == "DRE":
                 df.at[idx, "yoy"] = (row["ytd"] / anterior) - 1
         return df
 
-    def compute_running_mean_denominator(df: pd.DataFrame, value_col: str, label: str):
-        df = df.copy()
-        df[["ano", "mes"]] = df["Periodo"].apply(
-            lambda x: pd.Series(parse_periodo(x))
-        )
-        df["denom"] = pd.NA
-        for (instituicao, ano), grupo in df.groupby(["Instituicao", "ano"]):
-            grupo_ordenado = grupo.sort_values("mes")
-            acumulados = []
-            for idx, row in grupo_ordenado.iterrows():
-                valor = row[value_col]
-                if not pd.isna(valor):
-                    acumulados.append(valor)
-                df.at[idx, "denom"] = sum(acumulados) / len(acumulados) if acumulados else pd.NA
-        return df[["Instituicao", "Periodo", "ano", "mes", "denom"]].rename(columns={"denom": label})
-
-    def compute_line_values(df_base: pd.DataFrame, entry: dict, base_key: str) -> pd.DataFrame:
-        fontes = entry.get(f"sources_{base_key}", [])
-        fallback = entry.get(f"fallback_sources_{base_key}", [])
-        fontes = normalize_sources(fontes)
-        fallback = normalize_sources(fallback)
+    def compute_line_values(df_base: pd.DataFrame, entry: dict) -> pd.DataFrame:
+        fontes = normalize_sources(entry.get("sources", []))
         colunas = []
         for fonte in fontes:
             col = find_column(df_base, fonte)
             if col:
                 colunas.append(col)
-        if not colunas and fallback:
-            for fonte in fallback:
-                col = find_column(df_base, fonte)
-                if col:
-                    colunas.append(col)
         if not colunas:
             return pd.DataFrame()
         series_list = [coerce_numeric(df_base[col]) for col in colunas]
@@ -4651,11 +4745,6 @@ elif menu == "DRE":
         df_out["Label"] = entry["label"]
         df_out["valor"] = valores
         return df_out
-
-    def merge_bases_by_date_entity(df_old: pd.DataFrame, df_new: pd.DataFrame) -> pd.DataFrame:
-        if df_old.empty and df_new.empty:
-            return pd.DataFrame()
-        return pd.concat([df_old, df_new], ignore_index=True)
 
     def formatar_valor_br(valor, decimais=0):
         if pd.isna(valor) or valor is None:
@@ -4779,8 +4868,7 @@ elif menu == "DRE":
         if col_periodo is None:
             st.warning("Coluna de período não encontrada nos dados DRE.")
         else:
-            mapping_path = Path(__file__).resolve().parent / "data" / "dre_mapping.json"
-            mapping_entries = load_dre_mapping(mapping_path)
+            mapping_entries = load_dre_mapping()
 
             if not mapping_entries:
                 st.warning("Mapeamento DRE não encontrado ou vazio.")
@@ -4789,12 +4877,7 @@ elif menu == "DRE":
                 if col_inst:
                     colunas_necessarias.add(col_inst)
                 for entry in mapping_entries:
-                    for fonte in (
-                        entry.get("sources_new", [])
-                        + entry.get("sources_old", [])
-                        + entry.get("fallback_sources_new", [])
-                        + entry.get("fallback_sources_old", [])
-                    ):
+                    for fonte in entry.get("sources", []):
                         col_encontrada = find_column(df_dre, fonte)
                         if col_encontrada:
                             colunas_necessarias.add(col_encontrada)
@@ -4812,8 +4895,10 @@ elif menu == "DRE":
                 df_base[["ano", "mes"]] = df_base["Periodo"].apply(
                     lambda x: pd.Series(parse_periodo(x))
                 )
-                df_old = df_base[df_base["ano"].fillna(0) <= 2024].copy()
-                df_new = df_base[df_base["ano"].fillna(0) >= 2025].copy()
+                df_new = df_base[
+                    (df_base["ano"].fillna(0) > 2025)
+                    | ((df_base["ano"] == 2025) & (df_base["mes"].fillna(0) >= 3))
+                ].copy()
 
                 instit_col = "Instituicao"
                 instituicoes = sorted(df_base[instit_col].dropna().unique().tolist())
@@ -4838,53 +4923,9 @@ elif menu == "DRE":
                         key="dre_ano"
                     )
 
-                st.markdown("#### Denominadores e bases externas")
-                upload_credito = st.file_uploader(
-                    "Carteira de Crédito Total (CSV ou JSON)",
-                    type=["csv", "json"],
-                    key="dre_carteira_upload"
-                )
-
-                def carregar_carteira_manual(uploaded_file):
-                    if uploaded_file is None:
-                        return None
-                    if uploaded_file.name.lower().endswith(".csv"):
-                        df_upload = pd.read_csv(uploaded_file)
-                    else:
-                        df_upload = pd.read_json(uploaded_file)
-                    col_p, col_i = detectar_colunas_basicas(df_upload)
-                    if col_p is None:
-                        return None
-                    df_upload = df_upload.rename(columns={col_p: "Periodo"})
-                    if col_i:
-                        df_upload = df_upload.rename(columns={col_i: "Instituicao"})
-                    else:
-                        df_upload["Instituicao"] = "Carteira"
-                    candidatos_valor = [
-                        c for c in df_upload.columns if c not in ["Periodo", "Instituicao"]
-                    ]
-                    coluna_valor = None
-                    for col in candidatos_valor:
-                        if pd.api.types.is_numeric_dtype(df_upload[col]):
-                            coluna_valor = col
-                            break
-                    if coluna_valor is None and candidatos_valor:
-                        coluna_valor = candidatos_valor[0]
-                    if coluna_valor is None:
-                        return None
-                    df_upload = df_upload.rename(columns={coluna_valor: "valor"})
-                    df_upload["valor"] = coerce_numeric(df_upload["valor"])
-                    return df_upload[["Instituicao", "Periodo", "valor"]]
-
-                df_credito_manual = carregar_carteira_manual(upload_credito)
-
                 df_values = []
                 for entry in mapping_entries:
-                    if entry.get("metric"):
-                        continue
-                    df_entry_old = compute_line_values(df_old, entry, "old")
-                    df_entry_new = compute_line_values(df_new, entry, "new")
-                    df_entry = merge_bases_by_date_entity(df_entry_old, df_entry_new)
+                    df_entry = compute_line_values(df_new, entry)
                     if not df_entry.empty:
                         df_values.append(df_entry)
 
@@ -4895,104 +4936,13 @@ elif menu == "DRE":
                     df_ytd = compute_ytd_irregular(df_valores)
                     df_ytd = compute_yoy(df_ytd)
 
-                    metric_entries = [entry for entry in mapping_entries if entry.get("metric")]
-                    df_ratio_list = []
-                    denom_ativo = None
-                    denom_credito = None
-                    denominador_escolhido = "Ativo Total (média até a data)"
-
-                    if metric_entries:
-                        if df_credito_manual is not None and not df_credito_manual.empty:
-                            denom_credito = compute_running_mean_denominator(
-                                df_credito_manual,
-                                value_col="valor",
-                                label="denom_credito"
-                            )
-
-                        opcoes_denominador = ["Ativo Total (média até a data)"]
-                        if denom_credito is not None:
-                            opcoes_denominador.append("Carteira de Crédito Total (média até a data)")
-                        denominador_escolhido = st.selectbox(
-                            "Base para métricas de razão",
-                            opcoes_denominador,
-                            key="dre_denominador"
-                        )
-
-                        precisa_ativo = any(entry.get("metric") in ["ativo", "dual"] for entry in metric_entries)
-                        if precisa_ativo and not denominador_escolhido.startswith("Carteira"):
-                            ativo_data = load_ativo_data()
-                            if ativo_data is not None and not ativo_data.empty:
-                                col_p_ativo, col_i_ativo = detectar_colunas_basicas(ativo_data)
-                                col_ativo_total = None
-                                if col_p_ativo:
-                                    for col in ativo_data.columns:
-                                        if "ativo total" in str(col).lower():
-                                            col_ativo_total = col
-                                            break
-                                if col_p_ativo and col_ativo_total:
-                                    df_ativo = ativo_data.copy()
-                                    df_ativo = df_ativo.rename(columns={col_p_ativo: "Periodo"})
-                                    if col_i_ativo:
-                                        df_ativo = df_ativo.rename(columns={col_i_ativo: "Instituicao"})
-                                    else:
-                                        df_ativo["Instituicao"] = "Ativo"
-                                    df_ativo["valor"] = coerce_numeric(df_ativo[col_ativo_total])
-                                    denom_ativo = compute_running_mean_denominator(
-                                        df_ativo[["Instituicao", "Periodo", "valor"]],
-                                        value_col="valor",
-                                        label="denom_ativo"
-                                    )
-
-                    for entry in mapping_entries:
-                        if not entry.get("metric"):
-                            continue
-                        numeradores = entry.get("numerator_labels", [])
-                        if not numeradores:
-                            continue
-                        df_num = df_ytd[df_ytd["Label"].isin(numeradores)].copy()
-                        if df_num.empty:
-                            continue
-                        df_num = (
-                            df_num.groupby(["Instituicao", "Periodo", "ano", "mes"], as_index=False)
-                            .agg({"ytd": "sum"})
-                        )
-                        if entry["metric"] == "ativo":
-                            denom = denom_ativo
-                        elif entry["metric"] == "credito":
-                            denom = denom_credito
-                        else:
-                            denom = denom_credito if denominador_escolhido.startswith("Carteira") else denom_ativo
-                        if denom is None:
-                            continue
-                        df_ratio = df_num.merge(
-                            denom,
-                            on=["Instituicao", "Periodo", "ano", "mes"],
-                            how="left"
-                        )
-                        denom_col = "denom_credito" if "denom_credito" in df_ratio.columns and denominador_escolhido.startswith("Carteira") else "denom_ativo"
-
-                        def dividir_seguro(row):
-                            denom_valor = row.get(denom_col)
-                            if denom_valor is None or pd.isna(denom_valor) or denom_valor == 0:
-                                return pd.NA
-                            return row["ytd"] / denom_valor
-
-                        df_ratio["ytd"] = df_ratio.apply(dividir_seguro, axis=1)
-                        df_ratio["Label"] = entry["label"]
-                        df_ratio_list.append(df_ratio[["Instituicao", "Periodo", "Label", "ano", "mes", "ytd"]])
-
-                    if df_ratio_list:
-                        df_ratio_all = pd.concat(df_ratio_list, ignore_index=True)
-                        df_ratio_all = compute_yoy(df_ratio_all)
-                        df_ytd = pd.concat([df_ytd, df_ratio_all], ignore_index=True)
-
                     df_ytd["PeriodoExib"] = df_ytd["Periodo"].apply(periodo_para_exibicao)
 
                     formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries}
                     tooltip_por_label = {}
                     entradas_com_label = []
                     for entry in mapping_entries:
-                        fontes = entry.get("sources_new", []) + entry.get("sources_old", [])
+                        fontes = entry.get("sources", [])
                         fontes_fmt = ", ".join([f for f in fontes if f])
                         tooltip_parts = []
                         if entry.get("concept"):
@@ -5001,13 +4951,9 @@ elif menu == "DRE":
                             tooltip_parts.append(f"Fontes: {fontes_fmt}")
                         if entry.get("ytd_note"):
                             tooltip_parts.append("Nota YTD: set/dez = jun + período.")
-                        if entry.get("metric") and denominador_escolhido.startswith("Carteira"):
-                            tooltip_parts.append("Nota: usado como proxy sobre carteira de crédito.")
                         tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
 
                         label_exib = entry["label"]
-                        if entry.get("metric") == "dual" and denominador_escolhido.startswith("Carteira"):
-                            label_exib = f"{label_exib} (sobre carteira)"
                         entrada_copy = entry.copy()
                         entrada_copy["label_exib"] = label_exib
                         entradas_com_label.append(entrada_copy)
