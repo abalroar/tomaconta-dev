@@ -4435,7 +4435,554 @@ elif menu == "Deltas (Antes e Depois)":
 
 elif menu == "DRE":
     st.markdown("### Demonstração de Resultado (DRE)")
-    st.info("Em construção: em breve, tabela DRE com regras de YTD/YoY e tooltips explicativos.")
+    st.caption("Tabela com YTD irregular, YoY e compatibilidade entre bases antiga e nova.")
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_dre_data():
+        manager = get_cache_manager()
+        resultado = manager.carregar("dre")
+        if resultado.sucesso and resultado.dados is not None:
+            return resultado.dados
+        return None
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_ativo_data():
+        manager = get_cache_manager()
+        resultado = manager.carregar("ativo")
+        if resultado.sucesso and resultado.dados is not None:
+            return resultado.dados
+        return None
+
+    def normalize_sources(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [v for v in value if isinstance(v, str) and v.strip()]
+        if isinstance(value, str):
+            parts = [p.strip() for p in value.replace("|", ";").split(";")]
+            return [p for p in parts if p]
+        return []
+
+    def load_dre_mapping(path: Path):
+        if not path.exists():
+            return []
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data = data.get("items", [])
+        mapping = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            mapping.append({
+                "label": entry.get("label") or entry.get("nome") or "",
+                "sources_new": normalize_sources(entry.get("sources_new") or entry.get("sources")),
+                "sources_old": normalize_sources(entry.get("sources_old")),
+                "fallback_sources_new": normalize_sources(entry.get("fallback_sources_new")),
+                "fallback_sources_old": normalize_sources(entry.get("fallback_sources_old")),
+                "concept": entry.get("concept", "").strip(),
+                "metric": entry.get("metric"),
+                "numerator_labels": normalize_sources(entry.get("numerator_labels")),
+                "format": entry.get("format", "num"),
+                "ytd_note": entry.get("ytd_note", True),
+            })
+        return [m for m in mapping if m["label"]]
+
+    def find_column(df, source_name: str):
+        if source_name in df.columns:
+            return source_name
+        target = source_name.strip().lower()
+        for col in df.columns:
+            if str(col).strip().lower() == target:
+                return col
+        for col in df.columns:
+            if target in str(col).strip().lower():
+                return col
+        return None
+
+    def coerce_numeric(series: pd.Series) -> pd.Series:
+        if series is None:
+            return series
+        if series.dtype == object:
+            cleaned = (
+                series.astype(str)
+                .str.replace(".", "", regex=False)
+                .str.replace(",", ".", regex=False)
+            )
+            return pd.to_numeric(cleaned, errors="coerce")
+        return pd.to_numeric(series, errors="coerce")
+
+    def detectar_colunas_basicas(df: pd.DataFrame):
+        col_periodo = None
+        for candidato in ["Período", "Periodo", "PERIODO", "PERÍODO"]:
+            if candidato in df.columns:
+                col_periodo = candidato
+                break
+        if col_periodo is None:
+            for col in df.columns:
+                if "period" in str(col).lower():
+                    col_periodo = col
+                    break
+        col_inst = None
+        for candidato in ["Instituição", "Instituicao", "INSTITUICAO", "INSTITUIÇÃO"]:
+            if candidato in df.columns:
+                col_inst = candidato
+                break
+        if col_inst is None:
+            for col in df.columns:
+                if "institu" in str(col).lower():
+                    col_inst = col
+                    break
+        return col_periodo, col_inst
+
+    def parse_periodo(periodo_val):
+        if periodo_val is None:
+            return None, None
+        texto = str(periodo_val).strip()
+        if "/" in texto:
+            partes = texto.split("/")
+            if len(partes) >= 2 and partes[0].isdigit() and partes[1].isdigit():
+                parte1 = int(partes[0])
+                ano = int(partes[1])
+                if 1 <= parte1 <= 4:
+                    mes = {1: 3, 2: 6, 3: 9, 4: 12}.get(parte1)
+                else:
+                    mes = parte1
+                return ano, mes
+        if texto.isdigit():
+            if len(texto) == 6:
+                ano = int(texto[:4])
+                mes = int(texto[4:])
+                return ano, mes
+            if len(texto) == 8:
+                ano = int(texto[:4])
+                mes = int(texto[4:6])
+                return ano, mes
+        return None, None
+
+    def compute_ytd_irregular(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df[["ano", "mes"]] = df["Periodo"].apply(
+            lambda x: pd.Series(parse_periodo(x))
+        )
+        df["ytd"] = pd.NA
+        for (instituicao, label, ano), grupo in df.groupby(["Instituicao", "Label", "ano"]):
+            valores_mes = {row["mes"]: row["valor"] for _, row in grupo.iterrows()}
+            for idx, row in grupo.iterrows():
+                mes = row["mes"]
+                valor = row["valor"]
+                ytd_val = pd.NA
+                if pd.isna(valor):
+                    ytd_val = pd.NA
+                elif mes in (3, 6):
+                    ytd_val = valor
+                elif mes in (9, 12):
+                    valor_jun = valores_mes.get(6)
+                    if valor_jun is None or pd.isna(valor_jun):
+                        ytd_val = pd.NA
+                    else:
+                        ytd_val = valor + valor_jun
+                else:
+                    ytd_val = valor
+                df.at[idx, "ytd"] = ytd_val
+        return df
+
+    def compute_yoy(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["yoy"] = pd.NA
+        for (instituicao, label, mes), grupo in df.groupby(["Instituicao", "Label", "mes"]):
+            valores_ano = {
+                row["ano"]: row["ytd"]
+                for _, row in grupo.iterrows()
+                if row["ano"] is not None
+            }
+            for idx, row in grupo.iterrows():
+                ano = row["ano"]
+                if ano is None or pd.isna(row["ytd"]):
+                    continue
+                anterior = valores_ano.get(ano - 1)
+                if anterior is None or pd.isna(anterior) or anterior == 0:
+                    continue
+                df.at[idx, "yoy"] = (row["ytd"] / anterior) - 1
+        return df
+
+    def compute_running_mean_denominator(df: pd.DataFrame, value_col: str, label: str):
+        df = df.copy()
+        df[["ano", "mes"]] = df["Periodo"].apply(
+            lambda x: pd.Series(parse_periodo(x))
+        )
+        df["denom"] = pd.NA
+        for (instituicao, ano), grupo in df.groupby(["Instituicao", "ano"]):
+            grupo_ordenado = grupo.sort_values("mes")
+            acumulados = []
+            for idx, row in grupo_ordenado.iterrows():
+                valor = row[value_col]
+                if not pd.isna(valor):
+                    acumulados.append(valor)
+                df.at[idx, "denom"] = sum(acumulados) / len(acumulados) if acumulados else pd.NA
+        return df[["Instituicao", "Periodo", "ano", "mes", "denom"]].rename(columns={"denom": label})
+
+    def compute_line_values(df_base: pd.DataFrame, entry: dict, base_key: str) -> pd.DataFrame:
+        fontes = entry.get(f"sources_{base_key}", [])
+        fallback = entry.get(f"fallback_sources_{base_key}", [])
+        fontes = normalize_sources(fontes)
+        fallback = normalize_sources(fallback)
+        colunas = []
+        for fonte in fontes:
+            col = find_column(df_base, fonte)
+            if col:
+                colunas.append(col)
+        if not colunas and fallback:
+            for fonte in fallback:
+                col = find_column(df_base, fonte)
+                if col:
+                    colunas.append(col)
+        if not colunas:
+            return pd.DataFrame()
+        series_list = [coerce_numeric(df_base[col]) for col in colunas]
+        valores = pd.concat(series_list, axis=1).sum(axis=1, min_count=1)
+        df_out = df_base[["Instituicao", "Periodo"]].copy()
+        df_out["Label"] = entry["label"]
+        df_out["valor"] = valores
+        return df_out
+
+    def merge_bases_by_date_entity(df_old: pd.DataFrame, df_new: pd.DataFrame) -> pd.DataFrame:
+        if df_old.empty and df_new.empty:
+            return pd.DataFrame()
+        return pd.concat([df_old, df_new], ignore_index=True)
+
+    def formatar_valor_br(valor, decimais=0):
+        if pd.isna(valor) or valor is None:
+            return "—"
+        try:
+            if decimais == 0:
+                return f"{valor:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            return f"{valor:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return "—"
+
+    def formatar_percentual(valor, decimais=1):
+        if pd.isna(valor) or valor is None:
+            return "—"
+        try:
+            return f"{valor * 100:.{decimais}f}%"
+        except Exception:
+            return "—"
+
+    def render_table_like_carteira_4966(df_linhas: pd.DataFrame, entradas: list, periodos: list, formato_por_label: dict, tooltip_por_label: dict):
+        html_tabela = """
+        <style>
+        .carteira-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .carteira-table th, .carteira-table td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: right;
+            vertical-align: top;
+        }
+        .carteira-table th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+        .carteira-table td:first-child {
+            text-align: left;
+            font-weight: 500;
+        }
+        .carteira-table thead tr:first-child th {
+            background-color: #4a4a4a;
+            color: white;
+            text-align: center;
+        }
+        .carteira-table thead tr:nth-child(2) th {
+            background-color: #6a6a6a;
+            color: white;
+        }
+        .dre-info {
+            font-size: 12px;
+            color: #666;
+            margin-left: 6px;
+            cursor: help;
+        }
+        </style>
+        <table class="carteira-table">
+        <thead>
+        <tr>
+        <th rowspan="2">Item</th>
+        """
+
+        for periodo in periodos:
+            html_tabela += f'<th colspan="2">{periodo}</th>'
+        html_tabela += "</tr><tr>"
+        for _ in periodos:
+            html_tabela += "<th>YTD</th><th>Δ% YoY</th>"
+        html_tabela += "</tr></thead><tbody>"
+
+        for entry in entradas:
+            label = entry["label"]
+            label_exib = entry.get("label_exib", label)
+            tooltip = tooltip_por_label.get(label, "")
+            info_html = f'<span class="dre-info" title="{tooltip}">ⓘ</span>' if tooltip else ""
+            html_tabela += f"<tr><td>{label_exib} {info_html}</td>"
+            linha = df_linhas[df_linhas["Label"] == label]
+            for periodo in periodos:
+                cell = linha[linha["PeriodoExib"] == periodo]
+                if not cell.empty:
+                    ytd_val = cell["ytd"].iloc[0]
+                    yoy_val = cell["yoy"].iloc[0]
+                else:
+                    ytd_val = pd.NA
+                    yoy_val = pd.NA
+                formato = formato_por_label.get(label, "num")
+                if formato == "pct":
+                    ytd_fmt = formatar_percentual(ytd_val, decimais=2)
+                else:
+                    ytd_fmt = formatar_valor_br(ytd_val)
+                yoy_fmt = formatar_percentual(yoy_val, decimais=1)
+                html_tabela += f"<td>{ytd_fmt}</td><td>{yoy_fmt}</td>"
+            html_tabela += "</tr>"
+
+        html_tabela += "</tbody></table>"
+        st.markdown(html_tabela, unsafe_allow_html=True)
+
+    df_dre = load_dre_data()
+    if df_dre is None or df_dre.empty:
+        st.warning("Dados DRE não disponíveis no cache. Atualize a base no menu 'Atualizar Base'.")
+    else:
+        col_periodo, col_inst = detectar_colunas_basicas(df_dre)
+        if col_periodo is None:
+            st.warning("Coluna de período não encontrada nos dados DRE.")
+        else:
+            df_base = df_dre.copy()
+            if col_inst is None:
+                df_base["Instituicao"] = df_base.get("CodInst", "Instituição")
+            else:
+                df_base = df_base.rename(columns={col_inst: "Instituicao"})
+            df_base = df_base.rename(columns={col_periodo: "Periodo"})
+
+            df_base[["ano", "mes"]] = df_base["Periodo"].apply(
+                lambda x: pd.Series(parse_periodo(x))
+            )
+            df_old = df_base[df_base["ano"].fillna(0) <= 2024].copy()
+            df_new = df_base[df_base["ano"].fillna(0) >= 2025].copy()
+
+            mapping_path = Path(__file__).resolve().parent / "data" / "dre_mapping.json"
+            mapping_entries = load_dre_mapping(mapping_path)
+
+            if not mapping_entries:
+                st.warning("Mapeamento DRE não encontrado ou vazio.")
+            else:
+                instit_col = "Instituicao"
+                instituicoes = sorted(df_base[instit_col].dropna().unique().tolist())
+                anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
+
+                col_inst, col_ano = st.columns([1, 1])
+                with col_inst:
+                    instituicao_selecionada = st.selectbox(
+                        "Instituição",
+                        instituicoes,
+                        key="dre_instituicao"
+                    )
+                with col_ano:
+                    ano_selecionado = st.selectbox(
+                        "Ano",
+                        anos_disponiveis[::-1],
+                        index=0 if anos_disponiveis else None,
+                        key="dre_ano"
+                    )
+
+                st.markdown("#### Denominadores e bases externas")
+                upload_credito = st.file_uploader(
+                    "Carteira de Crédito Total (CSV ou JSON)",
+                    type=["csv", "json"],
+                    key="dre_carteira_upload"
+                )
+
+                def carregar_carteira_manual(uploaded_file):
+                    if uploaded_file is None:
+                        return None
+                    if uploaded_file.name.lower().endswith(".csv"):
+                        df_upload = pd.read_csv(uploaded_file)
+                    else:
+                        df_upload = pd.read_json(uploaded_file)
+                    col_p, col_i = detectar_colunas_basicas(df_upload)
+                    if col_p is None:
+                        return None
+                    df_upload = df_upload.rename(columns={col_p: "Periodo"})
+                    if col_i:
+                        df_upload = df_upload.rename(columns={col_i: "Instituicao"})
+                    else:
+                        df_upload["Instituicao"] = "Carteira"
+                    candidatos_valor = [
+                        c for c in df_upload.columns if c not in ["Periodo", "Instituicao"]
+                    ]
+                    coluna_valor = None
+                    for col in candidatos_valor:
+                        if pd.api.types.is_numeric_dtype(df_upload[col]):
+                            coluna_valor = col
+                            break
+                    if coluna_valor is None and candidatos_valor:
+                        coluna_valor = candidatos_valor[0]
+                    if coluna_valor is None:
+                        return None
+                    df_upload = df_upload.rename(columns={coluna_valor: "valor"})
+                    df_upload["valor"] = coerce_numeric(df_upload["valor"])
+                    return df_upload[["Instituicao", "Periodo", "valor"]]
+
+                df_credito_manual = carregar_carteira_manual(upload_credito)
+
+                df_values = []
+                for entry in mapping_entries:
+                    if entry.get("metric"):
+                        continue
+                    df_entry_old = compute_line_values(df_old, entry, "old")
+                    df_entry_new = compute_line_values(df_new, entry, "new")
+                    df_entry = merge_bases_by_date_entity(df_entry_old, df_entry_new)
+                    if not df_entry.empty:
+                        df_values.append(df_entry)
+
+                if not df_values:
+                    st.warning("Nenhuma linha DRE foi encontrada com o mapeamento atual.")
+                else:
+                    df_valores = pd.concat(df_values, ignore_index=True)
+                    df_ytd = compute_ytd_irregular(df_valores)
+                    df_ytd = compute_yoy(df_ytd)
+
+                    df_ratio_list = []
+                    ativo_data = load_ativo_data()
+                    denom_ativo = None
+                    if ativo_data is not None and not ativo_data.empty:
+                        col_p_ativo, col_i_ativo = detectar_colunas_basicas(ativo_data)
+                        col_ativo_total = None
+                        if col_p_ativo:
+                            for col in ativo_data.columns:
+                                if "ativo total" in str(col).lower():
+                                    col_ativo_total = col
+                                    break
+                        if col_p_ativo and col_ativo_total:
+                            df_ativo = ativo_data.copy()
+                            df_ativo = df_ativo.rename(columns={col_p_ativo: "Periodo"})
+                            if col_i_ativo:
+                                df_ativo = df_ativo.rename(columns={col_i_ativo: "Instituicao"})
+                            else:
+                                df_ativo["Instituicao"] = "Ativo"
+                            df_ativo["valor"] = coerce_numeric(df_ativo[col_ativo_total])
+                            denom_ativo = compute_running_mean_denominator(
+                                df_ativo[["Instituicao", "Periodo", "valor"]],
+                                value_col="valor",
+                                label="denom_ativo"
+                            )
+
+                    denom_credito = None
+                    if df_credito_manual is not None and not df_credito_manual.empty:
+                        denom_credito = compute_running_mean_denominator(
+                            df_credito_manual,
+                            value_col="valor",
+                            label="denom_credito"
+                        )
+
+                    opcoes_denominador = ["Ativo Total (média até a data)"]
+                    if denom_credito is not None:
+                        opcoes_denominador.append("Carteira de Crédito Total (média até a data)")
+                    denominador_escolhido = st.selectbox(
+                        "Base para métricas de razão",
+                        opcoes_denominador,
+                        key="dre_denominador"
+                    )
+
+                    for entry in mapping_entries:
+                        if not entry.get("metric"):
+                            continue
+                        numeradores = entry.get("numerator_labels", [])
+                        if not numeradores:
+                            continue
+                        df_num = df_ytd[df_ytd["Label"].isin(numeradores)].copy()
+                        if df_num.empty:
+                            continue
+                        df_num = (
+                            df_num.groupby(["Instituicao", "Periodo", "ano", "mes"], as_index=False)
+                            .agg({"ytd": "sum"})
+                        )
+                        if entry["metric"] == "ativo":
+                            denom = denom_ativo
+                        elif entry["metric"] == "credito":
+                            denom = denom_credito
+                        else:
+                            denom = denom_credito if denominador_escolhido.startswith("Carteira") else denom_ativo
+                        if denom is None:
+                            continue
+                        df_ratio = df_num.merge(
+                            denom,
+                            on=["Instituicao", "Periodo", "ano", "mes"],
+                            how="left"
+                        )
+                        denom_col = "denom_credito" if "denom_credito" in df_ratio.columns and denominador_escolhido.startswith("Carteira") else "denom_ativo"
+
+                        def dividir_seguro(row):
+                            denom_valor = row.get(denom_col)
+                            if denom_valor is None or pd.isna(denom_valor) or denom_valor == 0:
+                                return pd.NA
+                            return row["ytd"] / denom_valor
+
+                        df_ratio["ytd"] = df_ratio.apply(dividir_seguro, axis=1)
+                        df_ratio["Label"] = entry["label"]
+                        df_ratio_list.append(df_ratio[["Instituicao", "Periodo", "Label", "ano", "mes", "ytd"]])
+
+                    if df_ratio_list:
+                        df_ratio_all = pd.concat(df_ratio_list, ignore_index=True)
+                        df_ratio_all = compute_yoy(df_ratio_all)
+                        df_ytd = pd.concat([df_ytd, df_ratio_all], ignore_index=True)
+
+                    df_ytd["PeriodoExib"] = df_ytd["Periodo"].apply(periodo_para_exibicao)
+
+                    formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries}
+                    tooltip_por_label = {}
+                    entradas_com_label = []
+                    for entry in mapping_entries:
+                        fontes = entry.get("sources_new", []) + entry.get("sources_old", [])
+                        fontes_fmt = ", ".join([f for f in fontes if f])
+                        tooltip_parts = []
+                        if entry.get("concept"):
+                            tooltip_parts.append(entry["concept"])
+                        if fontes_fmt:
+                            tooltip_parts.append(f"Fontes: {fontes_fmt}")
+                        if entry.get("ytd_note"):
+                            tooltip_parts.append("Nota YTD: set/dez = jun + período.")
+                        if entry.get("metric") and denominador_escolhido.startswith("Carteira"):
+                            tooltip_parts.append("Nota: usado como proxy sobre carteira de crédito.")
+                        tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
+
+                        label_exib = entry["label"]
+                        if entry.get("metric") == "dual" and denominador_escolhido.startswith("Carteira"):
+                            label_exib = f"{label_exib} (sobre carteira)"
+                        entrada_copy = entry.copy()
+                        entrada_copy["label_exib"] = label_exib
+                        entradas_com_label.append(entrada_copy)
+
+                    df_filtrado = df_ytd[
+                        (df_ytd["Instituicao"] == instituicao_selecionada)
+                        & (df_ytd["ano"] == int(ano_selecionado))
+                    ].copy()
+
+                    periodos_ordem = ["Mar", "Jun", "Set", "Dez"]
+                    periodos_disponiveis = []
+                    for mes in [3, 6, 9, 12]:
+                        periodo_texto = periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}")
+                        periodos_disponiveis.append(periodo_texto)
+
+                    render_table_like_carteira_4966(
+                        df_filtrado,
+                        entradas_com_label,
+                        periodos_disponiveis,
+                        formato_por_label,
+                        tooltip_por_label
+                    )
+
+                    with st.expander("Dados para auditoria"):
+                        st.dataframe(df_filtrado, use_container_width=True)
 
 elif menu == "Carteira 4.966":
     # =========================================================================
