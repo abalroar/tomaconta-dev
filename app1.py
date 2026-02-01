@@ -4442,8 +4442,8 @@ elif menu == "DRE":
         manager = get_cache_manager()
         resultado = manager.carregar("dre")
         if resultado.sucesso and resultado.dados is not None:
-            return resultado.dados
-        return None
+            return resultado.dados, None
+        return None, resultado.mensagem
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_ativo_data():
@@ -4748,9 +4748,10 @@ elif menu == "DRE":
         html_tabela += "</tbody></table>"
         st.markdown(html_tabela, unsafe_allow_html=True)
 
-    df_dre = load_dre_data()
+    df_dre, dre_msg = load_dre_data()
     if df_dre is None or df_dre.empty:
-        st.warning("Dados DRE não disponíveis no cache. Atualize a base no menu 'Atualizar Base'.")
+        detalhe = f" ({dre_msg})" if dre_msg else ""
+        st.warning(f"Dados DRE não disponíveis no cache. Atualize a base no menu 'Atualizar Base'.{detalhe}")
     else:
         col_periodo, col_inst = detectar_colunas_basicas(df_dre)
         if col_periodo is None:
@@ -4779,6 +4780,10 @@ elif menu == "DRE":
                 instituicoes = sorted(df_base[instit_col].dropna().unique().tolist())
                 anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
 
+                if not instituicoes or not anos_disponiveis:
+                    st.warning("Dados DRE sem instituições ou períodos válidos.")
+                    st.stop()
+
                 col_inst, col_ano = st.columns([1, 1])
                 with col_inst:
                     instituicao_selecionada = st.selectbox(
@@ -4790,7 +4795,7 @@ elif menu == "DRE":
                     ano_selecionado = st.selectbox(
                         "Ano",
                         anos_disponiveis[::-1],
-                        index=0 if anos_disponiveis else None,
+                        index=0,
                         key="dre_ano"
                     )
 
