@@ -4752,6 +4752,22 @@ elif menu == "DRE":
     if df_dre is None or df_dre.empty:
         detalhe = f" ({dre_msg})" if dre_msg else ""
         st.warning(f"Dados DRE não disponíveis no cache. Atualize a base no menu 'Atualizar Base'.{detalhe}")
+        with st.expander("Limites de recursos do Streamlit Community Cloud"):
+            st.markdown(
+                """
+                Os limites atuais (fev/2024) são aproximadamente:
+                - CPU: 0,078 cores mínimo, 2 cores máximo
+                - Memória: 690MB mínimo, 2,7GB máximo
+                - Armazenamento: sem mínimo, 50GB máximo
+
+                Sintomas comuns de limite excedido:
+                - App lento (throttling)
+                - Mensagem "🤯 This app has gone over its resource limits."
+                - Mensagem "😦 Oh no."
+
+                Apps educacionais, open-source ou de impacto social podem solicitar aumento de recursos.
+                """
+            )
     else:
         col_periodo, col_inst = detectar_colunas_basicas(df_dre)
         if col_periodo is None:
