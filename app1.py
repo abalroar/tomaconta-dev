@@ -1,3 +1,4 @@
+import importlib
 import streamlit as st
 import pandas as pd
 import os
@@ -29,6 +30,9 @@ def _perf_log(label: str) -> str:
     """Finaliza timer e retorna mensagem formatada."""
     elapsed = _perf_end(label)
     return f"[PERF] {label}: {elapsed:.3f}s"
+import utils  # garante pacote utils carregado
+importlib.invalidate_caches()
+
 from utils.ifdata_extractor import (
     gerar_periodos,
     processar_todos_periodos,
