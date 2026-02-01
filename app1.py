@@ -1721,7 +1721,7 @@ with col_header:
     """, unsafe_allow_html=True)
 
 # Lista de opções do menu principal (análise)
-MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
+MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "DRE", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
 
 # Lista de opções do menu secundário (utilitários)
 MENU_SECUNDARIO = ["Sobre", "Atualizar Base", "Glossário"]
@@ -4432,6 +4432,10 @@ elif menu == "Deltas (Antes e Depois)":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "DRE":
+    st.markdown("### Demonstração de Resultado (DRE)")
+    st.info("Em construção: em breve, tabela DRE com regras de YTD/YoY e tooltips explicativos.")
 
 elif menu == "Carteira 4.966":
     # =========================================================================
