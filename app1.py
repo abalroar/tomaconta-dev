@@ -1601,7 +1601,10 @@ if 'df_aliases' not in st.session_state:
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
     print(_perf_log("init_aliases"))
 
-if 'dados_periodos' not in st.session_state:
+
+def carregar_dados_periodos():
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        return
     _perf_start("init_dados_periodos")
     cache_manager = get_cache_manager()
     resultado_principal = cache_manager.carregar("principal")
@@ -1612,9 +1615,6 @@ if 'dados_periodos' not in st.session_state:
         dados_cache = recalcular_metricas_derivadas(dados_cache)
         print(_perf_log("recalc_metricas"))
         if 'dict_aliases' in st.session_state:
-            # OTIMIZAÇÃO: NÃO chamar construir_mapa_codinst() aqui
-            # O mapa de códigos só é necessário se os dados tiverem códigos
-            # numéricos ao invés de nomes. O cache já tem nomes válidos.
             _perf_start("aplicar_aliases")
             dados_cache = aplicar_aliases_em_periodos(
                 dados_cache,
@@ -1627,9 +1627,10 @@ if 'dados_periodos' not in st.session_state:
             st.session_state['cache_fonte'] = resultado_principal.fonte if resultado_principal else 'desconhecida'
     print(_perf_log("init_dados_periodos"))
 
-# Carregar cache de capital (isolado) se disponível
-# Primeiro tenta local, depois GitHub Releases (igual ao cache principal)
-if 'dados_capital' not in st.session_state:
+
+def carregar_dados_capital():
+    if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
+        return
     _perf_start("init_dados_capital")
     cache_manager = get_cache_manager()
     resultado_capital = cache_manager.carregar("capital")
@@ -1646,16 +1647,6 @@ if 'dados_capital' not in st.session_state:
         st.session_state['capital_cache_fonte'] = resultado_capital.fonte if resultado_capital else 'desconhecida'
     print(_perf_log("init_dados_capital"))
 
-# Mesclar dados de capital com dados principais para disponibilizar nas abas
-if 'dados_periodos' in st.session_state and 'dados_capital' in st.session_state:
-    if not st.session_state.get('_dados_capital_mesclados', False):
-        _perf_start("mesclar_capital")
-        st.session_state['dados_periodos'] = mesclar_dados_capital(
-            st.session_state['dados_periodos'],
-            st.session_state['dados_capital']
-        )
-        st.session_state['_dados_capital_mesclados'] = True
-        print(_perf_log("mesclar_capital"))
 
 print(_perf_log("init_total"))
 
@@ -1721,7 +1712,7 @@ with col_header:
     """, unsafe_allow_html=True)
 
 # Lista de opções do menu principal (análise)
-MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
+MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "DRE", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
 
 # Lista de opções do menu secundário (utilitários)
 MENU_SECUNDARIO = ["Sobre", "Atualizar Base", "Glossário"]
@@ -1738,6 +1729,21 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
         st.session_state['menu_atual'] = "Sobre"
 
 menu_atual = st.session_state['menu_atual']
+
+# Carregamento sob demanda para reduzir uso de RAM
+menus_precisam_principal = {
+    "Painel",
+    "Histórico Individual",
+    "Histórico Peers",
+    "Scatter Plot",
+    "Deltas (Antes e Depois)",
+    "Crie sua métrica!",
+}
+if menu_atual in menus_precisam_principal:
+    carregar_dados_periodos()
+
+if menu_atual == "Capital Regulatório":
+    carregar_dados_capital()
 
 # Callbacks para navegação entre menus (evita conflito)
 def _on_main_menu_change():
@@ -1826,7 +1832,7 @@ with st.sidebar:
             st.warning("cache não encontrado no disco")
 
         # Botão para forçar recarregamento do cache local
-        if st.button("recarregar cache do disco", use_container_width=True):
+        if st.button("recarregar cache do disco", width='stretch'):
             if forcar_recarregar_cache():
                 st.success("cache recarregado do disco com sucesso!")
                 st.rerun()
@@ -1848,7 +1854,7 @@ with st.sidebar:
                 mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
 
             if 'dict_aliases' in st.session_state:
-                if st.button("extrair dados do BCB", type="primary", use_container_width=True):
+                if st.button("extrair dados do BCB", type="primary", width='stretch'):
                     periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
                     progress_bar = st.progress(0)
                     status = st.empty()
@@ -1957,7 +1963,7 @@ with st.sidebar:
                 col_upload1, col_upload2 = st.columns(2)
 
                 with col_upload1:
-                    if st.button("📦 enviar cache PRINCIPAL", use_container_width=True, help="Envia dados_cache"):
+                    if st.button("📦 enviar cache PRINCIPAL", width='stretch', help="Envia dados_cache"):
                         token_final = gh_token if gh_token else token_from_secrets
                         with st.spinner("enviando cache principal para github releases..."):
                             sucesso, mensagem = upload_cache_github(get_cache_manager(), "principal", token_final)
@@ -1972,7 +1978,7 @@ with st.sidebar:
                     btn_disabled = not capital_info['existe']
                     btn_help = "Envia cache de capital" if capital_info['existe'] else "Cache de capital não existe localmente"
 
-                    if st.button("💰 enviar cache CAPITAL", use_container_width=True, disabled=btn_disabled, help=btn_help):
+                    if st.button("💰 enviar cache CAPITAL", width='stretch', disabled=btn_disabled, help=btn_help):
                         token_final = gh_token if gh_token else token_from_secrets
                         with st.spinner("enviando cache de capital para github releases..."):
                             sucesso, mensagem = upload_cache_github(get_cache_manager(), "capital", token_final)
@@ -2003,7 +2009,7 @@ with st.sidebar:
                             data=cache_download["data"],
                             file_name=cache_download["file_name"],
                             mime=cache_download["mime"],
-                            use_container_width=True,
+                            width='stretch',
                             help="Baixe uma cópia do cache antes que o Streamlit reinicie"
                         )
                 else:
@@ -2025,7 +2031,7 @@ with st.sidebar:
                     help="Marque para apagar o cache existente e extrair tudo do zero. Use quando houver problemas com nomes ou dados antigos."
                 )
 
-                if st.button("extrair dados de capital", type="secondary", use_container_width=True, key="btn_extrair_capital"):
+                if st.button("extrair dados de capital", type="secondary", width='stretch', key="btn_extrair_capital"):
                     periodos_cap = gerar_periodos_capital(ano_cap_i, mes_cap_i, ano_cap_f, mes_cap_f)
                     progress_bar_cap = st.progress(0)
                     status_cap = st.empty()
@@ -2547,7 +2553,7 @@ elif menu == "Painel":
                             font=dict(family='IBM Plex Sans')
                         )
 
-                        st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+                        st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
 
                         df_componentes['ranking'] = df_componentes['total'].rank(method='first', ascending=False).astype(int)
                         # Merge com df_selecionado para ter acesso às colunas de peso
@@ -2695,7 +2701,7 @@ elif menu == "Painel":
                         font=dict(family='IBM Plex Sans')
                     )
 
-                    st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+                    st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
 
                     media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
                     df_export = df_selecionado.copy()
@@ -3115,7 +3121,7 @@ elif menu == "Capital Regulatório":
                         font=dict(family='IBM Plex Sans')
                     )
 
-                    st.plotly_chart(fig_capital, use_container_width=True, config={'displayModeBar': False})
+                    st.plotly_chart(fig_capital, width='stretch', config={'displayModeBar': False})
 
                     # --- Exportação Excel/CSV ---
                     df_export_capital = df_selecionado_cap[[
@@ -3195,7 +3201,7 @@ elif menu == "Capital Regulatório":
 
                     st.dataframe(
                         df_tabela,
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                         column_config={
                             'Período': st.column_config.TextColumn('Período'),
@@ -3348,7 +3354,7 @@ elif menu == "Histórico Individual":
                                     # Usa gráfico de barras para Lucro Líquido Acumulado YTD
                                     tipo_grafico = 'barra' if var == 'Lucro Líquido Acumulado YTD' else 'linha'
                                     fig = criar_mini_grafico(df_banco_filtrado, var, var, tipo=tipo_grafico)
-                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                                    st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
             else:
                 st.warning("nenhuma instituição encontrada nos dados")
         else:
@@ -3545,7 +3551,7 @@ elif menu == "Histórico Peers":
                             barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else None
                         )
 
-                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                        st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
                         if export_frames:
                             df_export = pd.concat(export_frames, ignore_index=True)
@@ -3716,7 +3722,7 @@ elif menu == "Scatter Plot":
             font=dict(family='IBM Plex Sans')
         )
 
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, width='stretch')
 
         # ============================================================
         # SCATTER PLOT n=2 - Comparação entre dois períodos
@@ -3971,7 +3977,7 @@ elif menu == "Scatter Plot":
                     font=dict(family='IBM Plex Sans')
                 )
 
-                st.plotly_chart(fig_scatter_n2, use_container_width=True)
+                st.plotly_chart(fig_scatter_n2, width='stretch')
 
                 # Legenda explicativa
                 st.caption("○ Círculo vazio = período inicial | ● Círculo cheio = período subsequente | → Seta indica direção da movimentação")
@@ -4386,7 +4392,7 @@ elif menu == "Deltas (Antes e Depois)":
                 )
 
                 st.markdown(f"### {variavel}")
-                st.plotly_chart(fig_delta, use_container_width=True, config={'displayModeBar': False})
+                st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
 
                 # Tabela resumo
                 with st.expander("ver dados"):
@@ -4405,7 +4411,7 @@ elif menu == "Deltas (Antes e Depois)":
                     df_display[periodo_inicial_delta] = df_display[periodo_inicial_delta].apply(lambda x: formatar_valor(x, variavel))
                     df_display[periodo_subsequente_delta] = df_display[periodo_subsequente_delta].apply(lambda x: formatar_valor(x, variavel))
 
-                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+                    st.dataframe(df_display, width='stretch', hide_index=True)
 
                     # Botão de exportar Excel
                     buffer_excel = BytesIO()
@@ -4432,6 +4438,595 @@ elif menu == "Deltas (Antes e Depois)":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "DRE":
+    st.markdown("### Demonstração de Resultado (DRE)")
+    st.caption("Tabela DRE a partir de Mar/25 com YTD irregular e YoY.")
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_dre_data():
+        manager = get_cache_manager()
+        resultado = manager.carregar("dre")
+        if resultado.sucesso and resultado.dados is not None:
+            return resultado.dados, None
+        return None, resultado.mensagem
+
+    def normalize_sources(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [v for v in value if isinstance(v, str) and v.strip()]
+        if isinstance(value, str):
+            parts = [p.strip() for p in value.replace("|", ";").split(";")]
+            return [p for p in parts if p]
+        return []
+
+    def load_dre_mapping():
+        return [
+            {
+                "label": "Resultado de Intermediação Financeira Bruto",
+                "sources": [
+                    "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
+                    "Rendas de Títulos e Valores Mobiliários (b)",
+                    "Rendas de Operações de Crédito (c)",
+                    "Rendas de Arrendamento Financeiro (d)",
+                    "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
+                ],
+                "concept": "Resultado de intermediação financeira bruto (a+b+c+d+e).",
+                "original_label": "Resultado de Intermediação Financeira Bruto",
+            },
+            {
+                "label": "Rec. Aplicações Interfinanceiras Liquidez",
+                "sources": ["Rendas de Aplicações Interfinanceiras de Liquidez (a)"],
+                "concept": "Receitas de aplicações interfinanceiras de liquidez.",
+                "original_label": "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. TVMs",
+                "sources": ["Rendas de Títulos e Valores Mobiliários (b)"],
+                "concept": "Receitas de títulos e valores mobiliários.",
+                "original_label": "Rendas de Títulos e Valores Mobiliários (b)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. Crédito",
+                "sources": ["Rendas de Operações de Crédito (c)"],
+                "concept": "Receitas de operações de crédito.",
+                "original_label": "Rendas de Operações de Crédito (c)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. Arrendamento Financeiro",
+                "sources": ["Rendas de Arrendamento Financeiro (d)"],
+                "concept": "Receitas de arrendamento financeiro.",
+                "original_label": "Rendas de Arrendamento Financeiro (d)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. Outras Operações c/ Características de Crédito",
+                "sources": ["Rendas de Outras Operações com Características de Concessão de Crédito (e)"],
+                "concept": "Receitas de outras operações com características de crédito.",
+                "original_label": "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
+                "is_child": True,
+            },
+            {
+                "label": "Desp. PDD",
+                "sources": ["Resultado com Perda Esperada (f)"],
+                "concept": "Despesa com perdas esperadas (PDD).",
+                "original_label": "Resultado com Perda Esperada (f)",
+            },
+            {
+                "label": "Desp. Captação",
+                "sources": ["Despesas de Captações (g)"],
+                "concept": "Despesas de captação.",
+                "original_label": "Despesas de Captações (g)",
+            },
+            {
+                "label": "Desp. Dívida Elegível a Capital",
+                "sources": ["Despesas de Instrumentos de Dívida Elegíveis a Capital (h)"],
+                "concept": "Despesas com dívida elegível a capital.",
+                "original_label": "Despesas de Instrumentos de Dívida Elegíveis a Capital (h)",
+            },
+            {
+                "label": "Res. Derivativos",
+                "sources": ["Resultado com Derivativos (i)"],
+                "concept": "Resultado com derivativos.",
+                "original_label": "Resultado com Derivativos (i)",
+            },
+            {
+                "label": "Outros Res. Intermediação Financeira",
+                "sources": ["Outros Resultados de Intermediação Financeira (j)"],
+                "concept": "Outros resultados de intermediação financeira.",
+                "original_label": "Outros Resultados de Intermediação Financeira (j)",
+            },
+            {
+                "label": "Resultado Int. Financeira Líquido",
+                "sources": [
+                    "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
+                    "Rendas de Títulos e Valores Mobiliários (b)",
+                    "Rendas de Operações de Crédito (c)",
+                    "Rendas de Arrendamento Financeiro (d)",
+                    "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
+                    "Resultado com Perda Esperada (f)",
+                    "Despesas de Captações (g)",
+                    "Despesas de Instrumentos de Dívida Elegíveis a Capital (h)",
+                    "Resultado com Derivativos (i)",
+                    "Outros Resultados de Intermediação Financeira (j)",
+                ],
+                "concept": "Resultado de intermediação financeira líquido.",
+                "original_label": "Resultado de Intermediação Financeira (k) = (a) + (b) + (c) + (d) + (e) + (f) + (g) + (h) + (i) + (j)",
+            },
+            {
+                "label": "Resultado Transações Pgto",
+                "sources": ["Resultado com Transações de Pagamento (l)"],
+                "concept": "Resultado com transações de pagamento.",
+                "original_label": "Resultado com Transações de Pagamento (l)",
+            },
+            {
+                "label": "Renda Tarifas Bancárias",
+                "sources": ["Rendas de Tarifas Bancárias (m)"],
+                "concept": "Receitas de tarifas bancárias.",
+                "original_label": "Rendas de Tarifas Bancárias (m)",
+            },
+            {
+                "label": "Outras Prestações de Serviços",
+                "sources": ["Outras Rendas de Prestação de Serviços (n)"],
+                "concept": "Outras receitas de prestação de serviços.",
+                "original_label": "Outras Rendas de Prestação de Serviços (n)",
+            },
+            {
+                "label": "Desp. Pessoal",
+                "sources": ["Despesas de Pessoal (o)"],
+                "concept": "Despesas com pessoal.",
+                "original_label": "Despesas de Pessoal (o)",
+            },
+            {
+                "label": "Desp. Adm",
+                "sources": ["Despesas Administrativas (p)"],
+                "concept": "Despesas administrativas.",
+                "original_label": "Despesas Administrativas (p)",
+            },
+            {
+                "label": "Desp. PDD Outras Operações",
+                "sources": ["Resultado com Perdas Esperadas de Outras Operações (q)"],
+                "concept": "Perdas esperadas de outras operações.",
+                "original_label": "Resultado com Perdas Esperadas de Outras Operações (q)",
+            },
+            {
+                "label": "Desp. JSCP Cooperativas",
+                "sources": ["Despesas de Juros Sobre Capital Próprio de Cooperativas (r)"],
+                "concept": "Juros sobre capital próprio (cooperativas).",
+                "original_label": "Despesas de Juros Sobre Capital Próprio de Cooperativas (r)",
+            },
+            {
+                "label": "Desp. Tributárias",
+                "sources": ["Despesas Tributárias (s)"],
+                "concept": "Despesas tributárias.",
+                "original_label": "Despesas Tributárias (s)",
+            },
+            {
+                "label": "Res. Participação Controladas",
+                "sources": ["Resultado de Participações (t)"],
+                "concept": "Resultado de participações em controladas/coligadas.",
+                "original_label": "Resultado de Participações (t)",
+            },
+            {
+                "label": "Outras Receitas",
+                "sources": ["Outras Receitas (u)"],
+                "concept": "Outras receitas.",
+                "original_label": "Outras Receitas (u)",
+            },
+            {
+                "label": "Outras Despesas",
+                "sources": ["Outras Despesas (v)"],
+                "concept": "Outras despesas.",
+                "original_label": "Outras Despesas (v)",
+            },
+            {
+                "label": "IR/CSLL",
+                "sources": ["Imposto de Renda e Contribuição Social (y)"],
+                "concept": "Imposto de renda e contribuição social.",
+                "original_label": "Imposto de Renda e Contribuição Social (y)",
+            },
+            {
+                "label": "Res. Participação Lucro",
+                "sources": ["Participações no Lucro (z)"],
+                "concept": "Participações no lucro.",
+                "original_label": "Participações no Lucro (z)",
+            },
+            {
+                "label": "Lucro Líquido Período Acumulado",
+                "sources": ["Lucro Líquido (aa) = (x) + (y) + (z)"],
+                "concept": "Lucro líquido acumulado no período.",
+                "original_label": "Lucro Líquido (aa) = (x) + (y) + (z)",
+            },
+        ]
+
+    def find_column(df, source_name: str):
+        if source_name in df.columns:
+            return source_name
+        target = source_name.strip().lower()
+        for col in df.columns:
+            if str(col).strip().lower() == target:
+                return col
+        for col in df.columns:
+            if target in str(col).strip().lower():
+                return col
+        return None
+
+    def coerce_numeric(series: pd.Series) -> pd.Series:
+        if series is None:
+            return series
+        if series.dtype == object:
+            cleaned = (
+                series.astype(str)
+                .str.replace(".", "", regex=False)
+                .str.replace(",", ".", regex=False)
+            )
+            return pd.to_numeric(cleaned, errors="coerce")
+        return pd.to_numeric(series, errors="coerce")
+
+    def detectar_colunas_basicas(df: pd.DataFrame):
+        col_periodo = None
+        for candidato in ["Período", "Periodo", "PERIODO", "PERÍODO"]:
+            if candidato in df.columns:
+                col_periodo = candidato
+                break
+        if col_periodo is None:
+            for col in df.columns:
+                if "period" in str(col).lower():
+                    col_periodo = col
+                    break
+        col_inst = None
+        for candidato in ["Instituição", "Instituicao", "INSTITUICAO", "INSTITUIÇÃO"]:
+            if candidato in df.columns:
+                col_inst = candidato
+                break
+        if col_inst is None:
+            for col in df.columns:
+                if "institu" in str(col).lower():
+                    col_inst = col
+                    break
+        return col_periodo, col_inst
+
+    def parse_periodo(periodo_val):
+        if periodo_val is None:
+            return None, None
+        texto = str(periodo_val).strip()
+        if "/" in texto:
+            partes = texto.split("/")
+            if len(partes) >= 2 and partes[0].isdigit() and partes[1].isdigit():
+                parte1 = int(partes[0])
+                ano = int(partes[1])
+                if 1 <= parte1 <= 4:
+                    mes = {1: 3, 2: 6, 3: 9, 4: 12}.get(parte1)
+                else:
+                    mes = parte1
+                return ano, mes
+        if texto.isdigit():
+            if len(texto) == 6:
+                ano = int(texto[:4])
+                mes = int(texto[4:])
+                return ano, mes
+            if len(texto) == 8:
+                ano = int(texto[:4])
+                mes = int(texto[4:6])
+                return ano, mes
+        return None, None
+
+    def compute_ytd_irregular(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df[["ano", "mes"]] = df["Periodo"].apply(
+            lambda x: pd.Series(parse_periodo(x))
+        )
+        df["ytd"] = pd.NA
+        for (instituicao, label, ano), grupo in df.groupby(["Instituicao", "Label", "ano"]):
+            valores_mes = {row["mes"]: row["valor"] for _, row in grupo.iterrows()}
+            for idx, row in grupo.iterrows():
+                mes = row["mes"]
+                valor = row["valor"]
+                ytd_val = pd.NA
+                if pd.isna(valor):
+                    ytd_val = pd.NA
+                elif mes in (3, 6):
+                    ytd_val = valor
+                elif mes in (9, 12):
+                    valor_jun = valores_mes.get(6)
+                    if valor_jun is None or pd.isna(valor_jun):
+                        ytd_val = pd.NA
+                    else:
+                        ytd_val = valor + valor_jun
+                else:
+                    ytd_val = valor
+                df.at[idx, "ytd"] = ytd_val
+        return df
+
+    def compute_yoy(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["yoy"] = pd.NA
+        for (instituicao, label, mes), grupo in df.groupby(["Instituicao", "Label", "mes"]):
+            valores_ano = {
+                row["ano"]: row["ytd"]
+                for _, row in grupo.iterrows()
+                if row["ano"] is not None
+            }
+            for idx, row in grupo.iterrows():
+                ano = row["ano"]
+                if ano is None or pd.isna(row["ytd"]):
+                    continue
+                anterior = valores_ano.get(ano - 1)
+                if anterior is None or pd.isna(anterior) or anterior == 0:
+                    continue
+                df.at[idx, "yoy"] = (row["ytd"] / anterior) - 1
+        return df
+
+    def compute_line_values(df_base: pd.DataFrame, entry: dict) -> pd.DataFrame:
+        fontes = normalize_sources(entry.get("sources", []))
+        colunas = []
+        for fonte in fontes:
+            col = find_column(df_base, fonte)
+            if col:
+                colunas.append(col)
+        if not colunas:
+            return pd.DataFrame()
+        series_list = [coerce_numeric(df_base[col]) for col in colunas]
+        valores = pd.concat(series_list, axis=1).sum(axis=1, min_count=1)
+        df_out = df_base[["Instituicao", "Periodo"]].copy()
+        df_out["Label"] = entry["label"]
+        df_out["valor"] = valores
+        return df_out
+
+    def formatar_valor_br(valor, decimais=0):
+        if pd.isna(valor) or valor is None:
+            return "—"
+        try:
+            if decimais == 0:
+                return f"{valor:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            return f"{valor:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return "—"
+
+    def formatar_percentual(valor, decimais=1):
+        if pd.isna(valor) or valor is None:
+            return "—"
+        try:
+            return f"{valor * 100:.{decimais}f}%"
+        except Exception:
+            return "—"
+
+    def render_table_like_carteira_4966(df_linhas: pd.DataFrame, entradas: list, periodos: list, formato_por_label: dict, tooltip_por_label: dict):
+        html_tabela = """
+        <style>
+        .carteira-table {
+            width: 88%;
+            margin: 10px auto 0 auto;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        .carteira-table th, .carteira-table td {
+            border: 1px solid #ddd;
+            padding: 6px 10px;
+            text-align: right;
+            vertical-align: top;
+        }
+        .carteira-table th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+        .carteira-table td:first-child {
+            text-align: left;
+            font-weight: 500;
+        }
+        .carteira-table thead tr:first-child th {
+            background-color: #4a4a4a;
+            color: white;
+            text-align: center;
+        }
+        .carteira-table thead tr:nth-child(2) th {
+            background-color: #6a6a6a;
+            color: white;
+        }
+        .dre-info {
+            font-size: 12px;
+            color: #666;
+            margin-left: 6px;
+            cursor: help;
+        }
+        .dre-subitem {
+            font-size: 12px;
+        }
+        .dre-subitem td:first-child {
+            padding-left: 18px;
+        }
+        .dre-negative {
+            color: #7a1e2b;
+            font-weight: 600;
+        }
+        </style>
+        <table class="carteira-table">
+        <thead>
+        <tr>
+        <th rowspan="2">Item</th>
+        """
+
+        for periodo in periodos:
+            html_tabela += f'<th colspan="2">{periodo}</th>'
+        html_tabela += "</tr><tr>"
+        for _ in periodos:
+            html_tabela += "<th>YTD</th><th>Δ% YoY</th>"
+        html_tabela += "</tr></thead><tbody>"
+
+        for entry in entradas:
+            label = entry["label"]
+            label_exib = entry.get("label_exib", label)
+            tooltip = tooltip_por_label.get(label, "")
+            info_html = f'<span class="dre-info" title="{tooltip}">ⓘ</span>' if tooltip else ""
+            row_class = "dre-subitem" if entry.get("is_child") else ""
+            html_tabela += f"<tr class=\"{row_class}\"><td>{label_exib} {info_html}</td>"
+            linha = df_linhas[df_linhas["Label"] == label]
+            for periodo in periodos:
+                cell = linha[linha["PeriodoExib"] == periodo]
+                if not cell.empty:
+                    ytd_val = cell["ytd"].iloc[0]
+                    yoy_val = cell["yoy"].iloc[0]
+                else:
+                    ytd_val = pd.NA
+                    yoy_val = pd.NA
+                formato = formato_por_label.get(label, "num")
+                if formato == "pct":
+                    ytd_fmt = formatar_percentual(ytd_val, decimais=2)
+                    ytd_neg = False
+                else:
+                    ytd_fmt = formatar_valor_br(ytd_val)
+                    ytd_neg = pd.notna(ytd_val) and ytd_val < 0
+                yoy_fmt = formatar_percentual(yoy_val, decimais=1)
+                yoy_neg = pd.notna(yoy_val) and yoy_val < 0
+                ytd_span = f"<span class=\"dre-negative\">{ytd_fmt}</span>" if ytd_neg else ytd_fmt
+                yoy_span = f"<span class=\"dre-negative\">{yoy_fmt}</span>" if yoy_neg else yoy_fmt
+                html_tabela += f"<td>{ytd_span}</td><td>{yoy_span}</td>"
+            html_tabela += "</tr>"
+
+        html_tabela += "</tbody></table>"
+        st.markdown(html_tabela, unsafe_allow_html=True)
+
+    df_dre, dre_msg = load_dre_data()
+    if df_dre is None or df_dre.empty:
+        detalhe = f" ({dre_msg})" if dre_msg else ""
+        st.warning(f"Dados DRE não disponíveis no cache. Atualize a base no menu 'Atualizar Base'.{detalhe}")
+        with st.expander("Limites de recursos do Streamlit Community Cloud"):
+            st.markdown(
+                """
+                Os limites atuais (fev/2024) são aproximadamente:
+                - CPU: 0,078 cores mínimo, 2 cores máximo
+                - Memória: 690MB mínimo, 2,7GB máximo
+                - Armazenamento: sem mínimo, 50GB máximo
+
+                Sintomas comuns de limite excedido:
+                - App lento (throttling)
+                - Mensagem "🤯 This app has gone over its resource limits."
+                - Mensagem "😦 Oh no."
+
+                Apps educacionais, open-source ou de impacto social podem solicitar aumento de recursos.
+                """
+            )
+    else:
+        col_periodo, col_inst = detectar_colunas_basicas(df_dre)
+        if col_periodo is None:
+            st.warning("Coluna de período não encontrada nos dados DRE.")
+        else:
+            mapping_entries = load_dre_mapping()
+
+            if not mapping_entries:
+                st.warning("Mapeamento DRE não encontrado ou vazio.")
+            else:
+                colunas_necessarias = {col_periodo}
+                if col_inst:
+                    colunas_necessarias.add(col_inst)
+                for entry in mapping_entries:
+                    for fonte in entry.get("sources", []):
+                        col_encontrada = find_column(df_dre, fonte)
+                        if col_encontrada:
+                            colunas_necessarias.add(col_encontrada)
+                colunas_necessarias = [c for c in df_dre.columns if c in colunas_necessarias]
+                if colunas_necessarias:
+                    df_dre = df_dre[colunas_necessarias].copy()
+
+                df_base = df_dre.copy()
+                if col_inst is None:
+                    df_base["Instituicao"] = df_base.get("CodInst", "Instituição")
+                else:
+                    df_base = df_base.rename(columns={col_inst: "Instituicao"})
+                df_base = df_base.rename(columns={col_periodo: "Periodo"})
+
+                df_base[["ano", "mes"]] = df_base["Periodo"].apply(
+                    lambda x: pd.Series(parse_periodo(x))
+                )
+                df_new = df_base[
+                    (df_base["ano"].fillna(0) > 2025)
+                    | ((df_base["ano"] == 2025) & (df_base["mes"].fillna(0) >= 3))
+                ].copy()
+
+                instit_col = "Instituicao"
+                instituicoes = sorted(df_base[instit_col].dropna().unique().tolist())
+                anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
+
+                if not instituicoes or not anos_disponiveis:
+                    st.warning("Dados DRE sem instituições ou períodos válidos.")
+                    st.stop()
+
+                col_inst, col_ano = st.columns([1, 1])
+                with col_inst:
+                    instituicao_selecionada = st.selectbox(
+                        "Instituição",
+                        instituicoes,
+                        key="dre_instituicao"
+                    )
+                with col_ano:
+                    ano_selecionado = st.selectbox(
+                        "Ano",
+                        anos_disponiveis[::-1],
+                        index=0,
+                        key="dre_ano"
+                    )
+
+                df_values = []
+                for entry in mapping_entries:
+                    df_entry = compute_line_values(df_new, entry)
+                    if not df_entry.empty:
+                        df_values.append(df_entry)
+
+                if not df_values:
+                    st.warning("Nenhuma linha DRE foi encontrada com o mapeamento atual.")
+                else:
+                    df_valores = pd.concat(df_values, ignore_index=True)
+                    df_ytd = compute_ytd_irregular(df_valores)
+                    df_ytd = compute_yoy(df_ytd)
+
+                    df_ytd["PeriodoExib"] = df_ytd["Periodo"].apply(periodo_para_exibicao)
+
+                    formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries}
+                    tooltip_por_label = {}
+                    entradas_com_label = []
+                    for entry in mapping_entries:
+                        fonte_original = entry.get("original_label")
+                        fontes = [fonte_original] if fonte_original else entry.get("sources", [])
+                        fontes_fmt = ", ".join([f for f in fontes if f])
+                        tooltip_parts = []
+                        if entry.get("concept"):
+                            tooltip_parts.append(entry["concept"])
+                        if fontes_fmt:
+                            tooltip_parts.append(f"Fontes: {fontes_fmt}")
+                        if entry.get("ytd_note"):
+                            tooltip_parts.append("Nota YTD: set/dez = jun + período.")
+                        tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
+
+                        label_exib = entry["label"]
+                        entrada_copy = entry.copy()
+                        entrada_copy["label_exib"] = label_exib
+                        entradas_com_label.append(entrada_copy)
+
+                    df_filtrado = df_ytd[
+                        (df_ytd["Instituicao"] == instituicao_selecionada)
+                        & (df_ytd["ano"] == int(ano_selecionado))
+                    ].copy()
+
+                    periodos_ordem = ["Mar", "Jun", "Set", "Dez"]
+                    periodos_disponiveis = []
+                    for mes in [3, 6, 9, 12]:
+                        periodo_texto = periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}")
+                        periodos_disponiveis.append(periodo_texto)
+
+                    render_table_like_carteira_4966(
+                        df_filtrado,
+                        entradas_com_label,
+                        periodos_disponiveis,
+                        formato_por_label,
+                        tooltip_por_label
+                    )
+
+                    with st.expander("Dados para auditoria"):
+                        st.dataframe(df_filtrado, width='stretch')
 
 elif menu == "Carteira 4.966":
     # =========================================================================
@@ -4697,7 +5292,7 @@ elif menu == "Carteira 4.966":
 
                 # Tabela de auditoria (dataframe simples)
                 with st.expander("Dados para auditoria"):
-                    st.dataframe(df_resultado, use_container_width=True)
+                    st.dataframe(df_resultado, width='stretch')
 
                 # Exportação Excel
                 st.markdown("---")
@@ -5027,7 +5622,7 @@ elif menu == "Taxas de Juros por Produto":
                     fig.update_xaxes(tickformat="%b/%y")
                     fig.update_traces(marker=dict(size=6))
 
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                     # =============================================================
                     # TABELA DE DADOS (data mais recente)
@@ -5038,7 +5633,7 @@ elif menu == "Taxas de Juros por Produto":
                         cols_disp = [c for c in cols_mostrar if c in df_rank.columns]
                         df_display = df_rank[cols_disp].sort_values('Posição' if 'Posição' in cols_disp else tipo_taxa)
                         st.caption(f"Ranking em {data_mais_recente.strftime('%d/%m/%Y')}:")
-                        st.dataframe(df_display, use_container_width=True, hide_index=True)
+                        st.dataframe(df_display, width='stretch', hide_index=True)
 
                     # =============================================================
                     # EXPORTAÇÃO
@@ -5114,7 +5709,7 @@ elif menu == "Crie sua métrica!":
 
         with col_add:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("adicionar", key="btn_add_step", use_container_width=True):
+            if st.button("adicionar", key="btn_add_step", width='stretch'):
                 st.session_state['brincar_formula_steps'].append({
                     'variavel': var_nova,
                     'operacao': operacao if operacao != "(fim)" else None
@@ -5410,7 +6005,7 @@ elif menu == "Crie sua métrica!":
                             font=dict(family='IBM Plex Sans')
                         )
 
-                        st.plotly_chart(fig_scatter_brincar, use_container_width=True)
+                        st.plotly_chart(fig_scatter_brincar, width='stretch')
 
                         # Tabela e exportação
                         with st.expander("ver dados e exportar"):
@@ -5434,7 +6029,7 @@ elif menu == "Crie sua métrica!":
                             df_export['Métrica Derivada'] = df_scatter_brincar['Métrica Derivada']
                             df_export = df_export[[c for c in cols_ordem if c in df_export.columns]]
 
-                            st.dataframe(df_export, use_container_width=True, hide_index=True)
+                            st.dataframe(df_export, width='stretch', hide_index=True)
 
                             col_excel, col_csv = st.columns(2)
                             with col_excel:
@@ -5661,7 +6256,7 @@ elif menu == "Crie sua métrica!":
                                 margin=dict(l=60, r=20, t=80, b=100)
                             )
 
-                            st.plotly_chart(fig_delta_brincar, use_container_width=True, config={'displayModeBar': False})
+                            st.plotly_chart(fig_delta_brincar, width='stretch', config={'displayModeBar': False})
 
                             # Tabela e exportação
                             with st.expander("ver dados e exportar"):
@@ -5678,7 +6273,7 @@ elif menu == "Crie sua métrica!":
                                 componentes = list(set([s['variavel'] for s in steps]))
                                 df_export_delta = df_resumo_brincar[['Instituição', periodo_inicial_brincar, periodo_subsequente_brincar, 'Delta', 'Variação %']].copy()
 
-                                st.dataframe(df_export_delta, use_container_width=True, hide_index=True)
+                                st.dataframe(df_export_delta, width='stretch', hide_index=True)
 
                                 col_excel, col_csv = st.columns(2)
                                 with col_excel:
@@ -5821,7 +6416,7 @@ elif menu == "Crie sua métrica!":
                             margin=dict(l=60, r=20, t=60, b=100)
                         )
 
-                        st.plotly_chart(fig_ranking, use_container_width=True, config={'displayModeBar': False})
+                        st.plotly_chart(fig_ranking, width='stretch', config={'displayModeBar': False})
 
                         # Tabela e exportação
                         with st.expander("ver dados e exportar"):
@@ -5840,7 +6435,7 @@ elif menu == "Crie sua métrica!":
                             cols_ordem = ['Período', 'Instituição', nome_metrica] + componentes
                             df_export_rank = df_export_rank[[c for c in cols_ordem if c in df_export_rank.columns]]
 
-                            st.dataframe(df_export_rank, use_container_width=True, hide_index=True)
+                            st.dataframe(df_export_rank, width='stretch', hide_index=True)
 
                             col_excel, col_csv = st.columns(2)
                             with col_excel:
@@ -5936,7 +6531,7 @@ elif menu == "Atualizar Base":
             })
 
         df_status = pd.DataFrame(status_data)
-        st.dataframe(df_status, use_container_width=True, hide_index=True)
+        st.dataframe(df_status, width='stretch', hide_index=True)
 
         # Legenda
         st.caption("""
@@ -6139,7 +6734,7 @@ elif menu == "Atualizar Base":
 
         if pode_extrair:
 
-            if st.button(f"Extrair dados de {opcoes_cache[cache_selecionado]}", type="primary", use_container_width=True, key="btn_extrair_unificado"):
+            if st.button(f"Extrair dados de {opcoes_cache[cache_selecionado]}", type="primary", width='stretch', key="btn_extrair_unificado"):
 
                 # Containers para UI
                 progress_bar = st.progress(0)
@@ -6381,7 +6976,7 @@ elif menu == "Atualizar Base":
 
         col_pub1, col_pub2 = st.columns([3, 1])
         with col_pub1:
-            if st.button(f"📤 Enviar '{cache_selecionado}' para GitHub", use_container_width=True, key="btn_enviar_github_unificado", disabled=not token_para_upload):
+            if st.button(f"📤 Enviar '{cache_selecionado}' para GitHub", width='stretch', key="btn_enviar_github_unificado", disabled=not token_para_upload):
                 with st.spinner(f"enviando cache '{cache_selecionado}' para github releases..."):
                     sucesso, mensagem = upload_cache_github(
                         cache_manager,
