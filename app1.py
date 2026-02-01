@@ -1601,7 +1601,10 @@ if 'df_aliases' not in st.session_state:
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
     print(_perf_log("init_aliases"))
 
-if 'dados_periodos' not in st.session_state:
+
+def carregar_dados_periodos():
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        return
     _perf_start("init_dados_periodos")
     cache_manager = get_cache_manager()
     resultado_principal = cache_manager.carregar("principal")
@@ -1612,9 +1615,6 @@ if 'dados_periodos' not in st.session_state:
         dados_cache = recalcular_metricas_derivadas(dados_cache)
         print(_perf_log("recalc_metricas"))
         if 'dict_aliases' in st.session_state:
-            # OTIMIZAÇÃO: NÃO chamar construir_mapa_codinst() aqui
-            # O mapa de códigos só é necessário se os dados tiverem códigos
-            # numéricos ao invés de nomes. O cache já tem nomes válidos.
             _perf_start("aplicar_aliases")
             dados_cache = aplicar_aliases_em_periodos(
                 dados_cache,
@@ -1627,9 +1627,10 @@ if 'dados_periodos' not in st.session_state:
             st.session_state['cache_fonte'] = resultado_principal.fonte if resultado_principal else 'desconhecida'
     print(_perf_log("init_dados_periodos"))
 
-# Carregar cache de capital (isolado) se disponível
-# Primeiro tenta local, depois GitHub Releases (igual ao cache principal)
-if 'dados_capital' not in st.session_state:
+
+def carregar_dados_capital():
+    if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
+        return
     _perf_start("init_dados_capital")
     cache_manager = get_cache_manager()
     resultado_capital = cache_manager.carregar("capital")
@@ -1646,16 +1647,6 @@ if 'dados_capital' not in st.session_state:
         st.session_state['capital_cache_fonte'] = resultado_capital.fonte if resultado_capital else 'desconhecida'
     print(_perf_log("init_dados_capital"))
 
-# Mesclar dados de capital com dados principais para disponibilizar nas abas
-if 'dados_periodos' in st.session_state and 'dados_capital' in st.session_state:
-    if not st.session_state.get('_dados_capital_mesclados', False):
-        _perf_start("mesclar_capital")
-        st.session_state['dados_periodos'] = mesclar_dados_capital(
-            st.session_state['dados_periodos'],
-            st.session_state['dados_capital']
-        )
-        st.session_state['_dados_capital_mesclados'] = True
-        print(_perf_log("mesclar_capital"))
 
 print(_perf_log("init_total"))
 
@@ -1738,6 +1729,21 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
         st.session_state['menu_atual'] = "Sobre"
 
 menu_atual = st.session_state['menu_atual']
+
+# Carregamento sob demanda para reduzir uso de RAM
+menus_precisam_principal = {
+    "Painel",
+    "Histórico Individual",
+    "Histórico Peers",
+    "Scatter Plot",
+    "Deltas (Antes e Depois)",
+    "Crie sua métrica!",
+}
+if menu_atual in menus_precisam_principal:
+    carregar_dados_periodos()
+
+if menu_atual == "Capital Regulatório":
+    carregar_dados_capital()
 
 # Callbacks para navegação entre menus (evita conflito)
 def _on_main_menu_change():
@@ -4773,25 +4779,42 @@ elif menu == "DRE":
         if col_periodo is None:
             st.warning("Coluna de período não encontrada nos dados DRE.")
         else:
-            df_base = df_dre.copy()
-            if col_inst is None:
-                df_base["Instituicao"] = df_base.get("CodInst", "Instituição")
-            else:
-                df_base = df_base.rename(columns={col_inst: "Instituicao"})
-            df_base = df_base.rename(columns={col_periodo: "Periodo"})
-
-            df_base[["ano", "mes"]] = df_base["Periodo"].apply(
-                lambda x: pd.Series(parse_periodo(x))
-            )
-            df_old = df_base[df_base["ano"].fillna(0) <= 2024].copy()
-            df_new = df_base[df_base["ano"].fillna(0) >= 2025].copy()
-
             mapping_path = Path(__file__).resolve().parent / "data" / "dre_mapping.json"
             mapping_entries = load_dre_mapping(mapping_path)
 
             if not mapping_entries:
                 st.warning("Mapeamento DRE não encontrado ou vazio.")
             else:
+                colunas_necessarias = {col_periodo}
+                if col_inst:
+                    colunas_necessarias.add(col_inst)
+                for entry in mapping_entries:
+                    for fonte in (
+                        entry.get("sources_new", [])
+                        + entry.get("sources_old", [])
+                        + entry.get("fallback_sources_new", [])
+                        + entry.get("fallback_sources_old", [])
+                    ):
+                        col_encontrada = find_column(df_dre, fonte)
+                        if col_encontrada:
+                            colunas_necessarias.add(col_encontrada)
+                colunas_necessarias = [c for c in df_dre.columns if c in colunas_necessarias]
+                if colunas_necessarias:
+                    df_dre = df_dre[colunas_necessarias].copy()
+
+                df_base = df_dre.copy()
+                if col_inst is None:
+                    df_base["Instituicao"] = df_base.get("CodInst", "Instituição")
+                else:
+                    df_base = df_base.rename(columns={col_inst: "Instituicao"})
+                df_base = df_base.rename(columns={col_periodo: "Periodo"})
+
+                df_base[["ano", "mes"]] = df_base["Periodo"].apply(
+                    lambda x: pd.Series(parse_periodo(x))
+                )
+                df_old = df_base[df_base["ano"].fillna(0) <= 2024].copy()
+                df_new = df_base[df_base["ano"].fillna(0) >= 2025].copy()
+
                 instit_col = "Instituicao"
                 instituicoes = sorted(df_base[instit_col].dropna().unique().tolist())
                 anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
@@ -4872,47 +4895,53 @@ elif menu == "DRE":
                     df_ytd = compute_ytd_irregular(df_valores)
                     df_ytd = compute_yoy(df_ytd)
 
+                    metric_entries = [entry for entry in mapping_entries if entry.get("metric")]
                     df_ratio_list = []
-                    ativo_data = load_ativo_data()
                     denom_ativo = None
-                    if ativo_data is not None and not ativo_data.empty:
-                        col_p_ativo, col_i_ativo = detectar_colunas_basicas(ativo_data)
-                        col_ativo_total = None
-                        if col_p_ativo:
-                            for col in ativo_data.columns:
-                                if "ativo total" in str(col).lower():
-                                    col_ativo_total = col
-                                    break
-                        if col_p_ativo and col_ativo_total:
-                            df_ativo = ativo_data.copy()
-                            df_ativo = df_ativo.rename(columns={col_p_ativo: "Periodo"})
-                            if col_i_ativo:
-                                df_ativo = df_ativo.rename(columns={col_i_ativo: "Instituicao"})
-                            else:
-                                df_ativo["Instituicao"] = "Ativo"
-                            df_ativo["valor"] = coerce_numeric(df_ativo[col_ativo_total])
-                            denom_ativo = compute_running_mean_denominator(
-                                df_ativo[["Instituicao", "Periodo", "valor"]],
+                    denom_credito = None
+                    denominador_escolhido = "Ativo Total (média até a data)"
+
+                    if metric_entries:
+                        if df_credito_manual is not None and not df_credito_manual.empty:
+                            denom_credito = compute_running_mean_denominator(
+                                df_credito_manual,
                                 value_col="valor",
-                                label="denom_ativo"
+                                label="denom_credito"
                             )
 
-                    denom_credito = None
-                    if df_credito_manual is not None and not df_credito_manual.empty:
-                        denom_credito = compute_running_mean_denominator(
-                            df_credito_manual,
-                            value_col="valor",
-                            label="denom_credito"
+                        opcoes_denominador = ["Ativo Total (média até a data)"]
+                        if denom_credito is not None:
+                            opcoes_denominador.append("Carteira de Crédito Total (média até a data)")
+                        denominador_escolhido = st.selectbox(
+                            "Base para métricas de razão",
+                            opcoes_denominador,
+                            key="dre_denominador"
                         )
 
-                    opcoes_denominador = ["Ativo Total (média até a data)"]
-                    if denom_credito is not None:
-                        opcoes_denominador.append("Carteira de Crédito Total (média até a data)")
-                    denominador_escolhido = st.selectbox(
-                        "Base para métricas de razão",
-                        opcoes_denominador,
-                        key="dre_denominador"
-                    )
+                        precisa_ativo = any(entry.get("metric") in ["ativo", "dual"] for entry in metric_entries)
+                        if precisa_ativo and not denominador_escolhido.startswith("Carteira"):
+                            ativo_data = load_ativo_data()
+                            if ativo_data is not None and not ativo_data.empty:
+                                col_p_ativo, col_i_ativo = detectar_colunas_basicas(ativo_data)
+                                col_ativo_total = None
+                                if col_p_ativo:
+                                    for col in ativo_data.columns:
+                                        if "ativo total" in str(col).lower():
+                                            col_ativo_total = col
+                                            break
+                                if col_p_ativo and col_ativo_total:
+                                    df_ativo = ativo_data.copy()
+                                    df_ativo = df_ativo.rename(columns={col_p_ativo: "Periodo"})
+                                    if col_i_ativo:
+                                        df_ativo = df_ativo.rename(columns={col_i_ativo: "Instituicao"})
+                                    else:
+                                        df_ativo["Instituicao"] = "Ativo"
+                                    df_ativo["valor"] = coerce_numeric(df_ativo[col_ativo_total])
+                                    denom_ativo = compute_running_mean_denominator(
+                                        df_ativo[["Instituicao", "Periodo", "valor"]],
+                                        value_col="valor",
+                                        label="denom_ativo"
+                                    )
 
                     for entry in mapping_entries:
                         if not entry.get("metric"):
