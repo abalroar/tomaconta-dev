@@ -1832,7 +1832,7 @@ with st.sidebar:
             st.warning("cache não encontrado no disco")
 
         # Botão para forçar recarregamento do cache local
-        if st.button("recarregar cache do disco", use_container_width=True):
+        if st.button("recarregar cache do disco", width='stretch'):
             if forcar_recarregar_cache():
                 st.success("cache recarregado do disco com sucesso!")
                 st.rerun()
@@ -1854,7 +1854,7 @@ with st.sidebar:
                 mes_f = st.selectbox("trimestre final", ['03','06','09','12'], index=2, key="mes_f")
 
             if 'dict_aliases' in st.session_state:
-                if st.button("extrair dados do BCB", type="primary", use_container_width=True):
+                if st.button("extrair dados do BCB", type="primary", width='stretch'):
                     periodos = gerar_periodos(ano_i, mes_i, ano_f, mes_f)
                     progress_bar = st.progress(0)
                     status = st.empty()
@@ -1963,7 +1963,7 @@ with st.sidebar:
                 col_upload1, col_upload2 = st.columns(2)
 
                 with col_upload1:
-                    if st.button("📦 enviar cache PRINCIPAL", use_container_width=True, help="Envia dados_cache"):
+                    if st.button("📦 enviar cache PRINCIPAL", width='stretch', help="Envia dados_cache"):
                         token_final = gh_token if gh_token else token_from_secrets
                         with st.spinner("enviando cache principal para github releases..."):
                             sucesso, mensagem = upload_cache_github(get_cache_manager(), "principal", token_final)
@@ -1978,7 +1978,7 @@ with st.sidebar:
                     btn_disabled = not capital_info['existe']
                     btn_help = "Envia cache de capital" if capital_info['existe'] else "Cache de capital não existe localmente"
 
-                    if st.button("💰 enviar cache CAPITAL", use_container_width=True, disabled=btn_disabled, help=btn_help):
+                    if st.button("💰 enviar cache CAPITAL", width='stretch', disabled=btn_disabled, help=btn_help):
                         token_final = gh_token if gh_token else token_from_secrets
                         with st.spinner("enviando cache de capital para github releases..."):
                             sucesso, mensagem = upload_cache_github(get_cache_manager(), "capital", token_final)
@@ -2009,7 +2009,7 @@ with st.sidebar:
                             data=cache_download["data"],
                             file_name=cache_download["file_name"],
                             mime=cache_download["mime"],
-                            use_container_width=True,
+                            width='stretch',
                             help="Baixe uma cópia do cache antes que o Streamlit reinicie"
                         )
                 else:
@@ -2031,7 +2031,7 @@ with st.sidebar:
                     help="Marque para apagar o cache existente e extrair tudo do zero. Use quando houver problemas com nomes ou dados antigos."
                 )
 
-                if st.button("extrair dados de capital", type="secondary", use_container_width=True, key="btn_extrair_capital"):
+                if st.button("extrair dados de capital", type="secondary", width='stretch', key="btn_extrair_capital"):
                     periodos_cap = gerar_periodos_capital(ano_cap_i, mes_cap_i, ano_cap_f, mes_cap_f)
                     progress_bar_cap = st.progress(0)
                     status_cap = st.empty()
@@ -2553,7 +2553,7 @@ elif menu == "Painel":
                             font=dict(family='IBM Plex Sans')
                         )
 
-                        st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+                        st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
 
                         df_componentes['ranking'] = df_componentes['total'].rank(method='first', ascending=False).astype(int)
                         # Merge com df_selecionado para ter acesso às colunas de peso
@@ -2701,7 +2701,7 @@ elif menu == "Painel":
                         font=dict(family='IBM Plex Sans')
                     )
 
-                    st.plotly_chart(fig_resumo, use_container_width=True, config={'displayModeBar': False})
+                    st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
 
                     media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
                     df_export = df_selecionado.copy()
@@ -3121,7 +3121,7 @@ elif menu == "Capital Regulatório":
                         font=dict(family='IBM Plex Sans')
                     )
 
-                    st.plotly_chart(fig_capital, use_container_width=True, config={'displayModeBar': False})
+                    st.plotly_chart(fig_capital, width='stretch', config={'displayModeBar': False})
 
                     # --- Exportação Excel/CSV ---
                     df_export_capital = df_selecionado_cap[[
@@ -3201,7 +3201,7 @@ elif menu == "Capital Regulatório":
 
                     st.dataframe(
                         df_tabela,
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                         column_config={
                             'Período': st.column_config.TextColumn('Período'),
@@ -3354,7 +3354,7 @@ elif menu == "Histórico Individual":
                                     # Usa gráfico de barras para Lucro Líquido Acumulado YTD
                                     tipo_grafico = 'barra' if var == 'Lucro Líquido Acumulado YTD' else 'linha'
                                     fig = criar_mini_grafico(df_banco_filtrado, var, var, tipo=tipo_grafico)
-                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                                    st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
             else:
                 st.warning("nenhuma instituição encontrada nos dados")
         else:
@@ -3551,7 +3551,7 @@ elif menu == "Histórico Peers":
                             barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else None
                         )
 
-                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                        st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
 
                         if export_frames:
                             df_export = pd.concat(export_frames, ignore_index=True)
@@ -3722,7 +3722,7 @@ elif menu == "Scatter Plot":
             font=dict(family='IBM Plex Sans')
         )
 
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, width='stretch')
 
         # ============================================================
         # SCATTER PLOT n=2 - Comparação entre dois períodos
@@ -3977,7 +3977,7 @@ elif menu == "Scatter Plot":
                     font=dict(family='IBM Plex Sans')
                 )
 
-                st.plotly_chart(fig_scatter_n2, use_container_width=True)
+                st.plotly_chart(fig_scatter_n2, width='stretch')
 
                 # Legenda explicativa
                 st.caption("○ Círculo vazio = período inicial | ● Círculo cheio = período subsequente | → Seta indica direção da movimentação")
@@ -4392,7 +4392,7 @@ elif menu == "Deltas (Antes e Depois)":
                 )
 
                 st.markdown(f"### {variavel}")
-                st.plotly_chart(fig_delta, use_container_width=True, config={'displayModeBar': False})
+                st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
 
                 # Tabela resumo
                 with st.expander("ver dados"):
@@ -4411,7 +4411,7 @@ elif menu == "Deltas (Antes e Depois)":
                     df_display[periodo_inicial_delta] = df_display[periodo_inicial_delta].apply(lambda x: formatar_valor(x, variavel))
                     df_display[periodo_subsequente_delta] = df_display[periodo_subsequente_delta].apply(lambda x: formatar_valor(x, variavel))
 
-                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+                    st.dataframe(df_display, width='stretch', hide_index=True)
 
                     # Botão de exportar Excel
                     buffer_excel = BytesIO()
@@ -4464,31 +4464,6 @@ elif menu == "DRE":
     def load_dre_mapping():
         return [
             {
-                "label": "Rec. Aplicações Interfinanceiras Liquidez",
-                "sources": ["Rendas de Aplicações Interfinanceiras de Liquidez (a)"],
-                "concept": "Receitas de aplicações interfinanceiras de liquidez.",
-            },
-            {
-                "label": "Rec. TVMs",
-                "sources": ["Rendas de Títulos e Valores Mobiliários (b)"],
-                "concept": "Receitas de títulos e valores mobiliários.",
-            },
-            {
-                "label": "Rec. Crédito",
-                "sources": ["Rendas de Operações de Crédito (c)"],
-                "concept": "Receitas de operações de crédito.",
-            },
-            {
-                "label": "Rec. Arrendamento Financeiro",
-                "sources": ["Rendas de Arrendamento Financeiro (d)"],
-                "concept": "Receitas de arrendamento financeiro.",
-            },
-            {
-                "label": "Rec. Outras Operações c/ Características de Crédito",
-                "sources": ["Rendas de Outras Operações com Características de Concessão de Crédito (e)"],
-                "concept": "Receitas de outras operações com características de crédito.",
-            },
-            {
                 "label": "Resultado de Intermediação Financeira Bruto",
                 "sources": [
                     "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
@@ -4498,31 +4473,72 @@ elif menu == "DRE":
                     "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
                 ],
                 "concept": "Resultado de intermediação financeira bruto (a+b+c+d+e).",
+                "original_label": "Resultado de Intermediação Financeira Bruto",
+            },
+            {
+                "label": "Rec. Aplicações Interfinanceiras Liquidez",
+                "sources": ["Rendas de Aplicações Interfinanceiras de Liquidez (a)"],
+                "concept": "Receitas de aplicações interfinanceiras de liquidez.",
+                "original_label": "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. TVMs",
+                "sources": ["Rendas de Títulos e Valores Mobiliários (b)"],
+                "concept": "Receitas de títulos e valores mobiliários.",
+                "original_label": "Rendas de Títulos e Valores Mobiliários (b)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. Crédito",
+                "sources": ["Rendas de Operações de Crédito (c)"],
+                "concept": "Receitas de operações de crédito.",
+                "original_label": "Rendas de Operações de Crédito (c)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. Arrendamento Financeiro",
+                "sources": ["Rendas de Arrendamento Financeiro (d)"],
+                "concept": "Receitas de arrendamento financeiro.",
+                "original_label": "Rendas de Arrendamento Financeiro (d)",
+                "is_child": True,
+            },
+            {
+                "label": "Rec. Outras Operações c/ Características de Crédito",
+                "sources": ["Rendas de Outras Operações com Características de Concessão de Crédito (e)"],
+                "concept": "Receitas de outras operações com características de crédito.",
+                "original_label": "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
+                "is_child": True,
             },
             {
                 "label": "Desp. PDD",
                 "sources": ["Resultado com Perda Esperada (f)"],
                 "concept": "Despesa com perdas esperadas (PDD).",
+                "original_label": "Resultado com Perda Esperada (f)",
             },
             {
                 "label": "Desp. Captação",
                 "sources": ["Despesas de Captações (g)"],
                 "concept": "Despesas de captação.",
+                "original_label": "Despesas de Captações (g)",
             },
             {
                 "label": "Desp. Dívida Elegível a Capital",
                 "sources": ["Despesas de Instrumentos de Dívida Elegíveis a Capital (h)"],
                 "concept": "Despesas com dívida elegível a capital.",
+                "original_label": "Despesas de Instrumentos de Dívida Elegíveis a Capital (h)",
             },
             {
                 "label": "Res. Derivativos",
                 "sources": ["Resultado com Derivativos (i)"],
                 "concept": "Resultado com derivativos.",
+                "original_label": "Resultado com Derivativos (i)",
             },
             {
                 "label": "Outros Res. Intermediação Financeira",
                 "sources": ["Outros Resultados de Intermediação Financeira (j)"],
                 "concept": "Outros resultados de intermediação financeira.",
+                "original_label": "Outros Resultados de Intermediação Financeira (j)",
             },
             {
                 "label": "Resultado Int. Financeira Líquido",
@@ -4539,76 +4555,91 @@ elif menu == "DRE":
                     "Outros Resultados de Intermediação Financeira (j)",
                 ],
                 "concept": "Resultado de intermediação financeira líquido.",
+                "original_label": "Resultado de Intermediação Financeira (k) = (a) + (b) + (c) + (d) + (e) + (f) + (g) + (h) + (i) + (j)",
             },
             {
                 "label": "Resultado Transações Pgto",
                 "sources": ["Resultado com Transações de Pagamento (l)"],
                 "concept": "Resultado com transações de pagamento.",
+                "original_label": "Resultado com Transações de Pagamento (l)",
             },
             {
                 "label": "Renda Tarifas Bancárias",
                 "sources": ["Rendas de Tarifas Bancárias (m)"],
                 "concept": "Receitas de tarifas bancárias.",
+                "original_label": "Rendas de Tarifas Bancárias (m)",
             },
             {
                 "label": "Outras Prestações de Serviços",
                 "sources": ["Outras Rendas de Prestação de Serviços (n)"],
                 "concept": "Outras receitas de prestação de serviços.",
+                "original_label": "Outras Rendas de Prestação de Serviços (n)",
             },
             {
                 "label": "Desp. Pessoal",
                 "sources": ["Despesas de Pessoal (o)"],
                 "concept": "Despesas com pessoal.",
+                "original_label": "Despesas de Pessoal (o)",
             },
             {
                 "label": "Desp. Adm",
                 "sources": ["Despesas Administrativas (p)"],
                 "concept": "Despesas administrativas.",
+                "original_label": "Despesas Administrativas (p)",
             },
             {
                 "label": "Desp. PDD Outras Operações",
                 "sources": ["Resultado com Perdas Esperadas de Outras Operações (q)"],
                 "concept": "Perdas esperadas de outras operações.",
+                "original_label": "Resultado com Perdas Esperadas de Outras Operações (q)",
             },
             {
                 "label": "Desp. JSCP Cooperativas",
                 "sources": ["Despesas de Juros Sobre Capital Próprio de Cooperativas (r)"],
                 "concept": "Juros sobre capital próprio (cooperativas).",
+                "original_label": "Despesas de Juros Sobre Capital Próprio de Cooperativas (r)",
             },
             {
                 "label": "Desp. Tributárias",
                 "sources": ["Despesas Tributárias (s)"],
                 "concept": "Despesas tributárias.",
+                "original_label": "Despesas Tributárias (s)",
             },
             {
                 "label": "Res. Participação Controladas",
                 "sources": ["Resultado de Participações (t)"],
                 "concept": "Resultado de participações em controladas/coligadas.",
+                "original_label": "Resultado de Participações (t)",
             },
             {
                 "label": "Outras Receitas",
                 "sources": ["Outras Receitas (u)"],
                 "concept": "Outras receitas.",
+                "original_label": "Outras Receitas (u)",
             },
             {
                 "label": "Outras Despesas",
                 "sources": ["Outras Despesas (v)"],
                 "concept": "Outras despesas.",
+                "original_label": "Outras Despesas (v)",
             },
             {
                 "label": "IR/CSLL",
                 "sources": ["Imposto de Renda e Contribuição Social (y)"],
                 "concept": "Imposto de renda e contribuição social.",
+                "original_label": "Imposto de Renda e Contribuição Social (y)",
             },
             {
                 "label": "Res. Participação Lucro",
                 "sources": ["Participações no Lucro (z)"],
                 "concept": "Participações no lucro.",
+                "original_label": "Participações no Lucro (z)",
             },
             {
                 "label": "Lucro Líquido Período Acumulado",
                 "sources": ["Lucro Líquido (aa) = (x) + (y) + (z)"],
                 "concept": "Lucro líquido acumulado no período.",
+                "original_label": "Lucro Líquido (aa) = (x) + (y) + (z)",
             },
         ]
 
@@ -4768,14 +4799,14 @@ elif menu == "DRE":
         html_tabela = """
         <style>
         .carteira-table {
-            width: 100%;
+            width: 88%;
+            margin: 10px auto 0 auto;
             border-collapse: collapse;
             font-size: 14px;
-            margin-top: 10px;
         }
         .carteira-table th, .carteira-table td {
             border: 1px solid #ddd;
-            padding: 8px 12px;
+            padding: 6px 10px;
             text-align: right;
             vertical-align: top;
         }
@@ -4802,6 +4833,16 @@ elif menu == "DRE":
             margin-left: 6px;
             cursor: help;
         }
+        .dre-subitem {
+            font-size: 12px;
+        }
+        .dre-subitem td:first-child {
+            padding-left: 18px;
+        }
+        .dre-negative {
+            color: #7a1e2b;
+            font-weight: 600;
+        }
         </style>
         <table class="carteira-table">
         <thead>
@@ -4821,7 +4862,8 @@ elif menu == "DRE":
             label_exib = entry.get("label_exib", label)
             tooltip = tooltip_por_label.get(label, "")
             info_html = f'<span class="dre-info" title="{tooltip}">ⓘ</span>' if tooltip else ""
-            html_tabela += f"<tr><td>{label_exib} {info_html}</td>"
+            row_class = "dre-subitem" if entry.get("is_child") else ""
+            html_tabela += f"<tr class=\"{row_class}\"><td>{label_exib} {info_html}</td>"
             linha = df_linhas[df_linhas["Label"] == label]
             for periodo in periodos:
                 cell = linha[linha["PeriodoExib"] == periodo]
@@ -4834,10 +4876,15 @@ elif menu == "DRE":
                 formato = formato_por_label.get(label, "num")
                 if formato == "pct":
                     ytd_fmt = formatar_percentual(ytd_val, decimais=2)
+                    ytd_neg = False
                 else:
                     ytd_fmt = formatar_valor_br(ytd_val)
+                    ytd_neg = pd.notna(ytd_val) and ytd_val < 0
                 yoy_fmt = formatar_percentual(yoy_val, decimais=1)
-                html_tabela += f"<td>{ytd_fmt}</td><td>{yoy_fmt}</td>"
+                yoy_neg = pd.notna(yoy_val) and yoy_val < 0
+                ytd_span = f"<span class=\"dre-negative\">{ytd_fmt}</span>" if ytd_neg else ytd_fmt
+                yoy_span = f"<span class=\"dre-negative\">{yoy_fmt}</span>" if yoy_neg else yoy_fmt
+                html_tabela += f"<td>{ytd_span}</td><td>{yoy_span}</td>"
             html_tabela += "</tr>"
 
         html_tabela += "</tbody></table>"
@@ -4942,7 +4989,8 @@ elif menu == "DRE":
                     tooltip_por_label = {}
                     entradas_com_label = []
                     for entry in mapping_entries:
-                        fontes = entry.get("sources", [])
+                        fonte_original = entry.get("original_label")
+                        fontes = [fonte_original] if fonte_original else entry.get("sources", [])
                         fontes_fmt = ", ".join([f for f in fontes if f])
                         tooltip_parts = []
                         if entry.get("concept"):
@@ -4978,7 +5026,7 @@ elif menu == "DRE":
                     )
 
                     with st.expander("Dados para auditoria"):
-                        st.dataframe(df_filtrado, use_container_width=True)
+                        st.dataframe(df_filtrado, width='stretch')
 
 elif menu == "Carteira 4.966":
     # =========================================================================
@@ -5244,7 +5292,7 @@ elif menu == "Carteira 4.966":
 
                 # Tabela de auditoria (dataframe simples)
                 with st.expander("Dados para auditoria"):
-                    st.dataframe(df_resultado, use_container_width=True)
+                    st.dataframe(df_resultado, width='stretch')
 
                 # Exportação Excel
                 st.markdown("---")
@@ -5574,7 +5622,7 @@ elif menu == "Taxas de Juros por Produto":
                     fig.update_xaxes(tickformat="%b/%y")
                     fig.update_traces(marker=dict(size=6))
 
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                     # =============================================================
                     # TABELA DE DADOS (data mais recente)
@@ -5585,7 +5633,7 @@ elif menu == "Taxas de Juros por Produto":
                         cols_disp = [c for c in cols_mostrar if c in df_rank.columns]
                         df_display = df_rank[cols_disp].sort_values('Posição' if 'Posição' in cols_disp else tipo_taxa)
                         st.caption(f"Ranking em {data_mais_recente.strftime('%d/%m/%Y')}:")
-                        st.dataframe(df_display, use_container_width=True, hide_index=True)
+                        st.dataframe(df_display, width='stretch', hide_index=True)
 
                     # =============================================================
                     # EXPORTAÇÃO
@@ -5661,7 +5709,7 @@ elif menu == "Crie sua métrica!":
 
         with col_add:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("adicionar", key="btn_add_step", use_container_width=True):
+            if st.button("adicionar", key="btn_add_step", width='stretch'):
                 st.session_state['brincar_formula_steps'].append({
                     'variavel': var_nova,
                     'operacao': operacao if operacao != "(fim)" else None
@@ -5957,7 +6005,7 @@ elif menu == "Crie sua métrica!":
                             font=dict(family='IBM Plex Sans')
                         )
 
-                        st.plotly_chart(fig_scatter_brincar, use_container_width=True)
+                        st.plotly_chart(fig_scatter_brincar, width='stretch')
 
                         # Tabela e exportação
                         with st.expander("ver dados e exportar"):
@@ -5981,7 +6029,7 @@ elif menu == "Crie sua métrica!":
                             df_export['Métrica Derivada'] = df_scatter_brincar['Métrica Derivada']
                             df_export = df_export[[c for c in cols_ordem if c in df_export.columns]]
 
-                            st.dataframe(df_export, use_container_width=True, hide_index=True)
+                            st.dataframe(df_export, width='stretch', hide_index=True)
 
                             col_excel, col_csv = st.columns(2)
                             with col_excel:
@@ -6208,7 +6256,7 @@ elif menu == "Crie sua métrica!":
                                 margin=dict(l=60, r=20, t=80, b=100)
                             )
 
-                            st.plotly_chart(fig_delta_brincar, use_container_width=True, config={'displayModeBar': False})
+                            st.plotly_chart(fig_delta_brincar, width='stretch', config={'displayModeBar': False})
 
                             # Tabela e exportação
                             with st.expander("ver dados e exportar"):
@@ -6225,7 +6273,7 @@ elif menu == "Crie sua métrica!":
                                 componentes = list(set([s['variavel'] for s in steps]))
                                 df_export_delta = df_resumo_brincar[['Instituição', periodo_inicial_brincar, periodo_subsequente_brincar, 'Delta', 'Variação %']].copy()
 
-                                st.dataframe(df_export_delta, use_container_width=True, hide_index=True)
+                                st.dataframe(df_export_delta, width='stretch', hide_index=True)
 
                                 col_excel, col_csv = st.columns(2)
                                 with col_excel:
@@ -6368,7 +6416,7 @@ elif menu == "Crie sua métrica!":
                             margin=dict(l=60, r=20, t=60, b=100)
                         )
 
-                        st.plotly_chart(fig_ranking, use_container_width=True, config={'displayModeBar': False})
+                        st.plotly_chart(fig_ranking, width='stretch', config={'displayModeBar': False})
 
                         # Tabela e exportação
                         with st.expander("ver dados e exportar"):
@@ -6387,7 +6435,7 @@ elif menu == "Crie sua métrica!":
                             cols_ordem = ['Período', 'Instituição', nome_metrica] + componentes
                             df_export_rank = df_export_rank[[c for c in cols_ordem if c in df_export_rank.columns]]
 
-                            st.dataframe(df_export_rank, use_container_width=True, hide_index=True)
+                            st.dataframe(df_export_rank, width='stretch', hide_index=True)
 
                             col_excel, col_csv = st.columns(2)
                             with col_excel:
@@ -6483,7 +6531,7 @@ elif menu == "Atualizar Base":
             })
 
         df_status = pd.DataFrame(status_data)
-        st.dataframe(df_status, use_container_width=True, hide_index=True)
+        st.dataframe(df_status, width='stretch', hide_index=True)
 
         # Legenda
         st.caption("""
@@ -6686,7 +6734,7 @@ elif menu == "Atualizar Base":
 
         if pode_extrair:
 
-            if st.button(f"Extrair dados de {opcoes_cache[cache_selecionado]}", type="primary", use_container_width=True, key="btn_extrair_unificado"):
+            if st.button(f"Extrair dados de {opcoes_cache[cache_selecionado]}", type="primary", width='stretch', key="btn_extrair_unificado"):
 
                 # Containers para UI
                 progress_bar = st.progress(0)
@@ -6928,7 +6976,7 @@ elif menu == "Atualizar Base":
 
         col_pub1, col_pub2 = st.columns([3, 1])
         with col_pub1:
-            if st.button(f"📤 Enviar '{cache_selecionado}' para GitHub", use_container_width=True, key="btn_enviar_github_unificado", disabled=not token_para_upload):
+            if st.button(f"📤 Enviar '{cache_selecionado}' para GitHub", width='stretch', key="btn_enviar_github_unificado", disabled=not token_para_upload):
                 with st.spinner(f"enviando cache '{cache_selecionado}' para github releases..."):
                     sucesso, mensagem = upload_cache_github(
                         cache_manager,
