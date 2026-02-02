@@ -5216,6 +5216,7 @@ elif menu == "DRE":
                         df_derived_slice = df_derived_slice.rename(
                             columns={"Métrica": "Label", "Valor": "valor", "Instituição": "Instituicao", "Período": "Periodo"}
                         )
+                        df_derived_slice["Periodo"] = df_derived_slice["Periodo"].astype(str)
                         df_derived_slice[["ano", "mes"]] = df_derived_slice["Periodo"].apply(
                             lambda x: pd.Series(parse_periodo(x))
                         )
