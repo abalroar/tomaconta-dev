@@ -79,6 +79,15 @@ from .taxas_juros import (
     MODALIDADES_CONHECIDAS,
 )
 
+from .derived_metrics import (
+    DerivedMetricsCache,
+    DERIVED_METRICS,
+    DERIVED_METRICS_FORMAT,
+    DERIVED_METRICS_FORMULAS,
+    build_derived_metrics,
+    load_derived_metrics_slice,
+)
+
 # Extrator autônomo (novo sistema)
 from .extractor import (
     extrair_cadastro,
@@ -181,6 +190,13 @@ __all__ = [
     "buscar_instituicoes_taxas_juros",
     "formatar_nome_modalidade",
     "MODALIDADES_CONHECIDAS",
+    # Derived metrics
+    "DerivedMetricsCache",
+    "DERIVED_METRICS",
+    "DERIVED_METRICS_FORMAT",
+    "DERIVED_METRICS_FORMULAS",
+    "build_derived_metrics",
+    "load_derived_metrics_slice",
     # Extrator autônomo
     "extrair_cadastro",
     "extrair_valores",
