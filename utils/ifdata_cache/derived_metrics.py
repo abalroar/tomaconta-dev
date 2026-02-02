@@ -78,6 +78,17 @@ class DerivedMetricsCache(BaseCache):
     def __init__(self, base_dir: Path):
         super().__init__(DERIVED_CACHE_CONFIG, base_dir)
 
+    def baixar_remoto(self):
+        return self._unsupported("Cache derivado não possui fonte remota")
+
+    def extrair_periodo(self, periodo: str, **kwargs):
+        return self._unsupported("Cache derivado não suporta extração direta")
+
+    def _unsupported(self, mensagem: str):
+        from .base import CacheResult
+
+        return CacheResult(sucesso=False, mensagem=mensagem, fonte="nenhum")
+
 
 @dataclass
 class DerivedMetricsStats:
