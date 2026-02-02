@@ -58,6 +58,11 @@ from utils.ifdata_cache import (
     # Gerenciador unificado
     CacheManager,
     get_manager as get_cache_manager,
+    DERIVED_METRICS,
+    DERIVED_METRICS_FORMAT,
+    DERIVED_METRICS_FORMULAS,
+    build_derived_metrics,
+    load_derived_metrics_slice,
 )
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -290,6 +295,8 @@ VARS_PERCENTUAL = [
     'Índice de Capital Principal',
     'Índice de Capital Nível I',
     'Razão de Alavancagem',
+    # Métricas derivadas
+    *DERIVED_METRICS,
 ]
 VARS_RAZAO = ['Crédito/PL (%)']
 VARS_MOEDAS = [
@@ -1314,6 +1321,123 @@ def get_dados_concatenados() -> pd.DataFrame:
     return _get_dados_concatenados(periodos_hash, periodos_keys)
 
 
+def _get_cache_data_mtime(cache_obj) -> Optional[float]:
+    if cache_obj is None:
+        return None
+    if cache_obj.arquivo_dados.exists():
+        return cache_obj.arquivo_dados.stat().st_mtime
+    if cache_obj.arquivo_dados_pickle.exists():
+        return cache_obj.arquivo_dados_pickle.stat().st_mtime
+    return None
+
+
+def _load_cache_metadata(cache_obj) -> dict:
+    if cache_obj is None or not cache_obj.arquivo_metadata.exists():
+        return {}
+    try:
+        return json.loads(cache_obj.arquivo_metadata.read_text())
+    except Exception:
+        return {}
+
+
+def ensure_derived_metrics_cache() -> Tuple[Optional[object], Optional[str], dict]:
+    manager = get_cache_manager()
+    cache_derivado = manager.get_cache("derived_metrics") if manager else None
+    if cache_derivado is None:
+        return None, "cache de métricas derivadas não configurado", {}
+
+    mtime_derivado = _get_cache_data_mtime(cache_derivado)
+    dre_cache = manager.get_cache("dre")
+    principal_cache = manager.get_cache("principal")
+    mtime_dre = _get_cache_data_mtime(dre_cache)
+    mtime_principal = _get_cache_data_mtime(principal_cache)
+
+    precisa_recalcular = True
+    if mtime_derivado is not None:
+        referencia = max([t for t in [mtime_dre, mtime_principal] if t is not None], default=None)
+        if referencia is None or mtime_derivado >= referencia:
+            precisa_recalcular = False
+
+    if not precisa_recalcular:
+        return cache_derivado, None, _load_cache_metadata(cache_derivado)
+
+    resultado_dre = manager.carregar("dre") if manager else None
+    if not resultado_dre or not resultado_dre.sucesso or resultado_dre.dados is None:
+        msg = resultado_dre.mensagem if resultado_dre else "falha ao carregar DRE"
+        return cache_derivado, msg, {}
+
+    resultado_principal = manager.carregar("principal") if manager else None
+    if not resultado_principal or not resultado_principal.sucesso or resultado_principal.dados is None:
+        msg = resultado_principal.mensagem if resultado_principal else "falha ao carregar principal"
+        return cache_derivado, msg, {}
+
+    _perf_start("derived_metrics_build")
+    df_derived, stats = build_derived_metrics(resultado_dre.dados, resultado_principal.dados)
+    elapsed = _perf_end("derived_metrics_build")
+
+    info_extra = {
+        "denominador_zero_ou_nan": stats.denominador_zero_ou_nan,
+        "period_type": stats.period_type,
+        "periodos_detectados": stats.periodos_detectados,
+        "tempo_execucao_s": round(elapsed, 3),
+    }
+    cache_derivado.salvar_local(df_derived, fonte="derivado", info_extra=info_extra)
+    return cache_derivado, None, _load_cache_metadata(cache_derivado)
+
+
+def carregar_metricas_derivadas_slice(periodos=None, instituicoes=None, metricas=None) -> pd.DataFrame:
+    cache_derivado, erro, _ = ensure_derived_metrics_cache()
+    if cache_derivado is None or erro:
+        return pd.DataFrame()
+    return load_derived_metrics_slice(
+        cache_derivado,
+        periodos=periodos,
+        instituicoes=instituicoes,
+        metricas=metricas,
+    )
+
+
+def _df_mem_mb(df: Optional[pd.DataFrame]) -> float:
+    if df is None or df.empty:
+        return 0.0
+    return df.memory_usage(deep=True).sum() / (1024 * 1024)
+
+
+def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
+    if df_periodo is None or df_periodo.empty:
+        return df_periodo, {}
+    _perf_start("scatter_derived_load")
+    df_derived = carregar_metricas_derivadas_slice(
+        periodos=[periodo],
+        instituicoes=df_periodo["Instituição"].dropna().unique().tolist(),
+        metricas=DERIVED_METRICS,
+    )
+    tempo = _perf_end("scatter_derived_load")
+    if df_derived.empty:
+        df_out = df_periodo.copy()
+        for metric in DERIVED_METRICS:
+            if metric not in df_out.columns:
+                df_out[metric] = pd.NA
+        return df_out, {"tempo_s": round(tempo, 3), "linhas": 0, "mem_mb": 0.0}
+    df_pivot = df_derived.pivot_table(
+        index="Instituição",
+        columns="Métrica",
+        values="Valor",
+        aggfunc="first",
+    ).reset_index()
+    df_pivot.columns.name = None
+    df_out = df_periodo.merge(df_pivot, on="Instituição", how="left")
+    for metric in DERIVED_METRICS:
+        if metric not in df_out.columns:
+            df_out[metric] = pd.NA
+    diag = {
+        "tempo_s": round(tempo, 3),
+        "linhas": len(df_derived),
+        "mem_mb": _df_mem_mb(df_derived),
+    }
+    return df_out, diag
+
+
 # FIX PROBLEMA 3: Busca de cor com normalização
 def obter_cor_banco(instituicao):
     if 'dict_cores_personalizadas' in st.session_state:
@@ -1842,6 +1966,15 @@ with st.sidebar:
                 st.rerun()
             else:
                 st.error("falha ao recarregar cache - arquivo não existe")
+
+        st.markdown("---")
+        st.markdown("**diagnóstico**")
+        st.toggle(
+            "modo diagnóstico",
+            value=False,
+            key="modo_diagnostico",
+            help="exibe memória aproximada, tamanho do recorte do cache derivado e tempos de execução",
+        )
 
         st.markdown("---")
         st.markdown("**atualizar dados (admin)**")
@@ -3590,7 +3723,11 @@ elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
-        colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
+        colunas_base = [
+            col for col in df.columns
+            if col not in ['Instituição', 'Período'] and pd.api.types.is_numeric_dtype(df[col])
+        ]
+        colunas_numericas = colunas_base + [m for m in DERIVED_METRICS if m not in colunas_base]
         periodos = ordenar_periodos(df['Período'].unique(), reverso=True)
 
         # Lista de todos os bancos disponíveis com ordenação por alias
@@ -3655,6 +3792,7 @@ elif menu == "Scatter Plot":
 
         # Aplica filtros ao dataframe
         df_periodo = df[df['Período'] == periodo_scatter]
+        df_periodo, diag_scatter_derived = anexar_metricas_derivadas_periodo(df_periodo, periodo_scatter)
 
         if peer_selecionado != 'Nenhum':
             df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
@@ -3727,6 +3865,14 @@ elif menu == "Scatter Plot":
         )
 
         st.plotly_chart(fig_scatter, width='stretch')
+
+        if st.session_state.get("modo_diagnostico"):
+            with st.expander("diagnóstico scatter n=1"):
+                st.caption(f"Memória df_periodo: {_df_mem_mb(df_periodo):.2f} MB")
+                st.caption(f"Memória df_scatter: {_df_mem_mb(df_scatter):.2f} MB")
+                st.caption(f"Recorte derivado: {diag_scatter_derived.get('linhas', 0)} linhas")
+                st.caption(f"Memória recorte derivado: {diag_scatter_derived.get('mem_mb', 0):.2f} MB")
+                st.caption(f"Tempo recorte derivado: {diag_scatter_derived.get('tempo_s', 0):.3f}s")
 
         # ============================================================
         # SCATTER PLOT n=2 - Comparação entre dois períodos
@@ -3826,6 +3972,9 @@ elif menu == "Scatter Plot":
             # Filtra dados para os dois períodos
             df_p1 = df[df['Período'] == periodo_inicial].copy()
             df_p2 = df[df['Período'] == periodo_subseq].copy()
+
+            df_p1, diag_scatter_derived_p1 = anexar_metricas_derivadas_periodo(df_p1, periodo_inicial)
+            df_p2, diag_scatter_derived_p2 = anexar_metricas_derivadas_periodo(df_p2, periodo_subseq)
 
             # Aplica filtro de peer
             if peer_selecionado_n2 != 'Nenhum':
@@ -3985,6 +4134,17 @@ elif menu == "Scatter Plot":
 
                 # Legenda explicativa
                 st.caption("○ Círculo vazio = período inicial | ● Círculo cheio = período subsequente | → Seta indica direção da movimentação")
+
+                if st.session_state.get("modo_diagnostico"):
+                    with st.expander("diagnóstico scatter n=2"):
+                        st.caption(f"Memória df_p1: {_df_mem_mb(df_p1):.2f} MB")
+                        st.caption(f"Memória df_p2: {_df_mem_mb(df_p2):.2f} MB")
+                        st.caption(f"Recorte derivado p1: {diag_scatter_derived_p1.get('linhas', 0)} linhas")
+                        st.caption(f"Recorte derivado p2: {diag_scatter_derived_p2.get('linhas', 0)} linhas")
+                        st.caption(f"Memória recorte derivado p1: {diag_scatter_derived_p1.get('mem_mb', 0):.2f} MB")
+                        st.caption(f"Memória recorte derivado p2: {diag_scatter_derived_p2.get('mem_mb', 0):.2f} MB")
+                        st.caption(f"Tempo recorte derivado p1: {diag_scatter_derived_p1.get('tempo_s', 0):.3f}s")
+                        st.caption(f"Tempo recorte derivado p2: {diag_scatter_derived_p2.get('tempo_s', 0):.3f}s")
 
     else:
         st.info("carregando dados automaticamente do github...")
@@ -4527,6 +4687,24 @@ elif menu == "DRE":
                 "original_label": "Despesas de Captações (g)",
             },
             {
+                "label": "Desp PDD / NIM bruta",
+                "derived_metric": "Desp PDD / NIM bruta",
+                "format": "pct",
+                "concept": "Desp. PDD dividido pela NIM bruta (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito).",
+            },
+            {
+                "label": "Desp PDD / Resultado Intermediação Fin. Bruto",
+                "derived_metric": "Desp PDD / Resultado Intermediação Fin. Bruto",
+                "format": "pct",
+                "concept": "Desp. PDD dividido pelo Resultado de Intermediação Financeira Bruto.",
+            },
+            {
+                "label": "Desp Captação / Captação",
+                "derived_metric": "Desp Captação / Captação",
+                "format": "pct",
+                "concept": "Desp. Captação anualizada dividida por Captações.",
+            },
+            {
                 "label": "Desp. Dívida Elegível a Capital",
                 "sources": ["Despesas de Instrumentos de Dívida Elegíveis a Capital (h)"],
                 "concept": "Despesas com dívida elegível a capital.",
@@ -4766,6 +4944,8 @@ elif menu == "DRE":
         return df
 
     def compute_line_values(df_base: pd.DataFrame, entry: dict) -> pd.DataFrame:
+        if entry.get("derived_metric"):
+            return pd.DataFrame()
         fontes = normalize_sources(entry.get("sources", []))
         colunas = []
         for fonte in fontes:
@@ -4999,6 +5179,10 @@ elif menu == "DRE":
                         tooltip_parts = []
                         if entry.get("concept"):
                             tooltip_parts.append(entry["concept"])
+                        if entry.get("derived_metric"):
+                            formula = DERIVED_METRICS_FORMULAS.get(entry["label"])
+                            if formula:
+                                tooltip_parts.append(f"Fórmula: {formula}")
                         if fontes_fmt:
                             tooltip_parts.append(f"Fontes: {fontes_fmt}")
                         if entry.get("ytd_note"):
@@ -5015,6 +5199,40 @@ elif menu == "DRE":
                         & (df_ytd["ano"] == int(ano_selecionado))
                     ].copy()
 
+                    diag_info = {}
+                    if st.session_state.get("modo_diagnostico"):
+                        diag_info["df_base_mb"] = _df_mem_mb(df_base)
+                        diag_info["df_valores_mb"] = _df_mem_mb(df_valores)
+                        diag_info["df_ytd_mb"] = _df_mem_mb(df_ytd)
+
+                    _perf_start("dre_derived_load")
+                    df_derived_slice = carregar_metricas_derivadas_slice(
+                        instituicoes=[instituicao_selecionada],
+                        metricas=DERIVED_METRICS,
+                    )
+                    tempo_derived = _perf_end("dre_derived_load")
+
+                    if not df_derived_slice.empty:
+                        df_derived_slice = df_derived_slice.rename(
+                            columns={"Métrica": "Label", "Valor": "valor", "Instituição": "Instituicao", "Período": "Periodo"}
+                        )
+                        df_derived_slice[["ano", "mes"]] = df_derived_slice["Periodo"].apply(
+                            lambda x: pd.Series(parse_periodo(x))
+                        )
+                        df_derived_slice = compute_ytd_irregular(df_derived_slice)
+                        df_derived_slice = compute_yoy(df_derived_slice)
+                        df_derived_slice["PeriodoExib"] = df_derived_slice["Periodo"].apply(periodo_para_exibicao)
+                        df_derived_filtrado = df_derived_slice[
+                            (df_derived_slice["Instituicao"] == instituicao_selecionada)
+                            & (df_derived_slice["ano"] == int(ano_selecionado))
+                        ].copy()
+                        df_filtrado = pd.concat([df_filtrado, df_derived_filtrado], ignore_index=True)
+
+                    if st.session_state.get("modo_diagnostico"):
+                        diag_info["derived_slice_mb"] = _df_mem_mb(df_derived_slice)
+                        diag_info["derived_slice_rows"] = len(df_derived_slice)
+                        diag_info["derived_load_s"] = round(tempo_derived, 3)
+
                     periodos_ordem = ["Mar", "Jun", "Set", "Dez"]
                     periodos_disponiveis = []
                     for mes in [3, 6, 9, 12]:
@@ -5028,6 +5246,15 @@ elif menu == "DRE":
                         formato_por_label,
                         tooltip_por_label
                     )
+
+                    if st.session_state.get("modo_diagnostico"):
+                        with st.expander("diagnóstico DRE"):
+                            st.caption(f"Memória df_base: {diag_info.get('df_base_mb', 0):.2f} MB")
+                            st.caption(f"Memória df_valores: {diag_info.get('df_valores_mb', 0):.2f} MB")
+                            st.caption(f"Memória df_ytd: {diag_info.get('df_ytd_mb', 0):.2f} MB")
+                            st.caption(f"Memória recorte derivado: {diag_info.get('derived_slice_mb', 0):.2f} MB")
+                            st.caption(f"Linhas recorte derivado: {diag_info.get('derived_slice_rows', 0)}")
+                            st.caption(f"Tempo recorte derivado: {diag_info.get('derived_load_s', 0):.3f}s")
 
                     st.markdown("#### Exportar DRE (formato simples)")
                     df_export = []
@@ -7182,4 +7409,10 @@ elif menu == "Glossário":
     **Crédito/Captações (%):** Carteira de Crédito Líquida dividida pelas Captações.
 
     **Crédito/Ativo (%):** Carteira de Crédito Líquida dividida pelo Ativo Total.
+
+    **Desp PDD / NIM bruta (%):** Desp. PDD dividido pela NIM bruta (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito). Fórmula: Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito).
+
+    **Desp PDD / Resultado Intermediação Fin. Bruto (%):** Desp. PDD dividido pelo Resultado de Intermediação Financeira Bruto. Fórmula: Desp. PDD / Resultado de Intermediação Financeira Bruto.
+
+    **Desp Captação / Captação (%):** Desp. Captação anualizada dividida por Captações. Fórmula: (Desp. Captação * (12 / meses_do_período)) / Captações.
     """)
