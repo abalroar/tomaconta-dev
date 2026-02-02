@@ -5233,9 +5233,9 @@ elif menu == "DRE":
                         diag_info["derived_slice_rows"] = len(df_derived_slice)
                         diag_info["derived_load_s"] = round(tempo_derived, 3)
 
-                    periodos_ordem = ["Mar", "Jun", "Set", "Dez"]
+                    periodos_ordem = ["Set", "Jun", "Mar", "Dez"]
                     periodos_disponiveis = []
-                    for mes in [3, 6, 9, 12]:
+                    for mes in [9, 6, 3, 12]:
                         periodo_texto = periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}")
                         periodos_disponiveis.append(periodo_texto)
 
