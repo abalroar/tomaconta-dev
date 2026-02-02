@@ -84,6 +84,12 @@ CACHES_INFO = {
         "todas_variaveis": True,
         "periodicidade": "diaria",  # Janelas de 5 dias úteis
     },
+    "derived_metrics": {
+        "nome_exibicao": "Métricas Derivadas",
+        "descricao": "Indicadores derivados (DRE + Resumo)",
+        "relatorio": None,
+        "todas_variaveis": False,
+    },
 }
 
 
@@ -117,6 +123,7 @@ class CacheManager:
             CarteiraInstrumentosCache,
         )
         from .taxas_juros import TaxasJurosCache
+        from .derived_metrics import DerivedMetricsCache
 
         # Caches principais (variáveis selecionadas)
         self.registrar(PrincipalCache(self.base_dir))
@@ -132,6 +139,8 @@ class CacheManager:
 
         # Cache de Taxas de Juros (API BCB diferente)
         self.registrar(TaxasJurosCache(self.base_dir))
+        # Cache de métricas derivadas (DRE + Resumo)
+        self.registrar(DerivedMetricsCache(self.base_dir))
 
     def registrar(self, cache: BaseCache):
         """Registra um novo tipo de cache.
