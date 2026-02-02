@@ -280,7 +280,7 @@ APP_DIR = Path(__file__).parent.resolve()
 DATA_DIR = APP_DIR / "data"
 
 ALIASES_PATH = str(DATA_DIR / "Aliases.xlsx")
-LOGO_PATH = str(DATA_DIR / "logo.png")
+LOGO_PATH = str(DATA_DIR / "logo.jpg")
 
 # Senha para proteger a funcionalidade de atualização de cache
 SENHA_ADMIN = "m4th3u$987"
@@ -2323,7 +2323,7 @@ if menu == "Sobre":
 
     with col1:
         st.markdown("""
-        **variáveis monetárias**
+        **variáveis de balanço**
         - ativo total
         - carteira de crédito (líquida)
         - títulos e valores mobiliários
@@ -2358,26 +2358,22 @@ if menu == "Sobre":
         - índice de basileia
         - índice de imobilização
         - número de agências e pacs
+
+        **taxas de juros**
+        - taxa de juros por produto e modalidade (pf e pj)
         """)
 
     st.markdown("---")
 
     st.markdown("### recursos avançados")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         st.markdown("""
         <div class="feature-card">
             <h4>filtros inteligentes</h4>
             <p>selecione instituições por top n (por qualquer indicador), por peer group ou lista customizada. 8 opções de ponderação para médias do grupo.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class="feature-card">
-            <h4>nomenclatura personalizada</h4>
-            <p>renomeie instituições com nomes-fantasia, defina cores personalizadas e agrupe por categoria (peer groups) para análises segmentadas.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2389,6 +2385,7 @@ if menu == "Sobre":
         </div>
         """, unsafe_allow_html=True)
 
+    with col3:
         st.markdown("""
         <div class="feature-card">
             <h4>dados oficiais</h4>
@@ -2416,8 +2413,14 @@ if menu == "Sobre":
     | **python 3.10+** | linguagem base |
     | **streamlit** | interface web interativa |
     | **pandas** | processamento e análise de dados |
+    | **numpy** | computação numérica e vetorização |
     | **plotly** | visualizações dinâmicas e interativas |
-    | **api bcb olinda** | fonte oficial de dados (if.data e relatório 5) |
+    | **matplotlib** | gráficos auxiliares e exportações |
+    | **reportlab** | geração de pdfs e scorecards |
+    | **openpyxl / xlsxwriter** | exportação avançada para excel |
+    | **pillow** | tratamento de imagens e assets |
+    | **requests** | integrações http e consumo de apis |
+    | **api bcb olinda** | fonte oficial de dados |
     """)
 
     st.markdown("---")
@@ -7377,7 +7380,7 @@ elif menu == "Glossário":
 
     ---
 
-    ## **Variáveis Monetárias**
+    ## **Variáveis de Balanço**
 
     **Ativo Total:** Padrão COSIF.
 
