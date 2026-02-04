@@ -4039,7 +4039,10 @@ elif menu == "Rankings":
             else:
                 df_selecionado = pd.DataFrame()
 
-            df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+            if indicador_col in df_selecionado.columns:
+                df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+            else:
+                df_selecionado = pd.DataFrame()
 
             grafico_escolhido = st.radio(
                 "gráfico",
