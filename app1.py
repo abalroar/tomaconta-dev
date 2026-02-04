@@ -5058,6 +5058,7 @@ elif menu == "DRE":
             margin: 10px auto 0 auto;
             border-collapse: collapse;
             font-size: 14px;
+            table-layout: auto;
         }
         .carteira-table th, .carteira-table td {
             border: 1px solid #ddd;
@@ -5072,6 +5073,9 @@ elif menu == "DRE":
         .carteira-table td:first-child {
             text-align: left;
             font-weight: 500;
+            white-space: nowrap;
+            width: 1%;
+            padding-right: 8px;
         }
         .carteira-table thead tr:first-child th {
             background-color: #4a4a4a;
