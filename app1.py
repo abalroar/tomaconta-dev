@@ -2513,21 +2513,6 @@ elif menu == "Painel":
                 )
                 coluna_peso_resumo = VARIAVEIS_PONDERACAO[tipo_media_label]
 
-            col_universo, col_bancos = st.columns([1.4, 2.6])
-
-            with col_universo:
-                usar_top_universo = st.checkbox(
-                    "selecionar automaticamente top N do universo",
-                    value=True,
-                    key="top_universo_toggle"
-                )
-                top_universo_n = st.selectbox(
-                    "top N (universo)",
-                    [10, 20, 30, 40],
-                    index=2,
-                    key="top_universo_n"
-                )
-
             df_periodo = df[df['Período'] == periodo_resumo].copy()
             df_periodo_universo = df_periodo.copy()
 
@@ -3926,6 +3911,13 @@ elif menu == "Rankings":
         todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         st.markdown("### ranking")
+        grafico_escolhido = st.radio(
+            "gráfico",
+            ["Ranking", "Deltas (antes e depois)"],
+            horizontal=True,
+            key="grafico_rankings",
+            index=0
+        )
 
         indicadores_config = {
             'Ativo Total': ['Ativo Total'],
@@ -4010,33 +4002,19 @@ elif menu == "Rankings":
 
             indicador_col = indicadores_disponiveis[indicador_label]
 
-            bancos_default = []
-            if usar_top_universo:
-                df_universo_valid = df_periodo_universo.dropna(subset=[indicador_col]).copy()
-                if df_universo_valid.empty:
-                    st.warning("não há dados disponíveis para calcular o top N do universo.")
-                else:
-                    df_universo_top = df_universo_valid.sort_values(indicador_col, ascending=False).head(top_universo_n)
-                    bancos_default = df_universo_top['Instituição'].tolist()
-
-            bancos_default = [banco for banco in bancos_default if banco in bancos_todos]
-
-            with col_bancos:
+            with st.container():
                 bancos_selecionados = st.multiselect(
                     "selecionar instituições (até 40)",
                     bancos_todos,
-                    default=bancos_default,
-                    key="bancos_resumo"
+                    key="bancos_resumo",
+                    max_selections=40
                 )
 
-            col_top, col_ordem, col_sort = st.columns([1.4, 1.4, 1.8])
-            with col_top:
-                usar_top_n = st.toggle("usar top/bottom n", value=True, key="usar_top_resumo")
-                top_n_resumo = st.selectbox("n", [10, 15, 20], index=0, key="top_n_resumo")
+            col_ordem, col_sort = st.columns([1.2, 1.8])
             with col_ordem:
                 direcao_top = st.radio(
-                    "top/bottom",
-                    ["Top", "Bottom"],
+                    "ordem",
+                    ["Maior → Menor", "Menor → Maior"],
                     horizontal=True,
                     key="top_bottom_resumo"
                 )
@@ -4058,22 +4036,12 @@ elif menu == "Rankings":
                     valor_formatado = f"+{valor_formatado}"
                 return f"{valor_formatado}{fmt_info['ticksuffix']}"
 
-            max_bancos = 40
-            if bancos_selecionados and len(bancos_selecionados) > max_bancos:
-                st.warning(f"limite de {max_bancos} instituições excedido; exibindo as primeiras {max_bancos}.")
-                bancos_selecionados = bancos_selecionados[:max_bancos]
-
-            if usar_top_n or not bancos_selecionados:
-                df_periodo_valid = df_periodo.dropna(subset=[indicador_col]).copy()
-                if df_periodo_valid.empty:
-                    st.info("não há dados suficientes para o período e indicador selecionados.")
-                else:
-                    ascending = direcao_top == "Bottom"
-                    df_selecionado = df_periodo_valid.sort_values(indicador_col, ascending=ascending).head(top_n_resumo)
-            else:
+            if bancos_selecionados:
                 df_selecionado = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados)].copy()
+            else:
+                df_selecionado = pd.DataFrame()
 
-            df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+            df_selecionado = df_selecionado.dropna(subset=[indicador_col]) if indicador_col in df_selecionado.columns else pd.DataFrame()
 
             if grafico_escolhido == "Ranking":
                 if df_selecionado.empty:
@@ -4084,7 +4052,7 @@ elif menu == "Rankings":
                     label_media = get_label_media(coluna_peso_resumo)
 
                     if modo_ordenacao == "Ordenar por valor":
-                        ordenar_asc = direcao_top == "Bottom"
+                        ordenar_asc = direcao_top == "Menor → Maior"
                         df_selecionado = df_selecionado.sort_values('valor_display', ascending=ordenar_asc)
                     elif bancos_selecionados:
                         ordem = bancos_selecionados
@@ -4260,24 +4228,24 @@ elif menu == "Rankings":
                     delta_colunas_map.setdefault(var, var)
 
                 # ===== LINHA 2: Seleção de períodos e tipo de variação =====
-                col_p1, col_p2, col_tipo_var, col_viz = st.columns([2, 2, 1, 1.6])
-                with col_p1:
-                    indice_inicial_delta = 1 if len(periodos_dropdown) > 1 else 0
-                    periodo_inicial_delta = st.selectbox(
-                        "período inicial",
-                        periodos_dropdown,
-                        index=indice_inicial_delta,
-                        key="periodo_inicial_delta",
-                        format_func=periodo_para_exibicao
-                    )
-                with col_p2:
-                    periodo_subsequente_delta = st.selectbox(
-                        "período subsequente",
-                        periodos_dropdown,
-                        index=0,
-                        key="periodo_subsequente_delta",
-                        format_func=periodo_para_exibicao
-                    )
+                col_p2, col_tipo_var, col_viz = st.columns([2, 1, 1.6])
+                periodo_inicial_delta = periodo_resumo
+                idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
+                periodos_subsequentes = [
+                    p for p in periodos_dropdown
+                    if periodos_disponiveis.index(p) > idx_ini
+                ]
+                if periodos_subsequentes:
+                    with col_p2:
+                        periodo_subsequente_delta = st.selectbox(
+                            "período subsequente",
+                            periodos_subsequentes,
+                            index=0,
+                            key="periodo_subsequente_delta",
+                            format_func=periodo_para_exibicao
+                        )
+                else:
+                    periodo_subsequente_delta = None
                 with col_tipo_var:
                     tipo_variacao = st.radio(
                         "ordenar por",
@@ -4295,50 +4263,14 @@ elif menu == "Rankings":
                         horizontal=True
                     )
 
-                # Validação de períodos
-                idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
-                idx_sub = periodos_disponiveis.index(periodo_subsequente_delta)
-                periodo_valido = idx_sub > idx_ini
+                if not periodos_subsequentes:
+                    st.warning("não há período subsequente disponível para o período selecionado.")
+                    periodo_valido = False
+                else:
+                    idx_sub = periodos_disponiveis.index(periodo_subsequente_delta)
+                    periodo_valido = idx_sub > idx_ini
 
-                if not periodo_valido:
-                    st.warning("o período subsequente deve ser posterior ao período inicial")
-
-                # ===== LINHA 3: Modo de seleção de instituições =====
-                col_modo, col_config = st.columns([1, 3])
-
-                with col_modo:
-                    modo_selecao = st.radio(
-                        "modo de seleção",
-                        ["Top N", "Personalizado"],
-                        index=0,
-                        key="modo_selecao_deltas"
-                    )
-
-                bancos_selecionados_delta = []
-
-                with col_config:
-                    if modo_selecao == "Top N":
-                        col_slider, col_var = st.columns(2)
-                        with col_slider:
-                            top_n_delta = st.slider("quantidade de bancos", 5, 50, 15, key="top_n_delta")
-                        with col_var:
-                            var_ordenacao = st.selectbox(
-                                "ordenar por",
-                                colunas_numericas,
-                                index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
-                                key="var_ordenacao_delta"
-                            )
-                        df_recente = df[df['Período'] == periodo_subsequente_delta].copy()
-                        df_recente_valid = df_recente.dropna(subset=[var_ordenacao])
-                        bancos_top_n = df_recente_valid.nlargest(top_n_delta, var_ordenacao)['Instituição'].tolist()
-                        bancos_selecionados_delta = bancos_top_n
-                    else:
-                        bancos_custom = st.multiselect(
-                            "adicionar/remover bancos",
-                            todos_bancos,
-                            key="bancos_custom_deltas"
-                        )
-                        bancos_selecionados_delta = bancos_custom
+                bancos_selecionados_delta = bancos_selecionados
 
                 if periodo_valido and variaveis_selecionadas_delta and bancos_selecionados_delta:
                     df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
