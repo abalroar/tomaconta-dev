@@ -4656,12 +4656,13 @@ elif menu == "Rankings":
                                 df_resumo.to_excel(writer, index=False, sheet_name='deltas')
                             buffer_excel.seek(0)
 
+                            nome_variavel = variavel.replace(' ', '_').replace('/', '_')
                             st.download_button(
                                 label="exportar excel",
                                 data=buffer_excel,
-                                file_name=f"Deltas_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
+                                file_name=f"Deltas_{nome_variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="exportar_excel_delta"
+                                key=f"exportar_excel_delta_{nome_variavel}"
                             )
                 elif not periodo_valido:
                     pass  # Já exibiu warning acima
