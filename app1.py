@@ -2437,13 +2437,6 @@ elif menu == "Painel":
                     key="ordenacao_resumo"
                 )
 
-            grafico_escolhido = st.radio(
-                "gráfico",
-                ["Ranking", "Deltas (antes e depois)"],
-                horizontal=True,
-                key="grafico_rankings"
-            )
-
             format_info = get_axis_format(indicador_col)
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False):
@@ -3907,6 +3900,13 @@ elif menu == "Rankings":
                 df_selecionado = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados)].copy()
 
             df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+
+            grafico_escolhido = st.radio(
+                "gráfico",
+                ["Ranking", "Deltas (antes e depois)"],
+                horizontal=True,
+                key="grafico_rankings"
+            )
 
             if grafico_escolhido == "Ranking":
                 if df_selecionado.empty:
