@@ -1753,6 +1753,12 @@ def carregar_dados_periodos():
         st.session_state['dados_periodos'] = dados_cache
         if 'cache_fonte' not in st.session_state:
             st.session_state['cache_fonte'] = resultado_principal.fonte if resultado_principal else 'desconhecida'
+        if 'dados_periodos_erro' in st.session_state:
+            del st.session_state['dados_periodos_erro']
+    else:
+        if resultado_principal and not resultado_principal.sucesso:
+            st.session_state['dados_periodos_erro'] = resultado_principal.mensagem
+            st.session_state['dados_periodos_fonte'] = resultado_principal.fonte
     print(_perf_log("init_dados_periodos"))
 
 
@@ -1864,7 +1870,7 @@ menus_precisam_principal = {
     "Histórico Individual",
     "Histórico Peers",
     "Scatter Plot",
-    "Deltas (Antes e Depois)",
+    "Rankings",
     "Crie sua métrica!",
 }
 if menu_atual in menus_precisam_principal:
@@ -2580,13 +2586,6 @@ elif menu == "Painel":
                     key="ordenacao_resumo"
                 )
 
-            grafico_escolhido = st.radio(
-                "gráfico",
-                ["Ranking", "Deltas (antes e depois)"],
-                horizontal=True,
-                key="grafico_rankings"
-            )
-
             format_info = get_axis_format(indicador_col)
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False):
@@ -2731,8 +2730,14 @@ elif menu == "Painel":
                 else:
                     st.info("composição disponível apenas para indicadores com componentes detalhados (ex.: Patrimônio de Referência).")
     else:
-        st.info("carregando dados automaticamente do github...")
-        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+        erro_cache = st.session_state.get('dados_periodos_erro')
+        if erro_cache:
+            st.error("dados principais indisponíveis no cache.")
+            st.caption(f"detalhe: {erro_cache}")
+            st.caption("abra 'Atualizar Base' e publique o cache no GitHub Releases.")
+        else:
+            st.info("carregando dados automaticamente do github...")
+            st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Capital Regulatório":
     st.markdown("## infos de capital")
@@ -4074,6 +4079,13 @@ elif menu == "Rankings":
                 df_selecionado = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados)].copy()
 
             df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+
+            grafico_escolhido = st.radio(
+                "gráfico",
+                ["Ranking", "Deltas (antes e depois)"],
+                horizontal=True,
+                key="grafico_rankings"
+            )
 
             if grafico_escolhido == "Ranking":
                 if df_selecionado.empty:
@@ -6826,8 +6838,8 @@ elif menu == "Atualizar Base":
                 "Local": "✅" if existe_local else "❌",
                 "GitHub": "☁️" if existe_github else "❌",
                 "Persistência": persistencia,
-                "Períodos": info.get("total_periodos", 0) if existe_local else "-",
-                "Registros": info.get("total_registros", 0) if existe_local else "-",
+                "Períodos": str(info.get("total_periodos", 0)) if existe_local else "-",
+                "Registros": str(info.get("total_registros", 0)) if existe_local else "-",
                 "Tamanho GH": gh_info.get("tamanho_fmt", "-") if existe_github else "-",
             })
 
