@@ -4032,13 +4032,6 @@ elif menu == "Rankings":
             else:
                 df_selecionado = pd.DataFrame()
 
-            grafico_escolhido = st.radio(
-                "gráfico",
-                ["Ranking", "Deltas (antes e depois)"],
-                horizontal=True,
-                key="grafico_rankings",
-                index=0
-            )
             if grafico_escolhido == "Ranking":
                 if df_selecionado.empty:
                     st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
@@ -4186,43 +4179,8 @@ elif menu == "Rankings":
                 st.markdown("---")
 
                 st.markdown("### deltas (antes e depois)")
-                st.markdown("### variáveis para análise de deltas")
-                st.caption("a variável do ranking é sempre incluída; adicione outras se quiser ampliar a análise.")
-
-                variaveis_disponiveis = [
-                    'Ativo Total',
-                    'Captações',
-                    'Patrimônio Líquido',
-                    'Carteira de Crédito',
-                    'Crédito/Ativo (%)',
-                    'Índice de Basileia',
-                    'Crédito/PL (%)',
-                    'Crédito/Captações (%)',
-                    'Lucro Líquido Acumulado YTD',
-                    'ROE Ac. YTD an. (%)',
-                    # Variáveis de Capital (Relatório 5)
-                    'RWA Total',
-                    'Capital Principal',
-                    'Índice de Capital Principal',
-                    'Índice de Capital Nível I',
-                    'Razão de Alavancagem',
-                ]
-                variaveis_extras = [
-                    v for v in variaveis_disponiveis
-                    if v != indicador_label and v in df.columns
-                ]
-                variaveis_extras_selecionadas = st.multiselect(
-                    "variáveis adicionais (opcional)",
-                    variaveis_extras,
-                    key="variaveis_deltas_extras"
-                )
-                variaveis_selecionadas_delta = list(dict.fromkeys(
-                    [indicador_label] + variaveis_extras_selecionadas
-                ))
-
+                variaveis_selecionadas_delta = [indicador_label]
                 delta_colunas_map = {label: col for label, col in indicadores_disponiveis.items()}
-                for var in variaveis_disponiveis:
-                    delta_colunas_map.setdefault(var, var)
 
                 periodo_inicial_delta = periodo_resumo
                 periodos_subsequentes = [
