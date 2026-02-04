@@ -3907,6 +3907,7 @@ elif menu == "Rankings":
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
+        periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
         st.markdown("### ranking")
         grafico_escolhido = st.radio(
@@ -4224,27 +4225,25 @@ elif menu == "Rankings":
                     delta_colunas_map.setdefault(var, var)
 
                 periodo_inicial_delta = periodo_resumo
-                idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
                 periodos_subsequentes = [
-                    periodo for i, periodo in enumerate(periodos_disponiveis) if i > idx_ini
+                    periodo for periodo in periodos_dropdown if periodo != periodo_inicial_delta
                 ]
+                if not periodos_subsequentes:
+                    periodos_subsequentes = periodos_dropdown
 
                 # ===== LINHA 2: Seleção de período subsequente e tipo de variação =====
                 col_p2, col_tipo_var, col_viz = st.columns([2, 1, 1.6])
                 with col_p2:
-                    if periodos_subsequentes:
-                        periodo_subsequente_delta = st.selectbox(
-                            "período subsequente",
-                            periodos_subsequentes,
-                            index=0,
-                            key="periodo_subsequente_delta",
-                            format_func=periodo_para_exibicao
-                        )
-                        periodo_valido = True
-                    else:
-                        periodo_subsequente_delta = None
-                        periodo_valido = False
-                        st.warning("não há período subsequente disponível para o período inicial selecionado.")
+                    periodo_subsequente_delta = st.selectbox(
+                        "período subsequente",
+                        periodos_subsequentes,
+                        index=0,
+                        key="periodo_subsequente_delta",
+                        format_func=periodo_para_exibicao
+                    )
+                    periodo_valido = periodo_subsequente_delta != periodo_inicial_delta
+                    if not periodo_valido:
+                        st.warning("selecione um período subsequente diferente do período inicial.")
                 with col_tipo_var:
                     tipo_variacao = st.radio(
                         "ordenar por",
@@ -4573,6 +4572,7 @@ elif menu == "Rankings":
                                 'variacao_texto': 'Variação %'
                             })
                             df_resumo = df_resumo[['Instituição', periodo_inicial_delta, periodo_subsequente_delta, 'Delta', 'Variação %']]
+                            st.dataframe(df_resumo, use_container_width=True)
 
                             buffer_excel = BytesIO()
                             with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
