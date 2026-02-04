@@ -1740,7 +1740,7 @@ menus_precisam_principal = {
     "Histórico Individual",
     "Histórico Peers",
     "Scatter Plot",
-    "Deltas (Antes e Depois)",
+    "Rankings",
     "Crie sua métrica!",
 }
 if menu_atual in menus_precisam_principal:
