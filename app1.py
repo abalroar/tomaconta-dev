@@ -1753,6 +1753,12 @@ def carregar_dados_periodos():
         st.session_state['dados_periodos'] = dados_cache
         if 'cache_fonte' not in st.session_state:
             st.session_state['cache_fonte'] = resultado_principal.fonte if resultado_principal else 'desconhecida'
+        if 'dados_periodos_erro' in st.session_state:
+            del st.session_state['dados_periodos_erro']
+    else:
+        if resultado_principal and not resultado_principal.sucesso:
+            st.session_state['dados_periodos_erro'] = resultado_principal.mensagem
+            st.session_state['dados_periodos_fonte'] = resultado_principal.fonte
     print(_perf_log("init_dados_periodos"))
 
 
@@ -1864,7 +1870,7 @@ menus_precisam_principal = {
     "Histórico Individual",
     "Histórico Peers",
     "Scatter Plot",
-    "Deltas (Antes e Depois)",
+    "Rankings",
     "Crie sua métrica!",
 }
 if menu_atual in menus_precisam_principal:
@@ -2513,21 +2519,6 @@ elif menu == "Painel":
                 )
                 coluna_peso_resumo = VARIAVEIS_PONDERACAO[tipo_media_label]
 
-            col_universo, col_bancos = st.columns([1.4, 2.6])
-
-            with col_universo:
-                usar_top_universo = st.checkbox(
-                    "selecionar automaticamente top N do universo",
-                    value=True,
-                    key="top_universo_toggle"
-                )
-                top_universo_n = st.selectbox(
-                    "top N (universo)",
-                    [10, 20, 30, 40],
-                    index=2,
-                    key="top_universo_n"
-                )
-
             df_periodo = df[df['Período'] == periodo_resumo].copy()
             df_periodo_universo = df_periodo.copy()
 
@@ -2579,13 +2570,6 @@ elif menu == "Painel":
                     horizontal=True,
                     key="ordenacao_resumo"
                 )
-
-            grafico_escolhido = st.radio(
-                "gráfico",
-                ["Ranking", "Deltas (antes e depois)"],
-                horizontal=True,
-                key="grafico_rankings"
-            )
 
             format_info = get_axis_format(indicador_col)
 
@@ -2731,8 +2715,14 @@ elif menu == "Painel":
                 else:
                     st.info("composição disponível apenas para indicadores com componentes detalhados (ex.: Patrimônio de Referência).")
     else:
-        st.info("carregando dados automaticamente do github...")
-        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+        erro_cache = st.session_state.get('dados_periodos_erro')
+        if erro_cache:
+            st.error("dados principais indisponíveis no cache.")
+            st.caption(f"detalhe: {erro_cache}")
+            st.caption("abra 'Atualizar Base' e publique o cache no GitHub Releases.")
+        else:
+            st.info("carregando dados automaticamente do github...")
+            st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Capital Regulatório":
     st.markdown("## infos de capital")
@@ -4041,6 +4031,13 @@ elif menu == "Rankings":
             else:
                 df_selecionado = pd.DataFrame()
 
+            grafico_escolhido = st.radio(
+                "gráfico",
+                ["Ranking", "Deltas (antes e depois)"],
+                horizontal=True,
+                key="grafico_rankings",
+                index=0
+            )
             if grafico_escolhido == "Ranking":
                 if df_selecionado.empty:
                     st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
@@ -4582,6 +4579,7 @@ elif menu == "Rankings":
                                 df_resumo.to_excel(writer, index=False, sheet_name='deltas')
                             buffer_excel.seek(0)
 
+                            nome_variavel = variavel.replace(' ', '_').replace('/', '_')
                             st.download_button(
                                 label="exportar excel",
                                 data=buffer_excel,
@@ -4984,6 +4982,7 @@ elif menu == "DRE":
             margin: 10px auto 0 auto;
             border-collapse: collapse;
             font-size: 14px;
+            table-layout: auto;
         }
         .carteira-table th, .carteira-table td {
             border: 1px solid #ddd;
@@ -4998,6 +4997,9 @@ elif menu == "DRE":
         .carteira-table td:first-child {
             text-align: left;
             font-weight: 500;
+            white-space: nowrap;
+            width: 1%;
+            padding-right: 8px;
         }
         .carteira-table thead tr:first-child th {
             background-color: #4a4a4a;
@@ -6747,8 +6749,8 @@ elif menu == "Atualizar Base":
                 "Local": "✅" if existe_local else "❌",
                 "GitHub": "☁️" if existe_github else "❌",
                 "Persistência": persistencia,
-                "Períodos": info.get("total_periodos", 0) if existe_local else "-",
-                "Registros": info.get("total_registros", 0) if existe_local else "-",
+                "Períodos": str(info.get("total_periodos", 0)) if existe_local else "-",
+                "Registros": str(info.get("total_registros", 0)) if existe_local else "-",
                 "Tamanho GH": gh_info.get("tamanho_fmt", "-") if existe_github else "-",
             })
 
