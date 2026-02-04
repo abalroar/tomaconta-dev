@@ -2437,6 +2437,13 @@ elif menu == "Painel":
                     key="ordenacao_resumo"
                 )
 
+            grafico_escolhido = st.radio(
+                "gráfico",
+                ["Ranking", "Deltas (antes e depois)"],
+                horizontal=True,
+                key="grafico_rankings"
+            )
+
             format_info = get_axis_format(indicador_col)
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False):
@@ -3901,625 +3908,600 @@ elif menu == "Rankings":
 
             df_selecionado = df_selecionado.dropna(subset=[indicador_col])
 
-            if df_selecionado.empty:
-                st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
-            else:
-                df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
-                media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
-                label_media = get_label_media(coluna_peso_resumo)
-
-                if modo_ordenacao == "Ordenar por valor":
-                    ordenar_asc = direcao_top == "Bottom"
-                    df_selecionado = df_selecionado.sort_values('valor_display', ascending=ordenar_asc)
-                elif bancos_selecionados:
-                    ordem = bancos_selecionados
-                    df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
-                    df_selecionado = df_selecionado.sort_values('ordem')
-
-                df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
-                df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
-
-                if media_display and media_display != 0:
-                    df_selecionado['diff_pct'] = (df_selecionado['valor_display'] / media_display - 1) * 100
-                    df_selecionado['diff_pct_text'] = df_selecionado['diff_pct'].map(lambda v: f"{v:.1f}%")
+            if grafico_escolhido == "Ranking":
+                if df_selecionado.empty:
+                    st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
                 else:
-                    df_selecionado['diff_pct_text'] = "N/A"
+                    df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
+                    media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
+                    label_media = get_label_media(coluna_peso_resumo)
 
-                df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
-                    lambda v: formatar_numero(v, format_info)
-                )
-                df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
-                    lambda v: formatar_numero(v, format_info, incluir_sinal=True)
-                )
+                    if modo_ordenacao == "Ordenar por valor":
+                        ordenar_asc = direcao_top == "Bottom"
+                        df_selecionado = df_selecionado.sort_values('valor_display', ascending=ordenar_asc)
+                    elif bancos_selecionados:
+                        ordem = bancos_selecionados
+                        df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
+                        df_selecionado = df_selecionado.sort_values('ordem')
 
-                n_bancos = len(df_selecionado)
-                orientacao_horizontal = n_bancos > 15
-                altura_grafico = max(650, n_bancos * 24) if orientacao_horizontal else 650
+                    df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
+                    df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
 
-                cores_plotly = px.colors.qualitative.Plotly
-                cores_barras = []
-                idx_cor = 0
-                for banco in df_selecionado['Instituição']:
-                    cor = obter_cor_banco(banco)
-                    if not cor:
-                        cor = cores_plotly[idx_cor % len(cores_plotly)]
-                        idx_cor += 1
-                    cores_barras.append(cor)
+                    if media_display and media_display != 0:
+                        df_selecionado['diff_pct'] = (df_selecionado['valor_display'] / media_display - 1) * 100
+                        df_selecionado['diff_pct_text'] = df_selecionado['diff_pct'].map(lambda v: f"{v:.1f}%")
+                    else:
+                        df_selecionado['diff_pct_text'] = "N/A"
 
-                fig_resumo = go.Figure()
-                banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
-                fig_resumo.add_trace(go.Bar(
-                    x=df_selecionado['valor_display'] if orientacao_horizontal else df_selecionado['Instituição'],
-                    y=df_selecionado['Instituição'] if orientacao_horizontal else df_selecionado['valor_display'],
-                    marker=dict(color=cores_barras, opacity=0.85),
-                    name=indicador_label,
-                    orientation='h' if orientacao_horizontal else 'v',
-                    customdata=np.stack([
-                        df_selecionado['ranking'],
-                        df_selecionado['diff_text'],
-                        df_selecionado['diff_pct_text'],
-                        df_selecionado['valor_text'],
-                    ], axis=-1),
-                    hovertemplate=(
-                        f"<b>{banco_hover}</b><br>"
-                        f"{indicador_label}: %{{customdata[3]}}<br>"
-                        "Ranking: %{customdata[0]}<br>"
-                        "Diferença vs média: %{customdata[1]}<br>"
-                        "Diferença vs média (%): %{customdata[2]}"
-                        "<extra></extra>"
+                    df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
+                        lambda v: formatar_numero(v, format_info)
                     )
-                ))
-
-                if orientacao_horizontal:
-                    fig_resumo.add_trace(go.Scatter(
-                        x=[media_display] * len(df_selecionado),
-                        y=df_selecionado['Instituição'],
-                        mode='lines',
-                        name=label_media,
-                        line=dict(color='#1f77b4', dash='dash')
-                    ))
-                else:
-                    fig_resumo.add_trace(go.Scatter(
-                        x=df_selecionado['Instituição'],
-                        y=[media_display] * len(df_selecionado),
-                        mode='lines',
-                        name=label_media,
-                        line=dict(color='#1f77b4', dash='dash')
-                    ))
-
-                fig_resumo.update_layout(
-                    title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
-                    xaxis_title=indicador_label if orientacao_horizontal else "instituições",
-                    yaxis_title="instituições" if orientacao_horizontal else indicador_label,
-                    plot_bgcolor='#f8f9fa',
-                    paper_bgcolor='white',
-                    height=altura_grafico,
-                    showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                    xaxis=dict(
-                        tickangle=-45 if not orientacao_horizontal else 0,
-                        tickformat=format_info['tickformat'] if orientacao_horizontal else None,
-                        ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
-                    ),
-                    yaxis=dict(
-                        tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
-                        ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
-                    ),
-                    font=dict(family='IBM Plex Sans')
-                )
-
-                st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
-
-                media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
-                df_export = df_selecionado.copy()
-                df_export['Período'] = periodo_resumo
-                df_export['Indicador'] = indicador_label
-                df_export['Valor'] = df_export[indicador_col]
-                df_export['Média do Grupo'] = media_grupo_raw
-                df_export['Tipo de Média'] = tipo_media_label
-                df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
-                df_export = df_export[[
-                    'Período',
-                    'Instituição',
-                    'Indicador',
-                    'Valor',
-                    'ranking',
-                    'Média do Grupo',
-                    'Tipo de Média',
-                    'Diferença vs Média'
-                ]].rename(columns={'ranking': 'Ranking'})
-
-                buffer_excel = BytesIO()
-                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                    df_export.to_excel(writer, index=False, sheet_name='resumo')
-                buffer_excel.seek(0)
-
-                st.download_button(
-                    label="Exportar Excel",
-                    data=buffer_excel,
-                    file_name=f"resumo_{periodo_resumo.replace('/', '-')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="exportar_resumo_excel"
-                )
-
-        st.markdown("---")
-
-        # ===== LINHA 1: Seleção de variáveis =====
-        st.markdown("**variáveis para análise de deltas**")
-        variaveis_disponiveis = [
-            'Ativo Total',
-            'Captações',
-            'Patrimônio Líquido',
-            'Carteira de Crédito',
-            'Crédito/Ativo (%)',
-            'Índice de Basileia',
-            'Crédito/PL (%)',
-            'Crédito/Captações (%)',
-            'Lucro Líquido Acumulado YTD',
-            'ROE Ac. YTD an. (%)',
-            # Variáveis de Capital (Relatório 5)
-            'RWA Total',
-            'Capital Principal',
-            'Índice de Capital Principal',
-            'Índice de Capital Nível I',
-            'Razão de Alavancagem',
-        ]
-        variaveis_selecionadas_delta = st.multiselect(
-            "selecionar variáveis",
-            variaveis_disponiveis,
-            default=['Carteira de Crédito'],
-            key="variaveis_deltas"
-        )
-
-        # ===== LINHA 2: Seleção de períodos e tipo de variação =====
-        col_p1, col_p2, col_tipo_var, col_viz = st.columns([2, 2, 1, 1.6])
-        with col_p1:
-            indice_inicial_delta = 1 if len(periodos_dropdown) > 1 else 0
-            periodo_inicial_delta = st.selectbox(
-                "período inicial",
-                periodos_dropdown,
-                index=indice_inicial_delta,
-                key="periodo_inicial_delta",
-                format_func=periodo_para_exibicao
-            )
-        with col_p2:
-            periodo_subsequente_delta = st.selectbox(
-                "período subsequente",
-                periodos_dropdown,
-                index=0,
-                key="periodo_subsequente_delta",
-                format_func=periodo_para_exibicao
-            )
-        with col_tipo_var:
-            tipo_variacao = st.radio(
-                "ordenar por",
-                ["Δ absoluto", "Δ %"],
-                index=1,
-                key="tipo_variacao_delta",
-                horizontal=True
-            )
-        with col_viz:
-            modo_visualizacao_deltas = st.radio(
-                "visualização",
-                ["Pontos (antes/depois)", "Barras (delta)"],
-                index=0,
-                key="modo_visualizacao_deltas",
-                horizontal=True
-            )
-
-        # Validação de períodos
-        idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
-        idx_sub = periodos_disponiveis.index(periodo_subsequente_delta)
-        periodo_valido = idx_sub > idx_ini
-
-        if not periodo_valido:
-            st.warning("o período subsequente deve ser posterior ao período inicial")
-
-        # ===== LINHA 3: Modo de seleção de instituições =====
-        col_modo, col_config = st.columns([1, 3])
-
-        with col_modo:
-            modo_selecao = st.radio(
-                "modo de seleção",
-                ["Top N", "Personalizado"],
-                index=0,
-                key="modo_selecao_deltas"
-            )
-
-        bancos_selecionados_delta = []
-
-        with col_config:
-            if modo_selecao == "Top N":
-                col_slider, col_var = st.columns(2)
-                with col_slider:
-                    top_n_delta = st.slider("quantidade de bancos", 5, 50, 15, key="top_n_delta")
-                with col_var:
-                    var_ordenacao = st.selectbox(
-                        "ordenar por",
-                        colunas_numericas,
-                        index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
-                        key="var_ordenacao_delta"
-                    )
-                # Obtém top N bancos do período mais recente
-                df_recente = df[df['Período'] == periodo_subsequente_delta].copy()
-                df_recente_valid = df_recente.dropna(subset=[var_ordenacao])
-                bancos_top_n = df_recente_valid.nlargest(top_n_delta, var_ordenacao)['Instituição'].tolist()
-                bancos_selecionados_delta = bancos_top_n
-
-            else:  # Personalizado
-                bancos_custom = st.multiselect(
-                    "adicionar/remover bancos",
-                    todos_bancos,
-                    key="bancos_custom_deltas"
-                )
-                bancos_selecionados_delta = bancos_custom
-
-        # ===== GRÁFICOS DE DELTAS =====
-        if periodo_valido and variaveis_selecionadas_delta and bancos_selecionados_delta:
-            # Filtra dados para os dois períodos
-            df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
-            df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
-
-            # ===== CONTROLES DE ESCALA DO EIXO Y =====
-            if modo_visualizacao_deltas == "Pontos (antes/depois)":
-                st.markdown("---")
-                col_escala1, col_escala2, col_escala3 = st.columns([1, 1, 2])
-
-                with col_escala1:
-                    # Inicializa session state para escala se não existir
-                    if 'delta_escala_modo' not in st.session_state:
-                        st.session_state['delta_escala_modo'] = 'Auto (zoom)'
-
-                    modo_escala = st.radio(
-                        "escala do eixo Y",
-                        ["Auto (zoom)", "Zero baseline", "Manual"],
-                        index=["Auto (zoom)", "Zero baseline", "Manual"].index(st.session_state['delta_escala_modo']),
-                        key="delta_escala_modo_radio",
-                        horizontal=True
-                    )
-                    st.session_state['delta_escala_modo'] = modo_escala
-
-                with col_escala2:
-                    # Inicializa session state para margem
-                    if 'delta_escala_margem' not in st.session_state:
-                        st.session_state['delta_escala_margem'] = 10
-
-                    if modo_escala == "Auto (zoom)":
-                        margem_pct = st.slider(
-                            "margem (%)",
-                            0, 50, st.session_state['delta_escala_margem'],
-                            key="delta_margem_slider",
-                            help="Margem adicional acima/abaixo dos valores"
-                        )
-                        st.session_state['delta_escala_margem'] = margem_pct
-
-                with col_escala3:
-                    if modo_escala == "Manual":
-                        col_min, col_max = st.columns(2)
-                        with col_min:
-                            if 'delta_y_min' not in st.session_state:
-                                st.session_state['delta_y_min'] = 0.0
-                            y_min_manual = st.number_input(
-                                "Y mínimo",
-                                value=st.session_state['delta_y_min'],
-                                key="delta_y_min_input"
-                            )
-                            st.session_state['delta_y_min'] = y_min_manual
-                        with col_max:
-                            if 'delta_y_max' not in st.session_state:
-                                st.session_state['delta_y_max'] = 100.0
-                            y_max_manual = st.number_input(
-                                "Y máximo",
-                                value=st.session_state['delta_y_max'],
-                                key="delta_y_max_input"
-                            )
-                            st.session_state['delta_y_max'] = y_max_manual
-
-                st.markdown("---")
-
-            for variavel in variaveis_selecionadas_delta:
-                if variavel not in df.columns:
-                    st.warning(f"variável '{variavel}' não encontrada nos dados")
-                    continue
-
-                format_info = get_axis_format(variavel)
-
-                # Prepara dados para o gráfico
-                dados_grafico = []
-                for instituicao in bancos_selecionados_delta:
-                    valor_ini = df_inicial[df_inicial['Instituição'] == instituicao][variavel].values
-                    valor_sub = df_subsequente[df_subsequente['Instituição'] == instituicao][variavel].values
-
-                    if len(valor_ini) > 0 and len(valor_sub) > 0:
-                        v_ini = valor_ini[0]
-                        v_sub = valor_sub[0]
-
-                        # Tratamento de edge cases
-                        if pd.isna(v_ini) or pd.isna(v_sub):
-                            continue  # Pula NAs
-
-                        # Calcula delta absoluto
-                        delta_absoluto = v_sub - v_ini
-
-                        # Formata delta texto conforme tipo de variável
-                        if variavel in VARS_PERCENTUAL:
-                            delta_texto = f"{delta_absoluto * 100:+.2f}pp"
-                        elif variavel in VARS_MOEDAS:
-                            delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
-                        else:
-                            delta_texto = f"{delta_absoluto:+.2f}"
-
-                        # Variação percentual com tratamento de edge cases
-                        if v_ini == 0:
-                            # Divisão por zero
-                            if delta_absoluto > 0:
-                                variacao_pct = float('inf')
-                                variacao_texto = "Valor Inicial 0 - ∞"
-                            elif delta_absoluto < 0:
-                                variacao_pct = float('-inf')
-                                variacao_texto = "Valor Inicial 0 - ∞"
-                            else:
-                                variacao_pct = 0
-                                variacao_texto = "0.0%"
-                        elif v_ini < 0 and v_sub > 0:
-                            # Cruzou de negativo para positivo
-                            variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                            variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
-                        elif v_ini > 0 and v_sub < 0:
-                            # Cruzou de positivo para negativo
-                            variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                            variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
-                        else:
-                            variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                            variacao_texto = f"{variacao_pct:+.1f}%"
-
-                        dados_grafico.append({
-                            'instituicao': instituicao,
-                            'valor_ini': v_ini,
-                            'valor_sub': v_sub,
-                            'delta': delta_absoluto,
-                            'delta_texto': delta_texto,
-                            'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
-                            'variacao_texto': variacao_texto
-                        })
-
-                if not dados_grafico:
-                    st.info(f"sem dados disponíveis para '{variavel}' nos períodos selecionados")
-                    continue
-
-                # Ordena pela variação (maior positiva → maior negativa)
-                if tipo_variacao == "Δ %":
-                    dados_grafico = sorted(dados_grafico, key=lambda x: x['variacao_pct'], reverse=True)
-                else:
-                    dados_grafico = sorted(dados_grafico, key=lambda x: x['delta'], reverse=True)
-
-                if modo_visualizacao_deltas == "Pontos (antes/depois)":
-                    # Cria o gráfico estilo lollipop
-                    fig_delta = go.Figure()
-
-                    # Coleta todos os valores Y para calcular escala
-                    todos_y = []
-                    for dado in dados_grafico:
-                        todos_y.append(dado['valor_ini'] * format_info['multiplicador'])
-                        todos_y.append(dado['valor_sub'] * format_info['multiplicador'])
-
-                    for i, dado in enumerate(dados_grafico):
-                        inst = dado['instituicao']
-                        y_ini = dado['valor_ini'] * format_info['multiplicador']
-                        y_sub = dado['valor_sub'] * format_info['multiplicador']
-                        delta_positivo = dado['delta'] > 0
-
-                        # Cor da bolinha do período subsequente
-                        cor_sub = '#2E7D32' if delta_positivo else '#7B1E3A'  # verde ou vinho
-
-                        # Linha conectando os dois pontos
-                        fig_delta.add_trace(go.Scatter(
-                            x=[inst, inst],
-                            y=[y_ini, y_sub],
-                            mode='lines',
-                            line=dict(color='#9E9E9E', width=2),
-                            showlegend=False,
-                            hoverinfo='skip'
-                        ))
-
-                        # Bolinha do período inicial (preta/cinza escuro)
-                        fig_delta.add_trace(go.Scatter(
-                            x=[inst],
-                            y=[y_ini],
-                            mode='markers',
-                            marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
-                            name=periodo_inicial_delta if i == 0 else None,
-                            showlegend=(i == 0),
-                            legendgroup='inicial',
-                            hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
-                        ))
-
-                        # Bolinha do período subsequente (verde/vinho)
-                        fig_delta.add_trace(go.Scatter(
-                            x=[inst],
-                            y=[y_sub],
-                            mode='markers',
-                            marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
-                            name=periodo_subsequente_delta if i == 0 else None,
-                            showlegend=(i == 0),
-                            legendgroup='subsequente',
-                            customdata=[[dado['delta_texto'], dado['variacao_texto']]],
-                            hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<extra></extra>'
-                        ))
-
-                    # Título do gráfico
-                    titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
-
-                    # Calcula limites do eixo Y baseado no modo de escala
-                    yaxis_config = dict(
-                        showgrid=True,
-                        gridcolor='#e0e0e0',
-                        tickformat=format_info['tickformat'],
-                        ticksuffix=format_info['ticksuffix'],
-                        title=variavel
+                    df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
+                        lambda v: formatar_numero(v, format_info, incluir_sinal=True)
                     )
 
-                    if todos_y:
-                        y_min_dados = min(todos_y)
-                        y_max_dados = max(todos_y)
-                        y_range = y_max_dados - y_min_dados if y_max_dados != y_min_dados else abs(y_max_dados) * 0.1 or 1
-
-                        if modo_escala == "Zero baseline":
-                            # Sempre incluir zero
-                            yaxis_config['range'] = [min(0, y_min_dados - y_range * 0.05), max(0, y_max_dados + y_range * 0.05)]
-                        elif modo_escala == "Auto (zoom)":
-                            # Zoom nos dados com margem configurável
-                            margem = y_range * (margem_pct / 100)
-                            yaxis_config['range'] = [y_min_dados - margem, y_max_dados + margem]
-                        elif modo_escala == "Manual":
-                            # Usar valores manuais
-                            yaxis_config['range'] = [y_min_manual, y_max_manual]
-
-                    fig_delta.update_layout(
-                        title=dict(
-                            text=titulo_delta,
-                            font=dict(size=16, family='IBM Plex Sans')
-                        ),
-                        height=max(400, len(dados_grafico) * 25 + 150),
-                        plot_bgcolor='#f8f9fa',
-                        paper_bgcolor='white',
-                        showlegend=True,
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="left",
-                            x=0
-                        ),
-                        xaxis=dict(
-                            showgrid=False,
-                            tickangle=45 if len(dados_grafico) > 10 else 0,
-                            tickfont=dict(size=10)
-                        ),
-                        yaxis=yaxis_config,
-                        font=dict(family='IBM Plex Sans'),
-                        margin=dict(l=60, r=20, t=80, b=100)
-                    )
-
-                    st.markdown(f"### {variavel}")
-                    st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
-                else:
-                    # ===== GRÁFICO DE BARRAS (DELTA) =====
-                    valores_finitos = []
-                    for dado in dados_grafico:
-                        if tipo_variacao == "Δ %":
-                            if np.isfinite(dado['variacao_pct']):
-                                valores_finitos.append(abs(dado['variacao_pct']))
-
-                    cap_visual = (max(valores_finitos) * 1.2) if valores_finitos else 1
-
-                    for dado in dados_grafico:
-                        if tipo_variacao == "Δ %":
-                            if np.isfinite(dado['variacao_pct']):
-                                dado['valor_plot'] = dado['variacao_pct']
-                            else:
-                                dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
-                        else:
-                            dado['valor_plot'] = dado['delta'] * format_info['multiplicador']
-
-                    n_bancos = len(dados_grafico)
+                    n_bancos = len(df_selecionado)
                     orientacao_horizontal = n_bancos > 15
+                    altura_grafico = max(650, n_bancos * 24) if orientacao_horizontal else 650
 
-                    insts = [d['instituicao'] for d in dados_grafico]
-                    valores_plot = [d['valor_plot'] for d in dados_grafico]
-                    cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
+                    cores_plotly = px.colors.qualitative.Plotly
+                    cores_barras = []
+                    idx_cor = 0
+                    for banco in df_selecionado['Instituição']:
+                        cor = obter_cor_banco(banco)
+                        if not cor:
+                            cor = cores_plotly[idx_cor % len(cores_plotly)]
+                            idx_cor += 1
+                        cores_barras.append(cor)
 
-                    eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
-                    eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
-                    eixo_titulo = "Δ %" if tipo_variacao == "Δ %" else "Δ absoluto"
-
-                    fig_barras = go.Figure()
-                    fig_barras.add_trace(go.Bar(
-                        x=valores_plot if orientacao_horizontal else insts,
-                        y=insts if orientacao_horizontal else valores_plot,
+                    fig_resumo = go.Figure()
+                    banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
+                    fig_resumo.add_trace(go.Bar(
+                        x=df_selecionado['valor_display'] if orientacao_horizontal else df_selecionado['Instituição'],
+                        y=df_selecionado['Instituição'] if orientacao_horizontal else df_selecionado['valor_display'],
+                        marker=dict(color=cores_barras, opacity=0.85),
+                        name=indicador_label,
                         orientation='h' if orientacao_horizontal else 'v',
-                        marker=dict(color=cores_barras, opacity=0.9),
                         customdata=np.stack([
-                            [d['delta_texto'] for d in dados_grafico],
-                            [d['variacao_texto'] for d in dados_grafico],
+                            df_selecionado['ranking'],
+                            df_selecionado['diff_text'],
+                            df_selecionado['diff_pct_text'],
+                            df_selecionado['valor_text'],
                         ], axis=-1),
                         hovertemplate=(
-                            "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
-                        ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<extra></extra>"
+                            f"<b>{banco_hover}</b><br>"
+                            f"{indicador_label}: %{{customdata[3]}}<br>"
+                            "Ranking: %{customdata[0]}<br>"
+                            "Diferença vs média: %{customdata[1]}<br>"
+                            "Diferença vs média (%): %{customdata[2]}"
+                            "<extra></extra>"
+                        )
                     ))
 
-                    fig_barras.update_layout(
-                        title=dict(
-                            text=f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}",
-                            font=dict(size=16, family='IBM Plex Sans')
-                        ),
-                        height=max(450, len(dados_grafico) * 25 + 160),
+                    if orientacao_horizontal:
+                        fig_resumo.add_trace(go.Scatter(
+                            x=[media_display] * len(df_selecionado),
+                            y=df_selecionado['Instituição'],
+                            mode='lines',
+                            name=label_media,
+                            line=dict(color='#1f77b4', dash='dash')
+                        ))
+                    else:
+                        fig_resumo.add_trace(go.Scatter(
+                            x=df_selecionado['Instituição'],
+                            y=[media_display] * len(df_selecionado),
+                            mode='lines',
+                            name=label_media,
+                            line=dict(color='#1f77b4', dash='dash')
+                        ))
+
+                    fig_resumo.update_layout(
+                        title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
+                        xaxis_title=indicador_label if orientacao_horizontal else "instituições",
+                        yaxis_title="instituições" if orientacao_horizontal else indicador_label,
                         plot_bgcolor='#f8f9fa',
                         paper_bgcolor='white',
-                        showlegend=False,
+                        height=altura_grafico,
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                         xaxis=dict(
-                            showgrid=True if not orientacao_horizontal else True,
-                            zeroline=True,
-                            zerolinecolor='#444',
-                            tickformat=eixo_tickformat if orientacao_horizontal else None,
-                            ticksuffix=eixo_ticksuffix if orientacao_horizontal else None,
-                            title=eixo_titulo if orientacao_horizontal else None
+                            tickangle=-45 if not orientacao_horizontal else 0,
+                            tickformat=format_info['tickformat'] if orientacao_horizontal else None,
+                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
                         ),
                         yaxis=dict(
-                            showgrid=False if orientacao_horizontal else True,
-                            zeroline=True,
-                            zerolinecolor='#444',
-                            tickformat=eixo_tickformat if not orientacao_horizontal else None,
-                            ticksuffix=eixo_ticksuffix if not orientacao_horizontal else None,
-                            title=eixo_titulo if not orientacao_horizontal else None
+                            tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
+                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
                         ),
-                        font=dict(family='IBM Plex Sans'),
-                        margin=dict(l=60, r=20, t=80, b=100)
+                        font=dict(family='IBM Plex Sans')
                     )
 
-                    st.markdown(f"### {variavel}")
-                    st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
+                    st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
 
-                # Tabela resumo
-                with st.expander("ver dados"):
-                    df_resumo = pd.DataFrame(dados_grafico)
-                    df_resumo = df_resumo.rename(columns={
-                        'instituicao': 'Instituição',
-                        'valor_ini': periodo_inicial_delta,
-                        'valor_sub': periodo_subsequente_delta,
-                        'delta_texto': 'Delta',
-                        'variacao_texto': 'Variação %'
-                    })
-                    df_resumo = df_resumo[['Instituição', periodo_inicial_delta, periodo_subsequente_delta, 'Delta', 'Variação %']]
+                    media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
+                    df_export = df_selecionado.copy()
+                    df_export['Período'] = periodo_resumo
+                    df_export['Indicador'] = indicador_label
+                    df_export['Valor'] = df_export[indicador_col]
+                    df_export['Média do Grupo'] = media_grupo_raw
+                    df_export['Tipo de Média'] = tipo_media_label
+                    df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
+                    df_export = df_export[[
+                        'Período',
+                        'Instituição',
+                        'Indicador',
+                        'Valor',
+                        'ranking',
+                        'Média do Grupo',
+                        'Tipo de Média',
+                        'Diferença vs Média'
+                    ]].rename(columns={'ranking': 'Ranking'})
 
-                    # Formata valores para exibição
-                    df_display = df_resumo.copy()
-                    df_display[periodo_inicial_delta] = df_display[periodo_inicial_delta].apply(lambda x: formatar_valor(x, variavel))
-                    df_display[periodo_subsequente_delta] = df_display[periodo_subsequente_delta].apply(lambda x: formatar_valor(x, variavel))
+                    with st.expander("exportar dados (excel)"):
+                        buffer_excel = BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                            df_export.to_excel(writer, index=False, sheet_name='ranking')
+                        buffer_excel.seek(0)
 
-                    st.dataframe(df_display, width='stretch', hide_index=True)
+                        st.download_button(
+                            label="exportar excel",
+                            data=buffer_excel,
+                            file_name=f"ranking_{periodo_resumo.replace('/', '-')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="exportar_resumo_excel"
+                        )
 
-                    # Botão de exportar Excel
-                    buffer_excel = BytesIO()
-                    with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                        df_resumo.to_excel(writer, index=False, sheet_name='deltas')
-                    buffer_excel.seek(0)
+            if grafico_escolhido == "Deltas (antes e depois)":
+                st.markdown("---")
 
-                    nome_variavel = variavel.replace(' ', '_').replace('/', '_')
-                    st.download_button(
-                        label="Exportar Excel",
-                        data=buffer_excel,
-                        file_name=f"Deltas_{nome_variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"exportar_excel_delta_{nome_variavel}"
+                st.markdown("### deltas (antes e depois)")
+                st.caption("a variável do ranking é sempre incluída; adicione outras se quiser ampliar a análise.")
+
+                variaveis_disponiveis = [
+                    'Ativo Total',
+                    'Captações',
+                    'Patrimônio Líquido',
+                    'Carteira de Crédito',
+                    'Crédito/Ativo (%)',
+                    'Índice de Basileia',
+                    'Crédito/PL (%)',
+                    'Crédito/Captações (%)',
+                    'Lucro Líquido Acumulado YTD',
+                    'ROE Ac. YTD an. (%)',
+                    # Variáveis de Capital (Relatório 5)
+                    'RWA Total',
+                    'Capital Principal',
+                    'Índice de Capital Principal',
+                    'Índice de Capital Nível I',
+                    'Razão de Alavancagem',
+                ]
+                variaveis_extras = [
+                    v for v in variaveis_disponiveis
+                    if v != indicador_label and v in df.columns
+                ]
+                variaveis_extras_selecionadas = st.multiselect(
+                    "variáveis adicionais (opcional)",
+                    variaveis_extras,
+                    key="variaveis_deltas_extras"
+                )
+                variaveis_selecionadas_delta = list(dict.fromkeys(
+                    [indicador_label] + variaveis_extras_selecionadas
+                ))
+
+                delta_colunas_map = {label: col for label, col in indicadores_disponiveis.items()}
+                for var in variaveis_disponiveis:
+                    delta_colunas_map.setdefault(var, var)
+
+                # ===== LINHA 2: Seleção de períodos e tipo de variação =====
+                col_p1, col_p2, col_tipo_var, col_viz = st.columns([2, 2, 1, 1.6])
+                with col_p1:
+                    indice_inicial_delta = 1 if len(periodos_dropdown) > 1 else 0
+                    periodo_inicial_delta = st.selectbox(
+                        "período inicial",
+                        periodos_dropdown,
+                        index=indice_inicial_delta,
+                        key="periodo_inicial_delta",
+                        format_func=periodo_para_exibicao
+                    )
+                with col_p2:
+                    periodo_subsequente_delta = st.selectbox(
+                        "período subsequente",
+                        periodos_dropdown,
+                        index=0,
+                        key="periodo_subsequente_delta",
+                        format_func=periodo_para_exibicao
+                    )
+                with col_tipo_var:
+                    tipo_variacao = st.radio(
+                        "ordenar por",
+                        ["Δ absoluto", "Δ %"],
+                        index=1,
+                        key="tipo_variacao_delta",
+                        horizontal=True
+                    )
+                with col_viz:
+                    modo_visualizacao_deltas = st.radio(
+                        "visualização",
+                        ["Pontos (antes/depois)", "Barras (delta)"],
+                        index=0,
+                        key="modo_visualizacao_deltas",
+                        horizontal=True
                     )
 
-        elif not periodo_valido:
-            pass  # Já exibiu warning acima
-        elif not variaveis_selecionadas_delta:
-            st.info("selecione ao menos uma variável para análise")
-        else:
-            st.info("selecione instituições para comparar")
+                # Validação de períodos
+                idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
+                idx_sub = periodos_disponiveis.index(periodo_subsequente_delta)
+                periodo_valido = idx_sub > idx_ini
+
+                if not periodo_valido:
+                    st.warning("o período subsequente deve ser posterior ao período inicial")
+
+                # ===== LINHA 3: Modo de seleção de instituições =====
+                col_modo, col_config = st.columns([1, 3])
+
+                with col_modo:
+                    modo_selecao = st.radio(
+                        "modo de seleção",
+                        ["Top N", "Personalizado"],
+                        index=0,
+                        key="modo_selecao_deltas"
+                    )
+
+                bancos_selecionados_delta = []
+
+                with col_config:
+                    if modo_selecao == "Top N":
+                        col_slider, col_var = st.columns(2)
+                        with col_slider:
+                            top_n_delta = st.slider("quantidade de bancos", 5, 50, 15, key="top_n_delta")
+                        with col_var:
+                            var_ordenacao = st.selectbox(
+                                "ordenar por",
+                                colunas_numericas,
+                                index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
+                                key="var_ordenacao_delta"
+                            )
+                        df_recente = df[df['Período'] == periodo_subsequente_delta].copy()
+                        df_recente_valid = df_recente.dropna(subset=[var_ordenacao])
+                        bancos_top_n = df_recente_valid.nlargest(top_n_delta, var_ordenacao)['Instituição'].tolist()
+                        bancos_selecionados_delta = bancos_top_n
+                    else:
+                        bancos_custom = st.multiselect(
+                            "adicionar/remover bancos",
+                            todos_bancos,
+                            key="bancos_custom_deltas"
+                        )
+                        bancos_selecionados_delta = bancos_custom
+
+                if periodo_valido and variaveis_selecionadas_delta and bancos_selecionados_delta:
+                    df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
+                    df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
+
+                    if modo_visualizacao_deltas == "Pontos (antes/depois)":
+                        st.markdown("---")
+                        col_escala1, col_escala2, col_escala3 = st.columns([1, 1, 2])
+
+                        with col_escala1:
+                            if 'delta_escala_modo' not in st.session_state:
+                                st.session_state['delta_escala_modo'] = 'Auto (zoom)'
+
+                            modo_escala = st.radio(
+                                "escala do eixo Y",
+                                ["Auto (zoom)", "Zero baseline", "Manual"],
+                                index=["Auto (zoom)", "Zero baseline", "Manual"].index(st.session_state['delta_escala_modo']),
+                                key="delta_escala_modo_radio",
+                                horizontal=True
+                            )
+                            st.session_state['delta_escala_modo'] = modo_escala
+
+                        with col_escala2:
+                            if 'delta_escala_margem' not in st.session_state:
+                                st.session_state['delta_escala_margem'] = 10
+
+                            if modo_escala == "Auto (zoom)":
+                                margem_pct = st.slider(
+                                    "margem (%)",
+                                    0, 50, st.session_state['delta_escala_margem'],
+                                    key="delta_margem_slider",
+                                    help="Margem adicional acima/abaixo dos valores"
+                                )
+                                st.session_state['delta_escala_margem'] = margem_pct
+
+                        with col_escala3:
+                            if modo_escala == "Manual":
+                                col_min, col_max = st.columns(2)
+                                with col_min:
+                                    if 'delta_y_min' not in st.session_state:
+                                        st.session_state['delta_y_min'] = 0.0
+                                    y_min_manual = st.number_input(
+                                        "Y mínimo",
+                                        value=st.session_state['delta_y_min'],
+                                        key="delta_y_min_input"
+                                    )
+                                    st.session_state['delta_y_min'] = y_min_manual
+                                with col_max:
+                                    if 'delta_y_max' not in st.session_state:
+                                        st.session_state['delta_y_max'] = 100.0
+                                    y_max_manual = st.number_input(
+                                        "Y máximo",
+                                        value=st.session_state['delta_y_max'],
+                                        key="delta_y_max_input"
+                                    )
+                                    st.session_state['delta_y_max'] = y_max_manual
+
+                        st.markdown("---")
+
+                    for variavel in variaveis_selecionadas_delta:
+                        coluna_variavel = delta_colunas_map.get(variavel, variavel)
+                        if coluna_variavel not in df.columns:
+                            st.warning(f"variável '{variavel}' não encontrada nos dados")
+                            continue
+
+                        format_info = get_axis_format(variavel)
+
+                        dados_grafico = []
+                        for instituicao in bancos_selecionados_delta:
+                            valor_ini = df_inicial[df_inicial['Instituição'] == instituicao][coluna_variavel].values
+                            valor_sub = df_subsequente[df_subsequente['Instituição'] == instituicao][coluna_variavel].values
+
+                            if len(valor_ini) > 0 and len(valor_sub) > 0:
+                                v_ini = valor_ini[0]
+                                v_sub = valor_sub[0]
+
+                                if pd.isna(v_ini) or pd.isna(v_sub):
+                                    continue
+
+                                delta_absoluto = v_sub - v_ini
+
+                                if variavel in VARS_PERCENTUAL:
+                                    delta_texto = f"{delta_absoluto * 100:+.2f}pp"
+                                elif variavel in VARS_MOEDAS:
+                                    delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                                else:
+                                    delta_texto = f"{delta_absoluto:+.2f}"
+
+                                if v_ini == 0:
+                                    if delta_absoluto > 0:
+                                        variacao_pct = float('inf')
+                                        variacao_texto = "Valor Inicial 0 - ∞"
+                                    elif delta_absoluto < 0:
+                                        variacao_pct = float('-inf')
+                                        variacao_texto = "Valor Inicial 0 - ∞"
+                                    else:
+                                        variacao_pct = 0
+                                        variacao_texto = "0.0%"
+                                elif v_ini < 0 and v_sub > 0:
+                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                    variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
+                                elif v_ini > 0 and v_sub < 0:
+                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                    variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
+                                else:
+                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                    variacao_texto = f"{variacao_pct:+.1f}%"
+
+                                dados_grafico.append({
+                                    'instituicao': instituicao,
+                                    'valor_ini': v_ini,
+                                    'valor_sub': v_sub,
+                                    'delta': delta_absoluto,
+                                    'delta_texto': delta_texto,
+                                    'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
+                                    'variacao_texto': variacao_texto
+                                })
+
+                        if not dados_grafico:
+                            st.info(f"sem dados disponíveis para '{variavel}' nos períodos selecionados")
+                            continue
+
+                        if tipo_variacao == "Δ %":
+                            dados_grafico = sorted(dados_grafico, key=lambda x: x['variacao_pct'], reverse=True)
+                        else:
+                            dados_grafico = sorted(dados_grafico, key=lambda x: x['delta'], reverse=True)
+
+                        if modo_visualizacao_deltas == "Pontos (antes/depois)":
+                            fig_delta = go.Figure()
+                            todos_y = []
+                            for dado in dados_grafico:
+                                todos_y.append(dado['valor_ini'] * format_info['multiplicador'])
+                                todos_y.append(dado['valor_sub'] * format_info['multiplicador'])
+
+                            for i, dado in enumerate(dados_grafico):
+                                inst = dado['instituicao']
+                                y_ini = dado['valor_ini'] * format_info['multiplicador']
+                                y_sub = dado['valor_sub'] * format_info['multiplicador']
+                                delta_positivo = dado['delta'] > 0
+
+                                cor_sub = '#2E7D32' if delta_positivo else '#7B1E3A'
+
+                                fig_delta.add_trace(go.Scatter(
+                                    x=[inst, inst],
+                                    y=[y_ini, y_sub],
+                                    mode='lines',
+                                    line=dict(color='#9E9E9E', width=2),
+                                    showlegend=False,
+                                    hoverinfo='skip'
+                                ))
+
+                                fig_delta.add_trace(go.Scatter(
+                                    x=[inst],
+                                    y=[y_ini],
+                                    mode='markers',
+                                    marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
+                                    name=periodo_inicial_delta if i == 0 else None,
+                                    showlegend=(i == 0),
+                                    legendgroup='inicial',
+                                    hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                                ))
+
+                                fig_delta.add_trace(go.Scatter(
+                                    x=[inst],
+                                    y=[y_sub],
+                                    mode='markers',
+                                    marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
+                                    name=periodo_subsequente_delta if i == 0 else None,
+                                    showlegend=(i == 0),
+                                    legendgroup='subsequente',
+                                    customdata=[[dado['delta_texto'], dado['variacao_texto']]],
+                                    hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<extra></extra>'
+                                ))
+
+                            titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
+
+                            yaxis_config = dict(
+                                showgrid=True,
+                                gridcolor='#e0e0e0',
+                                tickformat=format_info['tickformat'],
+                                ticksuffix=format_info['ticksuffix'],
+                                title=variavel
+                            )
+
+                            if todos_y:
+                                y_min_dados = min(todos_y)
+                                y_max_dados = max(todos_y)
+                                y_range = y_max_dados - y_min_dados if y_max_dados != y_min_dados else abs(y_max_dados) * 0.1 or 1
+
+                                if modo_escala == "Zero baseline":
+                                    yaxis_config['range'] = [min(0, y_min_dados - y_range * 0.05), max(0, y_max_dados + y_range * 0.05)]
+                                elif modo_escala == "Auto (zoom)":
+                                    margem = y_range * (margem_pct / 100)
+                                    yaxis_config['range'] = [y_min_dados - margem, y_max_dados + margem]
+                                elif modo_escala == "Manual":
+                                    yaxis_config['range'] = [y_min_manual, y_max_manual]
+
+                            fig_delta.update_layout(
+                                title=dict(
+                                    text=titulo_delta,
+                                    font=dict(size=16, family='IBM Plex Sans')
+                                ),
+                                height=max(400, len(dados_grafico) * 25 + 150),
+                                plot_bgcolor='#f8f9fa',
+                                paper_bgcolor='white',
+                                showlegend=True,
+                                legend=dict(
+                                    orientation="h",
+                                    yanchor="bottom",
+                                    y=1.02,
+                                    xanchor="left",
+                                    x=0
+                                ),
+                                xaxis=dict(
+                                    showgrid=False,
+                                    tickangle=45 if len(dados_grafico) > 10 else 0,
+                                    tickfont=dict(size=10)
+                                ),
+                                yaxis=yaxis_config,
+                                font=dict(family='IBM Plex Sans'),
+                                margin=dict(l=60, r=20, t=80, b=100)
+                            )
+
+                            st.markdown(f"### {variavel}")
+                            st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
+                        else:
+                            valores_finitos = []
+                            for dado in dados_grafico:
+                                if tipo_variacao == "Δ %":
+                                    if np.isfinite(dado['variacao_pct']):
+                                        valores_finitos.append(abs(dado['variacao_pct']))
+
+                            cap_visual = (max(valores_finitos) * 1.2) if valores_finitos else 1
+
+                            for dado in dados_grafico:
+                                if tipo_variacao == "Δ %":
+                                    if np.isfinite(dado['variacao_pct']):
+                                        dado['valor_plot'] = dado['variacao_pct']
+                                    else:
+                                        dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
+                                else:
+                                    dado['valor_plot'] = dado['delta'] * format_info['multiplicador']
+
+                            n_bancos = len(dados_grafico)
+                            orientacao_horizontal = n_bancos > 15
+
+                            insts = [d['instituicao'] for d in dados_grafico]
+                            valores_plot = [d['valor_plot'] for d in dados_grafico]
+                            cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
+
+                            eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
+                            eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
+                            eixo_titulo = "Δ %" if tipo_variacao == "Δ %" else "Δ absoluto"
+
+                            fig_barras = go.Figure()
+                            fig_barras.add_trace(go.Bar(
+                                x=valores_plot if orientacao_horizontal else insts,
+                                y=insts if orientacao_horizontal else valores_plot,
+                                orientation='h' if orientacao_horizontal else 'v',
+                                marker=dict(color=cores_barras, opacity=0.9),
+                                customdata=np.stack([
+                                    [d['delta_texto'] for d in dados_grafico],
+                                    [d['variacao_texto'] for d in dados_grafico],
+                                ], axis=-1),
+                                hovertemplate=(
+                                    "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
+                                ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<extra></extra>"
+                            ))
+
+                            fig_barras.update_layout(
+                                title=dict(
+                                    text=f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}",
+                                    font=dict(size=16, family='IBM Plex Sans')
+                                ),
+                                height=max(450, len(dados_grafico) * 25 + 160),
+                                plot_bgcolor='#f8f9fa',
+                                paper_bgcolor='white',
+                                showlegend=False,
+                                xaxis=dict(
+                                    showgrid=True if not orientacao_horizontal else True,
+                                    zeroline=True,
+                                    zerolinecolor='#444',
+                                    tickformat=eixo_tickformat if orientacao_horizontal else None,
+                                    ticksuffix=eixo_ticksuffix if orientacao_horizontal else None,
+                                    title=eixo_titulo if orientacao_horizontal else None
+                                ),
+                                yaxis=dict(
+                                    showgrid=False if orientacao_horizontal else True,
+                                    zeroline=True,
+                                    zerolinecolor='#444',
+                                    tickformat=eixo_tickformat if not orientacao_horizontal else None,
+                                    ticksuffix=eixo_ticksuffix if not orientacao_horizontal else None,
+                                    title=eixo_titulo if not orientacao_horizontal else None
+                                ),
+                                font=dict(family='IBM Plex Sans'),
+                                margin=dict(l=60, r=20, t=80, b=100)
+                            )
+
+                            st.markdown(f"### {variavel}")
+                            st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
+
+                        with st.expander("exportar dados (excel)"):
+                            df_resumo = pd.DataFrame(dados_grafico)
+                            df_resumo = df_resumo.rename(columns={
+                                'instituicao': 'Instituição',
+                                'valor_ini': periodo_inicial_delta,
+                                'valor_sub': periodo_subsequente_delta,
+                                'delta_texto': 'Delta',
+                                'variacao_texto': 'Variação %'
+                            })
+                            df_resumo = df_resumo[['Instituição', periodo_inicial_delta, periodo_subsequente_delta, 'Delta', 'Variação %']]
+
+                            buffer_excel = BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                df_resumo.to_excel(writer, index=False, sheet_name='deltas')
+                            buffer_excel.seek(0)
+
+                            st.download_button(
+                                label="exportar excel",
+                                data=buffer_excel,
+                                file_name=f"Deltas_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="exportar_excel_delta"
+                            )
+                elif not periodo_valido:
+                    pass  # Já exibiu warning acima
+                elif not variaveis_selecionadas_delta:
+                    st.info("selecione ao menos uma variável para análise")
+                else:
+                    st.info("selecione instituições para comparar")
 
     else:
         st.info("carregando dados automaticamente do github...")
