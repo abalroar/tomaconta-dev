@@ -1716,7 +1716,7 @@ with col_header:
     """, unsafe_allow_html=True)
 
 # Lista de opções do menu principal (análise)
-MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Deltas (Antes e Depois)", "Capital Regulatório", "DRE", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
+MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Rankings", "Capital Regulatório", "DRE", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
 
 # Lista de opções do menu secundário (utilitários)
 MENU_SECUNDARIO = ["Sobre", "Atualizar Base", "Glossário"]
@@ -2142,7 +2142,7 @@ if menu == "Sobre":
         st.markdown("""
         <div class="feature-card">
             <h4>histórico peers</h4>
-            <p>séries temporais comparativas entre múltiplas instituições. ideal para acompanhar a evolução de peers ou concorrentes ao longo dos trimestres.</p>
+            <p>séries temporais comparativas entre múltiplas instituições. ideal para acompanhar a evolução de concorrentes ao longo dos trimestres.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2237,14 +2237,14 @@ if menu == "Sobre":
         st.markdown("""
         <div class="feature-card">
             <h4>filtros inteligentes</h4>
-            <p>selecione instituições por top n (por qualquer indicador), por peer group ou lista customizada. 8 opções de ponderação para médias do grupo.</p>
+            <p>selecione instituições por top n (por qualquer indicador) ou lista customizada. 8 opções de ponderação para médias do grupo.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
             <h4>nomenclatura personalizada</h4>
-            <p>renomeie instituições com nomes-fantasia, defina cores personalizadas e agrupe por categoria (peer groups) para análises segmentadas.</p>
+            <p>renomeie instituições com nomes-fantasia e defina cores personalizadas para análises segmentadas.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2270,7 +2270,7 @@ if menu == "Sobre":
 
     1. **dados pré-carregados**: a plataforma já possui dados históricos prontos para análise imediata
     2. **navegue pelos módulos**: use o menu superior para acessar painel, histórico, scatter plot, deltas ou capital regulatório
-    3. **aplique filtros**: selecione instituições por top n, peer group ou lista customizada
+    3. **aplique filtros**: selecione instituições por top n ou lista customizada
     4. **personalize análises**: ajuste variáveis, períodos e ponderações conforme sua necessidade
     5. **exporte resultados**: baixe em excel, csv ou gere pdf scorecards para compartilhar
 
@@ -2342,7 +2342,7 @@ elif menu == "Painel":
                 ]
             }
 
-            col_periodo, col_indicador, col_tipo, col_media = st.columns([1.2, 2, 1.3, 1.8])
+            col_periodo, col_indicador, col_media = st.columns([1.2, 2, 1.8])
             with col_periodo:
                 periodo_resumo = st.selectbox(
                     "período",
@@ -2360,16 +2360,7 @@ elif menu == "Painel":
             componentes_disponiveis = [
                 col for col in componentes_indicador.get(indicador_label, []) if col in df.columns
             ]
-            with col_tipo:
-                if componentes_disponiveis:
-                    tipo_grafico = st.radio(
-                        "tipo de gráfico",
-                        ["Ranking", "Composição (100%)"],
-                        horizontal=True,
-                        key="tipo_grafico_resumo"
-                    )
-                else:
-                    tipo_grafico = "Ranking"
+            tipo_grafico = "Composição (100%)" if componentes_disponiveis else None
             with col_media:
                 tipo_media_label = st.selectbox(
                     "ponderar média por",
@@ -2379,48 +2370,23 @@ elif menu == "Painel":
                 )
                 coluna_peso_resumo = VARIAVEIS_PONDERACAO[tipo_media_label]
 
-            col_peers, col_bancos = st.columns([1.2, 2.8])
+            col_universo, col_bancos = st.columns([1.4, 2.6])
 
-            peers_disponiveis = []
-            if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-                peers_disponiveis = st.session_state['colunas_classificacao']
-
-            with col_peers:
-                peers_selecionados = st.multiselect(
-                    "grupos de peers",
-                    peers_disponiveis,
-                    key="peers_resumo"
+            with col_universo:
+                usar_top_universo = st.checkbox(
+                    "selecionar automaticamente top N do universo",
+                    value=True,
+                    key="top_universo_toggle"
                 )
-
-                usar_top_universo = False
-                top_universo_n = 30
-                if not peers_selecionados:
-                    usar_top_universo = st.checkbox(
-                        "selecionar automaticamente top N do universo",
-                        value=True,
-                        key="top_universo_toggle"
-                    )
-                    top_universo_n = st.selectbox(
-                        "top N (universo)",
-                        [10, 20, 30, 40],
-                        index=2,
-                        key="top_universo_n"
-                    )
-
-            bancos_do_peer = []
-            if peers_selecionados and 'df_aliases' in st.session_state:
-                df_aliases = st.session_state['df_aliases']
-                peer_vals = df_aliases[peers_selecionados].fillna(0).apply(
-                    lambda col: col.astype(str).str.strip().isin(["1", "1.0"])
+                top_universo_n = st.selectbox(
+                    "top N (universo)",
+                    [10, 20, 30, 40],
+                    index=2,
+                    key="top_universo_n"
                 )
-                mask_peer = peer_vals.any(axis=1)
-                bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
 
             df_periodo = df[df['Período'] == periodo_resumo].copy()
             df_periodo_universo = df_periodo.copy()
-
-            if peers_selecionados and bancos_do_peer:
-                df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
 
             bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
             dict_aliases = st.session_state.get('dict_aliases', {})
@@ -2428,12 +2394,12 @@ elif menu == "Painel":
 
             indicador_col = indicadores_disponiveis[indicador_label]
             coluna_selecao = indicador_col
-            if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
+            if componentes_disponiveis:
                 df_periodo['total_componentes'] = df_periodo[componentes_disponiveis].sum(axis=1, skipna=True)
                 df_periodo_universo['total_componentes'] = df_periodo_universo[componentes_disponiveis].sum(axis=1, skipna=True)
                 coluna_selecao = 'total_componentes'
 
-            bancos_default = bancos_do_peer[:10] if bancos_do_peer else []
+            bancos_default = []
             if usar_top_universo:
                 df_universo_valid = df_periodo_universo.dropna(subset=[coluna_selecao]).copy()
                 if df_universo_valid.empty:
@@ -2516,7 +2482,7 @@ elif menu == "Painel":
                     df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
                     df_selecionado = df_selecionado.sort_values('ordem')
 
-                if tipo_grafico == "Composição (100%)" and componentes_disponiveis:
+                if componentes_disponiveis:
                     df_componentes = df_selecionado[['Instituição'] + componentes_disponiveis].copy()
                     df_componentes['total'] = df_componentes[componentes_disponiveis].sum(axis=1, skipna=True)
                     df_componentes = df_componentes[df_componentes['total'] > 0]
@@ -2613,131 +2579,7 @@ elif menu == "Painel":
                             key="exportar_resumo_excel"
                         )
                 else:
-                    df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
-                    df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
-
-                    if media_display and media_display != 0:
-                        df_selecionado['diff_pct'] = (df_selecionado['valor_display'] / media_display - 1) * 100
-                        df_selecionado['diff_pct_text'] = df_selecionado['diff_pct'].map(lambda v: f"{v:.1f}%")
-                    else:
-                        df_selecionado['diff_pct_text'] = "N/A"
-
-                    df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
-                        lambda v: formatar_numero(v, format_info)
-                    )
-                    df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
-                        lambda v: formatar_numero(v, format_info, incluir_sinal=True)
-                    )
-
-                    n_bancos = len(df_selecionado)
-                    orientacao_horizontal = n_bancos > 15
-                    altura_grafico = max(650, n_bancos * 24) if orientacao_horizontal else 650
-
-                    cores_plotly = px.colors.qualitative.Plotly
-                    cores_barras = []
-                    idx_cor = 0
-                    for banco in df_selecionado['Instituição']:
-                        cor = obter_cor_banco(banco)
-                        if not cor:
-                            cor = cores_plotly[idx_cor % len(cores_plotly)]
-                            idx_cor += 1
-                        cores_barras.append(cor)
-
-                    fig_resumo = go.Figure()
-                    banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
-                    fig_resumo.add_trace(go.Bar(
-                        x=df_selecionado['valor_display'] if orientacao_horizontal else df_selecionado['Instituição'],
-                        y=df_selecionado['Instituição'] if orientacao_horizontal else df_selecionado['valor_display'],
-                        marker=dict(color=cores_barras, opacity=0.85),
-                        name=indicador_label,
-                        orientation='h' if orientacao_horizontal else 'v',
-                        customdata=np.stack([
-                            df_selecionado['ranking'],
-                            df_selecionado['diff_text'],
-                            df_selecionado['diff_pct_text'],
-                            df_selecionado['valor_text'],
-                        ], axis=-1),
-                        hovertemplate=(
-                            f"<b>{banco_hover}</b><br>"
-                            f"{indicador_label}: %{{customdata[3]}}<br>"
-                            "Ranking: %{customdata[0]}<br>"
-                            "Diferença vs média: %{customdata[1]}<br>"
-                            "Diferença vs média (%): %{customdata[2]}"
-                            "<extra></extra>"
-                        )
-                    ))
-
-                    if orientacao_horizontal:
-                        fig_resumo.add_trace(go.Scatter(
-                            x=[media_display] * len(df_selecionado),
-                            y=df_selecionado['Instituição'],
-                            mode='lines',
-                            name=label_media,
-                            line=dict(color='#1f77b4', dash='dash')
-                        ))
-                    else:
-                        fig_resumo.add_trace(go.Scatter(
-                            x=df_selecionado['Instituição'],
-                            y=[media_display] * len(df_selecionado),
-                            mode='lines',
-                            name=label_media,
-                            line=dict(color='#1f77b4', dash='dash')
-                        ))
-
-                    fig_resumo.update_layout(
-                        title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
-                        xaxis_title=indicador_label if orientacao_horizontal else "instituições",
-                        yaxis_title="instituições" if orientacao_horizontal else indicador_label,
-                        plot_bgcolor='#f8f9fa',
-                        paper_bgcolor='white',
-                        height=altura_grafico,
-                        showlegend=True,
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                        xaxis=dict(
-                            tickangle=-45 if not orientacao_horizontal else 0,
-                            tickformat=format_info['tickformat'] if orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
-                        ),
-                        yaxis=dict(
-                            tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
-                        ),
-                        font=dict(family='IBM Plex Sans')
-                    )
-
-                    st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
-
-                    media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
-                    df_export = df_selecionado.copy()
-                    df_export['Período'] = periodo_resumo
-                    df_export['Indicador'] = indicador_label
-                    df_export['Valor'] = df_export[indicador_col]
-                    df_export['Média do Grupo'] = media_grupo_raw
-                    df_export['Tipo de Média'] = tipo_media_label
-                    df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
-                    df_export = df_export[[
-                        'Período',
-                        'Instituição',
-                        'Indicador',
-                        'Valor',
-                        'ranking',
-                        'Média do Grupo',
-                        'Tipo de Média',
-                        'Diferença vs Média'
-                    ]].rename(columns={'ranking': 'Ranking'})
-
-                    buffer_excel = BytesIO()
-                    with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                        df_export.to_excel(writer, index=False, sheet_name='resumo')
-                    buffer_excel.seek(0)
-
-                    st.download_button(
-                        label="Exportar Excel",
-                        data=buffer_excel,
-                        file_name=f"resumo_{periodo_resumo.replace('/', '-')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="exportar_resumo_excel"
-                    )
+                    st.info("composição disponível apenas para indicadores com componentes detalhados (ex.: Patrimônio de Referência).")
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
@@ -2910,54 +2752,29 @@ elif menu == "Capital Regulatório":
                             df_periodo_cap = df_periodo_cap.merge(df_peso, on='Instituição', how='left')
 
                 # --- Seleção de Bancos (mesmo padrão do Resumo) ---
-                col_peers_cap, col_bancos_cap = st.columns([1.2, 2.8])
+                col_universo_cap, col_bancos_cap = st.columns([1.4, 2.6])
 
-                peers_disponiveis_cap = []
-                if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-                    peers_disponiveis_cap = st.session_state['colunas_classificacao']
-
-                with col_peers_cap:
-                    peers_selecionados_cap = st.multiselect(
-                        "grupos de peers",
-                        peers_disponiveis_cap,
-                        key="peers_capital"
+                with col_universo_cap:
+                    usar_top_universo_cap = st.checkbox(
+                        "selecionar automaticamente top N do universo",
+                        value=True,
+                        key="top_universo_toggle_capital"
                     )
-
-                    usar_top_universo_cap = False
-                    top_universo_n_cap = 30
-                    if not peers_selecionados_cap:
-                        usar_top_universo_cap = st.checkbox(
-                            "selecionar automaticamente top N do universo",
-                            value=True,
-                            key="top_universo_toggle_capital"
-                        )
-                        top_universo_n_cap = st.selectbox(
-                            "top N (universo)",
-                            [10, 20, 30, 40],
-                            index=2,
-                            key="top_universo_n_capital"
-                        )
-
-                bancos_do_peer_cap = []
-                if peers_selecionados_cap and 'df_aliases' in st.session_state:
-                    df_aliases = st.session_state['df_aliases']
-                    peer_vals = df_aliases[peers_selecionados_cap].fillna(0).apply(
-                        lambda col: col.astype(str).str.strip().isin(["1", "1.0"])
+                    top_universo_n_cap = st.selectbox(
+                        "top N (universo)",
+                        [10, 20, 30, 40],
+                        index=2,
+                        key="top_universo_n_capital"
                     )
-                    mask_peer = peer_vals.any(axis=1)
-                    bancos_do_peer_cap = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
 
                 df_periodo_universo_cap = df_periodo_cap.copy()
-
-                if peers_selecionados_cap and bancos_do_peer_cap:
-                    df_periodo_cap = df_periodo_cap[df_periodo_cap['Instituição'].isin(bancos_do_peer_cap)]
 
                 bancos_todos_cap = df_periodo_cap['Instituição'].dropna().unique().tolist()
                 dict_aliases = st.session_state.get('dict_aliases', {})
                 bancos_todos_cap = ordenar_bancos_com_alias(bancos_todos_cap, dict_aliases)
 
                 # Definir bancos default
-                bancos_default_cap = bancos_do_peer_cap[:10] if bancos_do_peer_cap else []
+                bancos_default_cap = []
                 if usar_top_universo_cap:
                     df_universo_valid_cap = df_periodo_universo_cap.dropna(subset=['Índice de Basileia Total (%)']).copy()
                     if not df_universo_valid_cap.empty:
@@ -3380,13 +3197,6 @@ elif menu == "Histórico Peers":
                 col_select, col_vars, col_periodo = st.columns([2, 2, 2])
 
                 with col_select:
-                    peers_disponiveis = []
-                    if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-                        peers_disponiveis = st.session_state['colunas_classificacao']
-
-                    opcoes_peer = ['Nenhum'] + peers_disponiveis
-                    peer_selecionado = st.selectbox("filtrar por peer", opcoes_peer, index=0)
-
                     bancos_selecionados = st.multiselect(
                         "selecionar instituições",
                         bancos_disponiveis,
@@ -3448,16 +3258,7 @@ elif menu == "Histórico Peers":
                         format_func=periodo_para_exibicao
                     )
 
-                bancos_do_peer = []
-                if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
-                    df_aliases = st.session_state['df_aliases']
-                    coluna_peer = df_aliases[peer_selecionado]
-                    mask_peer = (
-                        coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
-                    )
-                    bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
-
-                bancos_para_comparar = sorted(set(bancos_do_peer) | set(bancos_selecionados))
+                bancos_para_comparar = bancos_selecionados
 
                 if bancos_para_comparar and variaveis_selecionadas:
                     idx_ini = periodos_disponiveis.index(periodo_inicial)
@@ -3620,44 +3421,17 @@ elif menu == "Scatter Plot":
         with col_t2:
             var_top_n = st.selectbox("top n por", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
 
-        # Terceira linha: Peers e Seleção de bancos
-        col_f1, col_f2 = st.columns([1, 3])
-
-        # Opções de Peers disponíveis
-        peers_disponiveis = []
-        if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-            peers_disponiveis = st.session_state['colunas_classificacao']
-
-        with col_f1:
-            opcoes_peer = ['Nenhum'] + peers_disponiveis
-            peer_selecionado = st.selectbox("filtrar por peer", opcoes_peer, index=0)
-
-        # Bancos do peer selecionado (automático: valor = 1)
-        bancos_do_peer = []
-        if peer_selecionado != 'Nenhum' and 'df_aliases' in st.session_state:
-            df_aliases = st.session_state['df_aliases']
-            coluna_peer = df_aliases[peer_selecionado]
-            mask_peer = (
-                coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
-            )
-            bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
-
-        # Multiselect sempre visível para selecionar bancos adicionais
-        with col_f2:
-            # Se houver peer selecionado, pré-seleciona os bancos do peer
-            default_bancos = bancos_do_peer if bancos_do_peer else []
+        # Terceira linha: Seleção de bancos
+        col_f = st.columns(1)[0]
+        with col_f:
             bancos_selecionados = st.multiselect(
                 "selecionar bancos",
                 todos_bancos,
-                default=default_bancos,
                 key="bancos_multiselect"
             )
 
         # Aplica filtros ao dataframe
         df_periodo = df[df['Período'] == periodo_scatter]
-
-        if peer_selecionado != 'Nenhum':
-            df_periodo = df_periodo[df_periodo['Instituição'].isin(bancos_do_peer)]
 
         if bancos_selecionados:
             # Usa os bancos selecionados no multiselect
@@ -3705,8 +3479,8 @@ elif menu == "Scatter Plot":
                 hovertemplate=f'<b>{instituicao}</b><br>{var_x}: %{{x:{format_x["tickformat"]}}}{format_x["ticksuffix"]}<br>{var_y}: %{{y:{format_y["tickformat"]}}}{format_y["ticksuffix"]}<extra></extra>'
             ))
 
-        # Título dinâmico - Scatter Plot n=1
-        st.markdown("#### Scatter Plot n=1")
+        # Título dinâmico - Scatter Plot t=1
+        st.markdown("#### Scatter Plot t=1")
         if bancos_selecionados:
             titulo_scatter = f'{var_y} vs {var_x} - {periodo_scatter} ({len(df_scatter)} bancos)'
         else:
@@ -3729,10 +3503,10 @@ elif menu == "Scatter Plot":
         st.plotly_chart(fig_scatter, width='stretch')
 
         # ============================================================
-        # SCATTER PLOT n=2 - Comparação entre dois períodos
+        # SCATTER PLOT t=2 - Comparação entre dois períodos
         # ============================================================
         st.markdown("---")
-        st.markdown("#### Scatter Plot n=2")
+        st.markdown("#### Scatter Plot t=2")
         st.caption("Visualize a movimentação dos bancos entre dois períodos")
 
         # Seletores para os dois períodos
@@ -3789,33 +3563,12 @@ elif menu == "Scatter Plot":
             default_idx_n2 = opcoes_tamanho_n2.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho_n2 else 1
             var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=default_idx_n2, key="var_size_n2")
 
-        # Terceira linha: Peers e Seleção de bancos
-        col_n2_f1, col_n2_f2 = st.columns([1, 3])
-
-        with col_n2_f1:
-            peer_selecionado_n2 = st.selectbox(
-                "filtrar por peer",
-                opcoes_peer,
-                index=0,
-                key="peer_n2"
-            )
-
-        # Bancos do peer selecionado para n=2
-        bancos_do_peer_n2 = []
-        if peer_selecionado_n2 != 'Nenhum' and 'df_aliases' in st.session_state:
-            df_aliases = st.session_state['df_aliases']
-            coluna_peer_n2 = df_aliases[peer_selecionado_n2]
-            mask_peer_n2 = (
-                coluna_peer_n2.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
-            )
-            bancos_do_peer_n2 = df_aliases.loc[mask_peer_n2, 'Alias Banco'].tolist()
-
-        with col_n2_f2:
-            default_bancos_n2 = bancos_do_peer_n2 if bancos_do_peer_n2 else []
+        # Terceira linha: Seleção de bancos
+        col_n2_f = st.columns(1)[0]
+        with col_n2_f:
             bancos_selecionados_n2 = st.multiselect(
                 "selecionar bancos",
                 todos_bancos,
-                default=default_bancos_n2,
                 key="bancos_multiselect_n2"
             )
 
@@ -3826,11 +3579,6 @@ elif menu == "Scatter Plot":
             # Filtra dados para os dois períodos
             df_p1 = df[df['Período'] == periodo_inicial].copy()
             df_p2 = df[df['Período'] == periodo_subseq].copy()
-
-            # Aplica filtro de peer
-            if peer_selecionado_n2 != 'Nenhum':
-                df_p1 = df_p1[df_p1['Instituição'].isin(bancos_do_peer_n2)]
-                df_p2 = df_p2[df_p2['Instituição'].isin(bancos_do_peer_n2)]
 
             # Aplica seleção de bancos ou top N
             if bancos_selecionados_n2:
@@ -3990,7 +3738,7 @@ elif menu == "Scatter Plot":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Deltas (Antes e Depois)":
+elif menu == "Rankings":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
@@ -4002,6 +3750,299 @@ elif menu == "Deltas (Antes e Depois)":
         bancos_todos = df['Instituição'].dropna().unique().tolist()
         dict_aliases = st.session_state.get('dict_aliases', {})
         todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
+
+        st.markdown("### ranking")
+
+        indicadores_config = {
+            'Ativo Total': ['Ativo Total'],
+            'Carteira de Crédito': ['Carteira de Crédito'],
+            'Títulos e Valores Mobiliários': ['Títulos e Valores Mobiliários'],
+            'Passivo Exigível': ['Passivo Exigível'],
+            'Captações': ['Captações'],
+            'Patrimônio Líquido': ['Patrimônio Líquido'],
+            'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
+            'Patrimônio de Referência': [
+                'Patrimônio de Referência para Comparação com o RWA (e)',
+                'Patrimônio de Referência',
+            ],
+            'Índice de Basileia': ['Índice de Basileia'],
+            'Índice de Imobilização': ['Índice de Imobilização'],
+            'Número de Agências': ['Número de Agências'],
+            'Número de Postos de Atendimento': ['Número de Postos de Atendimento'],
+            # Variáveis de Capital (Relatório 5)
+            'RWA Total': ['RWA Total'],
+            'Capital Principal': ['Capital Principal'],
+            'Índice de Capital Principal': ['Índice de Capital Principal'],
+            'Índice de Capital Nível I': ['Índice de Capital Nível I'],
+            'Razão de Alavancagem': ['Razão de Alavancagem'],
+        }
+
+        indicadores_disponiveis = {}
+        for label, colunas in indicadores_config.items():
+            coluna_valida = next((col for col in colunas if col in df.columns), None)
+            if coluna_valida:
+                indicadores_disponiveis[label] = coluna_valida
+
+        if not indicadores_disponiveis:
+            st.warning("nenhum dos indicadores requeridos foi encontrado nos dados atuais.")
+        else:
+            periodos = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
+
+            col_periodo, col_indicador, col_media = st.columns([1.2, 2, 1.8])
+            with col_periodo:
+                periodo_resumo = st.selectbox(
+                    "período",
+                    periodos,
+                    index=0,
+                    key="periodo_resumo",
+                    format_func=periodo_para_exibicao
+                )
+            with col_indicador:
+                indicador_label = st.selectbox(
+                    "indicador",
+                    list(indicadores_disponiveis.keys()),
+                    key="indicador_resumo"
+                )
+            with col_media:
+                tipo_media_label = st.selectbox(
+                    "ponderar média por",
+                    list(VARIAVEIS_PONDERACAO.keys()),
+                    index=0,
+                    key="tipo_media_resumo"
+                )
+                coluna_peso_resumo = VARIAVEIS_PONDERACAO[tipo_media_label]
+
+            col_universo, col_bancos = st.columns([1.4, 2.6])
+
+            with col_universo:
+                usar_top_universo = st.checkbox(
+                    "selecionar automaticamente top N do universo",
+                    value=True,
+                    key="top_universo_toggle"
+                )
+                top_universo_n = st.selectbox(
+                    "top N (universo)",
+                    [10, 20, 30, 40],
+                    index=2,
+                    key="top_universo_n"
+                )
+
+            df_periodo = df[df['Período'] == periodo_resumo].copy()
+            df_periodo_universo = df_periodo.copy()
+
+            bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_todos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
+
+            indicador_col = indicadores_disponiveis[indicador_label]
+
+            bancos_default = []
+            if usar_top_universo:
+                df_universo_valid = df_periodo_universo.dropna(subset=[indicador_col]).copy()
+                if df_universo_valid.empty:
+                    st.warning("não há dados disponíveis para calcular o top N do universo.")
+                else:
+                    df_universo_top = df_universo_valid.sort_values(indicador_col, ascending=False).head(top_universo_n)
+                    bancos_default = df_universo_top['Instituição'].tolist()
+
+            bancos_default = [banco for banco in bancos_default if banco in bancos_todos]
+
+            with col_bancos:
+                bancos_selecionados = st.multiselect(
+                    "selecionar instituições (até 40)",
+                    bancos_todos,
+                    default=bancos_default,
+                    key="bancos_resumo"
+                )
+
+            col_top, col_ordem, col_sort = st.columns([1.4, 1.4, 1.8])
+            with col_top:
+                usar_top_n = st.toggle("usar top/bottom n", value=True, key="usar_top_resumo")
+                top_n_resumo = st.selectbox("n", [10, 15, 20], index=0, key="top_n_resumo")
+            with col_ordem:
+                direcao_top = st.radio(
+                    "top/bottom",
+                    ["Top", "Bottom"],
+                    horizontal=True,
+                    key="top_bottom_resumo"
+                )
+            with col_sort:
+                modo_ordenacao = st.radio(
+                    "ordenação",
+                    ["Ordenar por valor", "Manter ordem de seleção"],
+                    horizontal=True,
+                    key="ordenacao_resumo"
+                )
+
+            format_info = get_axis_format(indicador_col)
+
+            def formatar_numero(valor, fmt_info, incluir_sinal=False):
+                if pd.isna(valor):
+                    return "N/A"
+                valor_formatado = format(valor, fmt_info['tickformat'])
+                if incluir_sinal and valor > 0:
+                    valor_formatado = f"+{valor_formatado}"
+                return f"{valor_formatado}{fmt_info['ticksuffix']}"
+
+            max_bancos = 40
+            if bancos_selecionados and len(bancos_selecionados) > max_bancos:
+                st.warning(f"limite de {max_bancos} instituições excedido; exibindo as primeiras {max_bancos}.")
+                bancos_selecionados = bancos_selecionados[:max_bancos]
+
+            if usar_top_n or not bancos_selecionados:
+                df_periodo_valid = df_periodo.dropna(subset=[indicador_col]).copy()
+                if df_periodo_valid.empty:
+                    st.info("não há dados suficientes para o período e indicador selecionados.")
+                else:
+                    ascending = direcao_top == "Bottom"
+                    df_selecionado = df_periodo_valid.sort_values(indicador_col, ascending=ascending).head(top_n_resumo)
+            else:
+                df_selecionado = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados)].copy()
+
+            df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+
+            if df_selecionado.empty:
+                st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
+            else:
+                df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
+                media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
+                label_media = get_label_media(coluna_peso_resumo)
+
+                if modo_ordenacao == "Ordenar por valor":
+                    ordenar_asc = direcao_top == "Bottom"
+                    df_selecionado = df_selecionado.sort_values('valor_display', ascending=ordenar_asc)
+                elif bancos_selecionados:
+                    ordem = bancos_selecionados
+                    df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
+                    df_selecionado = df_selecionado.sort_values('ordem')
+
+                df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
+                df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
+
+                if media_display and media_display != 0:
+                    df_selecionado['diff_pct'] = (df_selecionado['valor_display'] / media_display - 1) * 100
+                    df_selecionado['diff_pct_text'] = df_selecionado['diff_pct'].map(lambda v: f"{v:.1f}%")
+                else:
+                    df_selecionado['diff_pct_text'] = "N/A"
+
+                df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
+                    lambda v: formatar_numero(v, format_info)
+                )
+                df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
+                    lambda v: formatar_numero(v, format_info, incluir_sinal=True)
+                )
+
+                n_bancos = len(df_selecionado)
+                orientacao_horizontal = n_bancos > 15
+                altura_grafico = max(650, n_bancos * 24) if orientacao_horizontal else 650
+
+                cores_plotly = px.colors.qualitative.Plotly
+                cores_barras = []
+                idx_cor = 0
+                for banco in df_selecionado['Instituição']:
+                    cor = obter_cor_banco(banco)
+                    if not cor:
+                        cor = cores_plotly[idx_cor % len(cores_plotly)]
+                        idx_cor += 1
+                    cores_barras.append(cor)
+
+                fig_resumo = go.Figure()
+                banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
+                fig_resumo.add_trace(go.Bar(
+                    x=df_selecionado['valor_display'] if orientacao_horizontal else df_selecionado['Instituição'],
+                    y=df_selecionado['Instituição'] if orientacao_horizontal else df_selecionado['valor_display'],
+                    marker=dict(color=cores_barras, opacity=0.85),
+                    name=indicador_label,
+                    orientation='h' if orientacao_horizontal else 'v',
+                    customdata=np.stack([
+                        df_selecionado['ranking'],
+                        df_selecionado['diff_text'],
+                        df_selecionado['diff_pct_text'],
+                        df_selecionado['valor_text'],
+                    ], axis=-1),
+                    hovertemplate=(
+                        f"<b>{banco_hover}</b><br>"
+                        f"{indicador_label}: %{{customdata[3]}}<br>"
+                        "Ranking: %{customdata[0]}<br>"
+                        "Diferença vs média: %{customdata[1]}<br>"
+                        "Diferença vs média (%): %{customdata[2]}"
+                        "<extra></extra>"
+                    )
+                ))
+
+                if orientacao_horizontal:
+                    fig_resumo.add_trace(go.Scatter(
+                        x=[media_display] * len(df_selecionado),
+                        y=df_selecionado['Instituição'],
+                        mode='lines',
+                        name=label_media,
+                        line=dict(color='#1f77b4', dash='dash')
+                    ))
+                else:
+                    fig_resumo.add_trace(go.Scatter(
+                        x=df_selecionado['Instituição'],
+                        y=[media_display] * len(df_selecionado),
+                        mode='lines',
+                        name=label_media,
+                        line=dict(color='#1f77b4', dash='dash')
+                    ))
+
+                fig_resumo.update_layout(
+                    title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
+                    xaxis_title=indicador_label if orientacao_horizontal else "instituições",
+                    yaxis_title="instituições" if orientacao_horizontal else indicador_label,
+                    plot_bgcolor='#f8f9fa',
+                    paper_bgcolor='white',
+                    height=altura_grafico,
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                    xaxis=dict(
+                        tickangle=-45 if not orientacao_horizontal else 0,
+                        tickformat=format_info['tickformat'] if orientacao_horizontal else None,
+                        ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
+                    ),
+                    yaxis=dict(
+                        tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
+                        ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
+                    ),
+                    font=dict(family='IBM Plex Sans')
+                )
+
+                st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
+
+                media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
+                df_export = df_selecionado.copy()
+                df_export['Período'] = periodo_resumo
+                df_export['Indicador'] = indicador_label
+                df_export['Valor'] = df_export[indicador_col]
+                df_export['Média do Grupo'] = media_grupo_raw
+                df_export['Tipo de Média'] = tipo_media_label
+                df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
+                df_export = df_export[[
+                    'Período',
+                    'Instituição',
+                    'Indicador',
+                    'Valor',
+                    'ranking',
+                    'Média do Grupo',
+                    'Tipo de Média',
+                    'Diferença vs Média'
+                ]].rename(columns={'ranking': 'Ranking'})
+
+                buffer_excel = BytesIO()
+                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                    df_export.to_excel(writer, index=False, sheet_name='resumo')
+                buffer_excel.seek(0)
+
+                st.download_button(
+                    label="Exportar Excel",
+                    data=buffer_excel,
+                    file_name=f"resumo_{periodo_resumo.replace('/', '-')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="exportar_resumo_excel"
+                )
+
+        st.markdown("---")
 
         # ===== LINHA 1: Seleção de variáveis =====
         st.markdown("**variáveis para análise de deltas**")
@@ -4031,7 +4072,7 @@ elif menu == "Deltas (Antes e Depois)":
         )
 
         # ===== LINHA 2: Seleção de períodos e tipo de variação =====
-        col_p1, col_p2, col_tipo_var = st.columns([2, 2, 1])
+        col_p1, col_p2, col_tipo_var, col_viz = st.columns([2, 2, 1, 1.6])
         with col_p1:
             indice_inicial_delta = 1 if len(periodos_dropdown) > 1 else 0
             periodo_inicial_delta = st.selectbox(
@@ -4057,6 +4098,14 @@ elif menu == "Deltas (Antes e Depois)":
                 key="tipo_variacao_delta",
                 horizontal=True
             )
+        with col_viz:
+            modo_visualizacao_deltas = st.radio(
+                "visualização",
+                ["Pontos (antes/depois)", "Barras (delta)"],
+                index=0,
+                key="modo_visualizacao_deltas",
+                horizontal=True
+            )
 
         # Validação de períodos
         idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
@@ -4072,7 +4121,7 @@ elif menu == "Deltas (Antes e Depois)":
         with col_modo:
             modo_selecao = st.radio(
                 "modo de seleção",
-                ["Top N", "Peer", "Personalizado"],
+                ["Top N", "Personalizado"],
                 index=0,
                 key="modo_selecao_deltas"
             )
@@ -4097,57 +4146,12 @@ elif menu == "Deltas (Antes e Depois)":
                 bancos_top_n = df_recente_valid.nlargest(top_n_delta, var_ordenacao)['Instituição'].tolist()
                 bancos_selecionados_delta = bancos_top_n
 
-            elif modo_selecao == "Peer":
-                peers_disponiveis = []
-                if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-                    peers_disponiveis = st.session_state['colunas_classificacao']
-
-                if peers_disponiveis:
-                    peer_selecionado_delta = st.selectbox(
-                        "selecionar peer group",
-                        peers_disponiveis,
-                        key="peer_deltas"
-                    )
-                    # Obtém bancos do peer
-                    df_aliases = st.session_state['df_aliases']
-                    coluna_peer = df_aliases[peer_selecionado_delta]
-                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
-                    bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
-                    bancos_selecionados_delta = [b for b in bancos_do_peer if b in todos_bancos]
-                else:
-                    st.info("nenhum peer group disponível")
-
             else:  # Personalizado
-                col_peer_custom, col_add_remove = st.columns(2)
-
-                with col_peer_custom:
-                    peers_disponiveis = []
-                    if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-                        peers_disponiveis = st.session_state['colunas_classificacao']
-
-                    opcoes_peer_custom = ['Nenhum'] + peers_disponiveis
-                    peer_base = st.selectbox(
-                        "peer base (opcional)",
-                        opcoes_peer_custom,
-                        index=0,
-                        key="peer_base_deltas"
-                    )
-
-                bancos_base = []
-                if peer_base != 'Nenhum' and 'df_aliases' in st.session_state:
-                    df_aliases = st.session_state['df_aliases']
-                    coluna_peer = df_aliases[peer_base]
-                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
-                    bancos_base = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
-                    bancos_base = [b for b in bancos_base if b in todos_bancos]
-
-                with col_add_remove:
-                    bancos_custom = st.multiselect(
-                        "adicionar/remover bancos",
-                        todos_bancos,
-                        default=bancos_base,
-                        key="bancos_custom_deltas"
-                    )
+                bancos_custom = st.multiselect(
+                    "adicionar/remover bancos",
+                    todos_bancos,
+                    key="bancos_custom_deltas"
+                )
                 bancos_selecionados_delta = bancos_custom
 
         # ===== GRÁFICOS DE DELTAS =====
@@ -4157,60 +4161,61 @@ elif menu == "Deltas (Antes e Depois)":
             df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
 
             # ===== CONTROLES DE ESCALA DO EIXO Y =====
-            st.markdown("---")
-            col_escala1, col_escala2, col_escala3 = st.columns([1, 1, 2])
+            if modo_visualizacao_deltas == "Pontos (antes/depois)":
+                st.markdown("---")
+                col_escala1, col_escala2, col_escala3 = st.columns([1, 1, 2])
 
-            with col_escala1:
-                # Inicializa session state para escala se não existir
-                if 'delta_escala_modo' not in st.session_state:
-                    st.session_state['delta_escala_modo'] = 'Auto (zoom)'
+                with col_escala1:
+                    # Inicializa session state para escala se não existir
+                    if 'delta_escala_modo' not in st.session_state:
+                        st.session_state['delta_escala_modo'] = 'Auto (zoom)'
 
-                modo_escala = st.radio(
-                    "escala do eixo Y",
-                    ["Auto (zoom)", "Zero baseline", "Manual"],
-                    index=["Auto (zoom)", "Zero baseline", "Manual"].index(st.session_state['delta_escala_modo']),
-                    key="delta_escala_modo_radio",
-                    horizontal=True
-                )
-                st.session_state['delta_escala_modo'] = modo_escala
-
-            with col_escala2:
-                # Inicializa session state para margem
-                if 'delta_escala_margem' not in st.session_state:
-                    st.session_state['delta_escala_margem'] = 10
-
-                if modo_escala == "Auto (zoom)":
-                    margem_pct = st.slider(
-                        "margem (%)",
-                        0, 50, st.session_state['delta_escala_margem'],
-                        key="delta_margem_slider",
-                        help="Margem adicional acima/abaixo dos valores"
+                    modo_escala = st.radio(
+                        "escala do eixo Y",
+                        ["Auto (zoom)", "Zero baseline", "Manual"],
+                        index=["Auto (zoom)", "Zero baseline", "Manual"].index(st.session_state['delta_escala_modo']),
+                        key="delta_escala_modo_radio",
+                        horizontal=True
                     )
-                    st.session_state['delta_escala_margem'] = margem_pct
+                    st.session_state['delta_escala_modo'] = modo_escala
 
-            with col_escala3:
-                if modo_escala == "Manual":
-                    col_min, col_max = st.columns(2)
-                    with col_min:
-                        if 'delta_y_min' not in st.session_state:
-                            st.session_state['delta_y_min'] = 0.0
-                        y_min_manual = st.number_input(
-                            "Y mínimo",
-                            value=st.session_state['delta_y_min'],
-                            key="delta_y_min_input"
-                        )
-                        st.session_state['delta_y_min'] = y_min_manual
-                    with col_max:
-                        if 'delta_y_max' not in st.session_state:
-                            st.session_state['delta_y_max'] = 100.0
-                        y_max_manual = st.number_input(
-                            "Y máximo",
-                            value=st.session_state['delta_y_max'],
-                            key="delta_y_max_input"
-                        )
-                        st.session_state['delta_y_max'] = y_max_manual
+                with col_escala2:
+                    # Inicializa session state para margem
+                    if 'delta_escala_margem' not in st.session_state:
+                        st.session_state['delta_escala_margem'] = 10
 
-            st.markdown("---")
+                    if modo_escala == "Auto (zoom)":
+                        margem_pct = st.slider(
+                            "margem (%)",
+                            0, 50, st.session_state['delta_escala_margem'],
+                            key="delta_margem_slider",
+                            help="Margem adicional acima/abaixo dos valores"
+                        )
+                        st.session_state['delta_escala_margem'] = margem_pct
+
+                with col_escala3:
+                    if modo_escala == "Manual":
+                        col_min, col_max = st.columns(2)
+                        with col_min:
+                            if 'delta_y_min' not in st.session_state:
+                                st.session_state['delta_y_min'] = 0.0
+                            y_min_manual = st.number_input(
+                                "Y mínimo",
+                                value=st.session_state['delta_y_min'],
+                                key="delta_y_min_input"
+                            )
+                            st.session_state['delta_y_min'] = y_min_manual
+                        with col_max:
+                            if 'delta_y_max' not in st.session_state:
+                                st.session_state['delta_y_max'] = 100.0
+                            y_max_manual = st.number_input(
+                                "Y máximo",
+                                value=st.session_state['delta_y_max'],
+                                key="delta_y_max_input"
+                            )
+                            st.session_state['delta_y_max'] = y_max_manual
+
+                st.markdown("---")
 
             for variavel in variaveis_selecionadas_delta:
                 if variavel not in df.columns:
@@ -4249,10 +4254,10 @@ elif menu == "Deltas (Antes e Depois)":
                             # Divisão por zero
                             if delta_absoluto > 0:
                                 variacao_pct = float('inf')
-                                variacao_texto = "+∞"
+                                variacao_texto = "Valor Inicial 0 - ∞"
                             elif delta_absoluto < 0:
                                 variacao_pct = float('-inf')
-                                variacao_texto = "-∞"
+                                variacao_texto = "Valor Inicial 0 - ∞"
                             else:
                                 variacao_pct = 0
                                 variacao_texto = "0.0%"
@@ -4288,115 +4293,192 @@ elif menu == "Deltas (Antes e Depois)":
                 else:
                     dados_grafico = sorted(dados_grafico, key=lambda x: x['delta'], reverse=True)
 
-                # Cria o gráfico estilo lollipop
-                fig_delta = go.Figure()
+                if modo_visualizacao_deltas == "Pontos (antes/depois)":
+                    # Cria o gráfico estilo lollipop
+                    fig_delta = go.Figure()
 
-                # Coleta todos os valores Y para calcular escala
-                todos_y = []
-                for dado in dados_grafico:
-                    todos_y.append(dado['valor_ini'] * format_info['multiplicador'])
-                    todos_y.append(dado['valor_sub'] * format_info['multiplicador'])
+                    # Coleta todos os valores Y para calcular escala
+                    todos_y = []
+                    for dado in dados_grafico:
+                        todos_y.append(dado['valor_ini'] * format_info['multiplicador'])
+                        todos_y.append(dado['valor_sub'] * format_info['multiplicador'])
 
-                for i, dado in enumerate(dados_grafico):
-                    inst = dado['instituicao']
-                    y_ini = dado['valor_ini'] * format_info['multiplicador']
-                    y_sub = dado['valor_sub'] * format_info['multiplicador']
-                    delta_positivo = dado['delta'] > 0
+                    for i, dado in enumerate(dados_grafico):
+                        inst = dado['instituicao']
+                        y_ini = dado['valor_ini'] * format_info['multiplicador']
+                        y_sub = dado['valor_sub'] * format_info['multiplicador']
+                        delta_positivo = dado['delta'] > 0
 
-                    # Cor da bolinha do período subsequente
-                    cor_sub = '#2E7D32' if delta_positivo else '#C62828'  # verde ou vermelho
+                        # Cor da bolinha do período subsequente
+                        cor_sub = '#2E7D32' if delta_positivo else '#7B1E3A'  # verde ou vinho
 
-                    # Linha conectando os dois pontos
-                    fig_delta.add_trace(go.Scatter(
-                        x=[inst, inst],
-                        y=[y_ini, y_sub],
-                        mode='lines',
-                        line=dict(color='#9E9E9E', width=2),
+                        # Linha conectando os dois pontos
+                        fig_delta.add_trace(go.Scatter(
+                            x=[inst, inst],
+                            y=[y_ini, y_sub],
+                            mode='lines',
+                            line=dict(color='#9E9E9E', width=2),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+
+                        # Bolinha do período inicial (preta/cinza escuro)
+                        fig_delta.add_trace(go.Scatter(
+                            x=[inst],
+                            y=[y_ini],
+                            mode='markers',
+                            marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
+                            name=periodo_inicial_delta if i == 0 else None,
+                            showlegend=(i == 0),
+                            legendgroup='inicial',
+                            hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
+                        ))
+
+                        # Bolinha do período subsequente (verde/vinho)
+                        fig_delta.add_trace(go.Scatter(
+                            x=[inst],
+                            y=[y_sub],
+                            mode='markers',
+                            marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
+                            name=periodo_subsequente_delta if i == 0 else None,
+                            showlegend=(i == 0),
+                            legendgroup='subsequente',
+                            customdata=[[dado['delta_texto'], dado['variacao_texto']]],
+                            hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<extra></extra>'
+                        ))
+
+                    # Título do gráfico
+                    titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
+
+                    # Calcula limites do eixo Y baseado no modo de escala
+                    yaxis_config = dict(
+                        showgrid=True,
+                        gridcolor='#e0e0e0',
+                        tickformat=format_info['tickformat'],
+                        ticksuffix=format_info['ticksuffix'],
+                        title=variavel
+                    )
+
+                    if todos_y:
+                        y_min_dados = min(todos_y)
+                        y_max_dados = max(todos_y)
+                        y_range = y_max_dados - y_min_dados if y_max_dados != y_min_dados else abs(y_max_dados) * 0.1 or 1
+
+                        if modo_escala == "Zero baseline":
+                            # Sempre incluir zero
+                            yaxis_config['range'] = [min(0, y_min_dados - y_range * 0.05), max(0, y_max_dados + y_range * 0.05)]
+                        elif modo_escala == "Auto (zoom)":
+                            # Zoom nos dados com margem configurável
+                            margem = y_range * (margem_pct / 100)
+                            yaxis_config['range'] = [y_min_dados - margem, y_max_dados + margem]
+                        elif modo_escala == "Manual":
+                            # Usar valores manuais
+                            yaxis_config['range'] = [y_min_manual, y_max_manual]
+
+                    fig_delta.update_layout(
+                        title=dict(
+                            text=titulo_delta,
+                            font=dict(size=16, family='IBM Plex Sans')
+                        ),
+                        height=max(400, len(dados_grafico) * 25 + 150),
+                        plot_bgcolor='#f8f9fa',
+                        paper_bgcolor='white',
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="left",
+                            x=0
+                        ),
+                        xaxis=dict(
+                            showgrid=False,
+                            tickangle=45 if len(dados_grafico) > 10 else 0,
+                            tickfont=dict(size=10)
+                        ),
+                        yaxis=yaxis_config,
+                        font=dict(family='IBM Plex Sans'),
+                        margin=dict(l=60, r=20, t=80, b=100)
+                    )
+
+                    st.markdown(f"### {variavel}")
+                    st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
+                else:
+                    # ===== GRÁFICO DE BARRAS (DELTA) =====
+                    valores_finitos = []
+                    for dado in dados_grafico:
+                        if tipo_variacao == "Δ %":
+                            if np.isfinite(dado['variacao_pct']):
+                                valores_finitos.append(abs(dado['variacao_pct']))
+
+                    cap_visual = (max(valores_finitos) * 1.2) if valores_finitos else 1
+
+                    for dado in dados_grafico:
+                        if tipo_variacao == "Δ %":
+                            if np.isfinite(dado['variacao_pct']):
+                                dado['valor_plot'] = dado['variacao_pct']
+                            else:
+                                dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
+                        else:
+                            dado['valor_plot'] = dado['delta'] * format_info['multiplicador']
+
+                    n_bancos = len(dados_grafico)
+                    orientacao_horizontal = n_bancos > 15
+
+                    insts = [d['instituicao'] for d in dados_grafico]
+                    valores_plot = [d['valor_plot'] for d in dados_grafico]
+                    cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
+
+                    eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
+                    eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
+                    eixo_titulo = "Δ %" if tipo_variacao == "Δ %" else "Δ absoluto"
+
+                    fig_barras = go.Figure()
+                    fig_barras.add_trace(go.Bar(
+                        x=valores_plot if orientacao_horizontal else insts,
+                        y=insts if orientacao_horizontal else valores_plot,
+                        orientation='h' if orientacao_horizontal else 'v',
+                        marker=dict(color=cores_barras, opacity=0.9),
+                        customdata=np.stack([
+                            [d['delta_texto'] for d in dados_grafico],
+                            [d['variacao_texto'] for d in dados_grafico],
+                        ], axis=-1),
+                        hovertemplate=(
+                            "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
+                        ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<extra></extra>"
+                    ))
+
+                    fig_barras.update_layout(
+                        title=dict(
+                            text=f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}",
+                            font=dict(size=16, family='IBM Plex Sans')
+                        ),
+                        height=max(450, len(dados_grafico) * 25 + 160),
+                        plot_bgcolor='#f8f9fa',
+                        paper_bgcolor='white',
                         showlegend=False,
-                        hoverinfo='skip'
-                    ))
+                        xaxis=dict(
+                            showgrid=True if not orientacao_horizontal else True,
+                            zeroline=True,
+                            zerolinecolor='#444',
+                            tickformat=eixo_tickformat if orientacao_horizontal else None,
+                            ticksuffix=eixo_ticksuffix if orientacao_horizontal else None,
+                            title=eixo_titulo if orientacao_horizontal else None
+                        ),
+                        yaxis=dict(
+                            showgrid=False if orientacao_horizontal else True,
+                            zeroline=True,
+                            zerolinecolor='#444',
+                            tickformat=eixo_tickformat if not orientacao_horizontal else None,
+                            ticksuffix=eixo_ticksuffix if not orientacao_horizontal else None,
+                            title=eixo_titulo if not orientacao_horizontal else None
+                        ),
+                        font=dict(family='IBM Plex Sans'),
+                        margin=dict(l=60, r=20, t=80, b=100)
+                    )
 
-                    # Bolinha do período inicial (preta/cinza escuro)
-                    fig_delta.add_trace(go.Scatter(
-                        x=[inst],
-                        y=[y_ini],
-                        mode='markers',
-                        marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
-                        name=periodo_inicial_delta if i == 0 else None,
-                        showlegend=(i == 0),
-                        legendgroup='inicial',
-                        hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
-                    ))
-
-                    # Bolinha do período subsequente (verde/vermelho)
-                    fig_delta.add_trace(go.Scatter(
-                        x=[inst],
-                        y=[y_sub],
-                        mode='markers',
-                        marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
-                        name=periodo_subsequente_delta if i == 0 else None,
-                        showlegend=(i == 0),
-                        legendgroup='subsequente',
-                        customdata=[[dado['delta_texto'], dado['variacao_texto']]],
-                        hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<extra></extra>'
-                    ))
-
-                # Título do gráfico
-                titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
-
-                # Calcula limites do eixo Y baseado no modo de escala
-                yaxis_config = dict(
-                    showgrid=True,
-                    gridcolor='#e0e0e0',
-                    tickformat=format_info['tickformat'],
-                    ticksuffix=format_info['ticksuffix'],
-                    title=variavel
-                )
-
-                if todos_y:
-                    y_min_dados = min(todos_y)
-                    y_max_dados = max(todos_y)
-                    y_range = y_max_dados - y_min_dados if y_max_dados != y_min_dados else abs(y_max_dados) * 0.1 or 1
-
-                    if modo_escala == "Zero baseline":
-                        # Sempre incluir zero
-                        yaxis_config['range'] = [min(0, y_min_dados - y_range * 0.05), max(0, y_max_dados + y_range * 0.05)]
-                    elif modo_escala == "Auto (zoom)":
-                        # Zoom nos dados com margem configurável
-                        margem = y_range * (margem_pct / 100)
-                        yaxis_config['range'] = [y_min_dados - margem, y_max_dados + margem]
-                    elif modo_escala == "Manual":
-                        # Usar valores manuais
-                        yaxis_config['range'] = [y_min_manual, y_max_manual]
-
-                fig_delta.update_layout(
-                    title=dict(
-                        text=titulo_delta,
-                        font=dict(size=16, family='IBM Plex Sans')
-                    ),
-                    height=max(400, len(dados_grafico) * 25 + 150),
-                    plot_bgcolor='#f8f9fa',
-                    paper_bgcolor='white',
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="left",
-                        x=0
-                    ),
-                    xaxis=dict(
-                        showgrid=False,
-                        tickangle=45 if len(dados_grafico) > 10 else 0,
-                        tickfont=dict(size=10)
-                    ),
-                    yaxis=yaxis_config,
-                    font=dict(family='IBM Plex Sans'),
-                    margin=dict(l=60, r=20, t=80, b=100)
-                )
-
-                st.markdown(f"### {variavel}")
-                st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
+                    st.markdown(f"### {variavel}")
+                    st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
 
                 # Tabela resumo
                 with st.expander("ver dados"):
@@ -5816,7 +5898,7 @@ elif menu == "Crie sua métrica!":
         with col_modo:
             modo_selecao_brincar = st.radio(
                 "modo de seleção",
-                ["Top N", "Peer", "Personalizado"],
+                ["Top N", "Personalizado"],
                 index=0,
                 key="modo_selecao_brincar"
             )
@@ -5842,58 +5924,13 @@ elif menu == "Crie sua métrica!":
                 bancos_top_n = df_recente_valid.nlargest(top_n_brincar, var_ordenacao_brincar)['Instituição'].tolist()
                 bancos_selecionados_brincar = bancos_top_n
 
-            elif modo_selecao_brincar == "Peer":
-                peers_disponiveis = []
-                if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-                    peers_disponiveis = st.session_state['colunas_classificacao']
-
-                if peers_disponiveis:
-                    peer_selecionado_brincar = st.selectbox(
-                        "selecionar peer group",
-                        peers_disponiveis,
-                        key="peer_brincar"
-                    )
-                    # Obtém bancos do peer
-                    df_aliases = st.session_state['df_aliases']
-                    coluna_peer = df_aliases[peer_selecionado_brincar]
-                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
-                    bancos_do_peer = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
-                    bancos_selecionados_brincar = [b for b in bancos_do_peer if b in todos_bancos]
-                else:
-                    st.info("nenhum peer group disponível")
-
             else:  # Personalizado
-                col_peer_custom, col_add_remove = st.columns(2)
-
-                with col_peer_custom:
-                    peers_disponiveis = []
-                    if 'colunas_classificacao' in st.session_state and 'df_aliases' in st.session_state:
-                        peers_disponiveis = st.session_state['colunas_classificacao']
-
-                    opcoes_peer_custom = ['Nenhum'] + peers_disponiveis
-                    peer_base_brincar = st.selectbox(
-                        "peer base (opcional)",
-                        opcoes_peer_custom,
-                        index=0,
-                        key="peer_base_brincar"
-                    )
-
-                bancos_base = []
-                if peer_base_brincar != 'Nenhum' and 'df_aliases' in st.session_state:
-                    df_aliases = st.session_state['df_aliases']
-                    coluna_peer = df_aliases[peer_base_brincar]
-                    mask_peer = coluna_peer.fillna(0).astype(str).str.strip().isin(["1", "1.0"])
-                    bancos_base = df_aliases.loc[mask_peer, 'Alias Banco'].tolist()
-                    bancos_base = [b for b in bancos_base if b in todos_bancos]
-
-                with col_add_remove:
-                    bancos_custom_brincar = st.multiselect(
-                        "adicionar/remover bancos",
-                        todos_bancos,
-                        default=bancos_base,
-                        max_selections=40,
-                        key="bancos_custom_brincar"
-                    )
+                bancos_custom_brincar = st.multiselect(
+                    "adicionar/remover bancos",
+                    todos_bancos,
+                    max_selections=40,
+                    key="bancos_custom_brincar"
+                )
                 bancos_selecionados_brincar = bancos_custom_brincar
 
         # ===== TIPO DE VISUALIZAÇÃO =====
@@ -7116,6 +7153,17 @@ elif menu == "Glossário":
     - O Conglomerado Prudencial Original inclui Banco Original, PicPay Bank e a IP do PicPay (além de outros veículos do grupo). Dependendo do recorte, você verá o conglomerado (ou o líder) e não cada entidade isoladamente.
 
     Em caso de dúvidas, consulte o site do Banco Central.
+
+    ---
+
+    ## **Por que os dados do IFdata (balanço etc.) começam em Mar-2015?**
+
+    A partir de **Mar-2015**, usamos a visão **Conglomerado Prudencial**, criada pelo Banco Central naquela data.
+    Antes disso, os dados eram reportados na visão **Conglomerado Financeiro**.
+
+    Para instituições com apenas um CNPJ, a comparação entre as duas visões pode até ser possível.
+    Para conglomerados com muitas instituições, **não é comparável**.
+    O mais adequado é usar a soma do todo: **Conglomerado Prudencial**.
 
     ---
 
