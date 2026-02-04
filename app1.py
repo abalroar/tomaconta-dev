@@ -4073,7 +4073,10 @@ elif menu == "Rankings":
             else:
                 df_selecionado = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados)].copy()
 
-            df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+            if indicador_col in df_selecionado.columns:
+                df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+            else:
+                df_selecionado = pd.DataFrame()
 
             if grafico_escolhido == "Ranking":
                 if df_selecionado.empty:
