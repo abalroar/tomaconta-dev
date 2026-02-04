@@ -3916,6 +3916,13 @@ elif menu == "Rankings":
         todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         st.markdown("### ranking")
+        grafico_escolhido = st.radio(
+            "gráfico",
+            ["Ranking", "Deltas (antes e depois)"],
+            horizontal=True,
+            key="grafico_rankings",
+            index=0
+        )
 
         indicadores_config = {
             'Ativo Total': ['Ativo Total'],
@@ -4039,10 +4046,7 @@ elif menu == "Rankings":
             else:
                 df_selecionado = pd.DataFrame()
 
-            if indicador_col in df_selecionado.columns:
-                df_selecionado = df_selecionado.dropna(subset=[indicador_col])
-            else:
-                df_selecionado = pd.DataFrame()
+            df_selecionado = df_selecionado.dropna(subset=[indicador_col]) if indicador_col in df_selecionado.columns else pd.DataFrame()
 
             grafico_escolhido = st.radio(
                 "gráfico",
