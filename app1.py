@@ -3906,21 +3906,14 @@ elif menu == "Rankings":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
 
-        colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
-        periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
-
-        # Lista de todos os bancos disponíveis com ordenação por alias
-        bancos_todos = df['Instituição'].dropna().unique().tolist()
-        dict_aliases = st.session_state.get('dict_aliases', {})
-        todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
         st.markdown("### ranking")
         grafico_escolhido = st.radio(
             "gráfico",
             ["Ranking", "Deltas (antes e depois)"],
             horizontal=True,
-            key="grafico_rankings",
+            key="grafico_rankings_toggle",
             index=0
         )
 
@@ -3983,23 +3976,9 @@ elif menu == "Rankings":
                 )
                 coluna_peso_resumo = VARIAVEIS_PONDERACAO[tipo_media_label]
 
-            col_universo, col_bancos = st.columns([1.4, 2.6])
-
-            with col_universo:
-                usar_top_universo = st.checkbox(
-                    "selecionar automaticamente top N do universo",
-                    value=True,
-                    key="top_universo_toggle"
-                )
-                top_universo_n = st.selectbox(
-                    "top N (universo)",
-                    [10, 20, 30, 40],
-                    index=2,
-                    key="top_universo_n"
-                )
+            col_bancos = st.columns([1])[0]
 
             df_periodo = df[df['Período'] == periodo_resumo].copy()
-            df_periodo_universo = df_periodo.copy()
 
             bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
             dict_aliases = st.session_state.get('dict_aliases', {})
@@ -4007,21 +3986,22 @@ elif menu == "Rankings":
 
             indicador_col = indicadores_disponiveis[indicador_label]
 
-            with st.container():
+            with col_bancos:
                 bancos_selecionados = st.multiselect(
                     "selecionar instituições (até 40)",
                     bancos_todos,
+                    default=[],
                     key="bancos_resumo",
                     max_selections=40
                 )
 
-            col_ordem, col_sort = st.columns([1.2, 1.8])
+            col_ordem, col_sort = st.columns([1.4, 1.8])
             with col_ordem:
                 direcao_top = st.radio(
                     "ordem",
                     ["Maior → Menor", "Menor → Maior"],
                     horizontal=True,
-                    key="top_bottom_resumo"
+                    key="ordem_resumo"
                 )
             with col_sort:
                 modo_ordenacao = st.radio(
@@ -4046,7 +4026,10 @@ elif menu == "Rankings":
             else:
                 df_selecionado = pd.DataFrame()
 
-            df_selecionado = df_selecionado.dropna(subset=[indicador_col]) if indicador_col in df_selecionado.columns else pd.DataFrame()
+            if indicador_col in df_selecionado.columns:
+                df_selecionado = df_selecionado.dropna(subset=[indicador_col])
+            else:
+                df_selecionado = pd.DataFrame()
 
             grafico_escolhido = st.radio(
                 "gráfico",
@@ -4202,6 +4185,7 @@ elif menu == "Rankings":
                 st.markdown("---")
 
                 st.markdown("### deltas (antes e depois)")
+                st.markdown("### variáveis para análise de deltas")
                 st.caption("a variável do ranking é sempre incluída; adicione outras se quiser ampliar a análise.")
 
                 variaveis_disponiveis = [
@@ -4239,16 +4223,16 @@ elif menu == "Rankings":
                 for var in variaveis_disponiveis:
                     delta_colunas_map.setdefault(var, var)
 
-                # ===== LINHA 2: Seleção de períodos e tipo de variação =====
-                col_p2, col_tipo_var, col_viz = st.columns([2, 1, 1.6])
                 periodo_inicial_delta = periodo_resumo
                 idx_ini = periodos_disponiveis.index(periodo_inicial_delta)
                 periodos_subsequentes = [
-                    p for p in periodos_dropdown
-                    if periodos_disponiveis.index(p) > idx_ini
+                    periodo for i, periodo in enumerate(periodos_disponiveis) if i > idx_ini
                 ]
-                if periodos_subsequentes:
-                    with col_p2:
+
+                # ===== LINHA 2: Seleção de período subsequente e tipo de variação =====
+                col_p2, col_tipo_var, col_viz = st.columns([2, 1, 1.6])
+                with col_p2:
+                    if periodos_subsequentes:
                         periodo_subsequente_delta = st.selectbox(
                             "período subsequente",
                             periodos_subsequentes,
@@ -4256,8 +4240,11 @@ elif menu == "Rankings":
                             key="periodo_subsequente_delta",
                             format_func=periodo_para_exibicao
                         )
-                else:
-                    periodo_subsequente_delta = None
+                        periodo_valido = True
+                    else:
+                        periodo_subsequente_delta = None
+                        periodo_valido = False
+                        st.warning("não há período subsequente disponível para o período inicial selecionado.")
                 with col_tipo_var:
                     tipo_variacao = st.radio(
                         "ordenar por",
@@ -4274,14 +4261,6 @@ elif menu == "Rankings":
                         key="modo_visualizacao_deltas",
                         horizontal=True
                     )
-
-                if not periodos_subsequentes:
-                    st.warning("não há período subsequente disponível para o período selecionado.")
-                    periodo_valido = False
-                else:
-                    idx_sub = periodos_disponiveis.index(periodo_subsequente_delta)
-                    periodo_valido = idx_sub > idx_ini
-
                 bancos_selecionados_delta = bancos_selecionados
 
                 if periodo_valido and variaveis_selecionadas_delta and bancos_selecionados_delta:
@@ -4604,9 +4583,9 @@ elif menu == "Rankings":
                             st.download_button(
                                 label="exportar excel",
                                 data=buffer_excel,
-                                file_name=f"Deltas_{nome_variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
+                                file_name=f"Deltas_{variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"exportar_excel_delta_{nome_variavel}"
+                                key=f"exportar_excel_delta_{variavel}"
                             )
                 elif not periodo_valido:
                     pass  # Já exibiu warning acima
