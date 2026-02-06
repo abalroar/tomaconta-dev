@@ -1297,6 +1297,19 @@ def adicionar_indice_cet1(df_base: pd.DataFrame) -> pd.DataFrame:
     return df_base
 
 
+def normalizar_periodo_chave(periodo: str) -> str:
+    if periodo is None:
+        return ""
+    periodo_str = str(periodo)
+    if "/" in periodo_str:
+        return periodo_str
+    if periodo_str.isdigit() and len(periodo_str) == 6:
+        return f"{periodo_str[4:6]}/{periodo_str[:4]}"
+    if periodo_str.isdigit() and len(periodo_str) == 5:
+        return f"0{periodo_str[3:5]}/{periodo_str[:4]}"
+    return periodo_str
+
+
 def construir_cet1_capital(dados_capital: dict) -> pd.DataFrame:
     if not dados_capital:
         return pd.DataFrame()
@@ -1317,11 +1330,52 @@ def construir_cet1_capital(dados_capital: dict) -> pd.DataFrame:
             )
         else:
             continue
-        df_temp["Período"] = periodo
+        df_temp["Período"] = normalizar_periodo_chave(periodo)
         registros.append(df_temp[["Período", "Instituição", "Índice de CET1"]])
     if not registros:
         return pd.DataFrame()
     return pd.concat(registros, ignore_index=True)
+
+
+def obter_cet1_periodo(
+    periodo: str,
+    dados_capital: dict,
+    dict_aliases: dict,
+    df_aliases: Optional[pd.DataFrame] = None,
+    dados_periodos: Optional[dict] = None,
+) -> pd.DataFrame:
+    if not dados_capital:
+        return pd.DataFrame()
+    periodo_norm = normalizar_periodo_chave(periodo)
+    chave_periodo = None
+    for chave in dados_capital.keys():
+        if normalizar_periodo_chave(chave) == periodo_norm:
+            chave_periodo = chave
+            break
+    if chave_periodo is None:
+        return pd.DataFrame()
+
+    df_capital = dados_capital.get(chave_periodo)
+    if df_capital is None or df_capital.empty:
+        return pd.DataFrame()
+
+    df_capital = normalizar_colunas_capital(df_capital)
+    df_capital = resolver_nomes_instituicoes_capital(
+        df_capital, dict_aliases, df_aliases, dados_periodos
+    )
+
+    if "CET1 (%)" in df_capital.columns:
+        df_temp = df_capital[["Instituição", "CET1 (%)"]].copy()
+        df_temp["Índice de CET1"] = df_temp["CET1 (%)"] / 100
+    elif "Capital Principal" in df_capital.columns and "RWA Total" in df_capital.columns:
+        df_temp = df_capital[["Instituição", "Capital Principal", "RWA Total"]].copy()
+        df_temp["Índice de CET1"] = (
+            df_temp["Capital Principal"] / df_temp["RWA Total"].replace(0, np.nan)
+        )
+    else:
+        return pd.DataFrame()
+
+    return df_temp[["Instituição", "Índice de CET1"]]
 
 
 @st.cache_resource(show_spinner=False)
@@ -2552,6 +2606,14 @@ elif False and menu == "Painel":
             coluna_valida = next((col for col in colunas if col in df.columns), None)
             if coluna_valida:
                 indicadores_disponiveis[label] = coluna_valida
+        if 'Índice de CET1' not in indicadores_disponiveis:
+            df_cet1_check = construir_cet1_capital(st.session_state.get("dados_capital", {}))
+            if not df_cet1_check.empty:
+                indicadores_disponiveis['Índice de CET1'] = 'Índice de CET1'
+        if 'Índice de CET1' not in indicadores_disponiveis:
+            df_cet1_check = construir_cet1_capital(st.session_state.get("dados_capital", {}))
+            if not df_cet1_check.empty:
+                indicadores_disponiveis['Índice de CET1'] = 'Índice de CET1'
 
         if not indicadores_disponiveis:
             st.warning("nenhum dos indicadores requeridos foi encontrado nos dados atuais.")
@@ -2597,6 +2659,34 @@ elif False and menu == "Painel":
                 coluna_peso_resumo = VARIAVEIS_PONDERACAO[tipo_media_label]
 
             df_periodo = df[df['Período'] == periodo_resumo].copy()
+            if indicador_label == "Índice de CET1":
+                df_cet1_periodo = obter_cet1_periodo(
+                    periodo_resumo,
+                    st.session_state.get("dados_capital", {}),
+                    st.session_state.get("dict_aliases", {}),
+                    st.session_state.get("df_aliases"),
+                    st.session_state.get("dados_periodos"),
+                )
+                if not df_cet1_periodo.empty:
+                    df_periodo = df_periodo.merge(
+                        df_cet1_periodo,
+                        on="Instituição",
+                        how="left",
+                    )
+            if indicador_label == "Índice de CET1":
+                df_cet1_periodo = obter_cet1_periodo(
+                    periodo_resumo,
+                    st.session_state.get("dados_capital", {}),
+                    st.session_state.get("dict_aliases", {}),
+                    st.session_state.get("df_aliases"),
+                    st.session_state.get("dados_periodos"),
+                )
+                if not df_cet1_periodo.empty:
+                    df_periodo = df_periodo.merge(
+                        df_cet1_periodo,
+                        on="Instituição",
+                        how="left",
+                    )
             df_periodo_universo = df_periodo.copy()
 
             bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
@@ -4055,6 +4145,10 @@ elif menu == "Rankings":
             coluna_valida = next((col for col in colunas if col in df.columns), None)
             if coluna_valida:
                 indicadores_disponiveis[label] = coluna_valida
+        if 'Índice de CET1' not in indicadores_disponiveis:
+            df_cet1_check = construir_cet1_capital(st.session_state.get("dados_capital", {}))
+            if not df_cet1_check.empty:
+                indicadores_disponiveis['Índice de CET1'] = 'Índice de CET1'
 
         if not indicadores_disponiveis:
             st.warning("nenhum dos indicadores requeridos foi encontrado nos dados atuais.")
@@ -4100,6 +4194,20 @@ elif menu == "Rankings":
             col_bancos = st.columns([1])[0]
 
             df_periodo = df[df['Período'] == periodo_resumo].copy()
+            if indicador_label == "Índice de CET1":
+                df_cet1_periodo = obter_cet1_periodo(
+                    periodo_resumo,
+                    st.session_state.get("dados_capital", {}),
+                    st.session_state.get("dict_aliases", {}),
+                    st.session_state.get("df_aliases"),
+                    st.session_state.get("dados_periodos"),
+                )
+                if not df_cet1_periodo.empty:
+                    df_periodo = df_periodo.merge(
+                        df_cet1_periodo,
+                        on="Instituição",
+                        how="left",
+                    )
 
             bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
             dict_aliases = st.session_state.get('dict_aliases', {})
