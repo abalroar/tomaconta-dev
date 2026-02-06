@@ -3945,11 +3945,15 @@ elif menu == "Rankings":
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
         st.markdown("### ranking")
-        grafico_escolhido = st.segmented_control(
+        opcoes_grafico = ["Ranking (barras)", "Deltas (barras)", "Deltas (pontos)"]
+        if st.session_state.get("grafico_rankings_toggle_v2") not in opcoes_grafico:
+            st.session_state["grafico_rankings_toggle_v2"] = opcoes_grafico[0]
+        grafico_escolhido = st.radio(
             "gráfico",
-            ["Ranking (barras)", "Deltas (barras)", "Deltas (pontos)"],
+            opcoes_grafico,
             key="grafico_rankings_toggle_v2",
-            index=0
+            index=0,
+            horizontal=True
         )
         grafico_base = "Ranking" if grafico_escolhido.startswith("Ranking") else "Deltas (antes e depois)"
         modo_visualizacao_deltas = None
