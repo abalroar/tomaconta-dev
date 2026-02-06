@@ -1297,6 +1297,33 @@ def adicionar_indice_cet1(df_base: pd.DataFrame) -> pd.DataFrame:
     return df_base
 
 
+def construir_cet1_capital(dados_capital: dict) -> pd.DataFrame:
+    if not dados_capital:
+        return pd.DataFrame()
+    registros = []
+    for periodo, df_capital in dados_capital.items():
+        if df_capital is None or df_capital.empty:
+            continue
+        df_capital = normalizar_colunas_capital(df_capital)
+        if "Instituição" not in df_capital.columns:
+            continue
+        if "CET1 (%)" in df_capital.columns:
+            df_temp = df_capital[["Instituição", "CET1 (%)"]].copy()
+            df_temp["Índice de CET1"] = df_temp["CET1 (%)"] / 100
+        elif "Capital Principal" in df_capital.columns and "RWA Total" in df_capital.columns:
+            df_temp = df_capital[["Instituição", "Capital Principal", "RWA Total"]].copy()
+            df_temp["Índice de CET1"] = (
+                df_temp["Capital Principal"] / df_temp["RWA Total"].replace(0, np.nan)
+            )
+        else:
+            continue
+        df_temp["Período"] = periodo
+        registros.append(df_temp[["Período", "Instituição", "Índice de CET1"]])
+    if not registros:
+        return pd.DataFrame()
+    return pd.concat(registros, ignore_index=True)
+
+
 @st.cache_resource(show_spinner=False)
 def _carregar_logo_base64(logo_path: str, target_width: int = 200) -> str:
     """Carrega e processa o logo uma única vez, retornando base64.
@@ -3965,6 +3992,15 @@ elif menu == "Rankings":
 
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = adicionar_indice_cet1(df)
+        if "Índice de CET1" not in df.columns:
+            df_cet1 = construir_cet1_capital(st.session_state.get("dados_capital", {}))
+            if not df_cet1.empty:
+                df = df.merge(
+                    df_cet1,
+                    on=["Período", "Instituição"],
+                    how="left",
+                    suffixes=("", "_cet1")
+                )
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
