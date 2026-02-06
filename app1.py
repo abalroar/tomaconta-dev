@@ -1310,7 +1310,12 @@ def normalizar_periodo_chave(periodo: str) -> str:
     return periodo_str
 
 
-def construir_cet1_capital(dados_capital: dict) -> pd.DataFrame:
+def construir_cet1_capital(
+    dados_capital: dict,
+    dict_aliases: Optional[dict] = None,
+    df_aliases: Optional[pd.DataFrame] = None,
+    dados_periodos: Optional[dict] = None,
+) -> pd.DataFrame:
     if not dados_capital:
         return pd.DataFrame()
     registros = []
@@ -1318,6 +1323,10 @@ def construir_cet1_capital(dados_capital: dict) -> pd.DataFrame:
         if df_capital is None or df_capital.empty:
             continue
         df_capital = normalizar_colunas_capital(df_capital)
+        if dict_aliases:
+            df_capital = resolver_nomes_instituicoes_capital(
+                df_capital, dict_aliases, df_aliases, dados_periodos
+            )
         if "Instituição" not in df_capital.columns:
             continue
         if "CET1 (%)" in df_capital.columns:
@@ -2607,11 +2616,21 @@ elif False and menu == "Painel":
             if coluna_valida:
                 indicadores_disponiveis[label] = coluna_valida
         if 'Índice de CET1' not in indicadores_disponiveis:
-            df_cet1_check = construir_cet1_capital(st.session_state.get("dados_capital", {}))
+            df_cet1_check = construir_cet1_capital(
+                st.session_state.get("dados_capital", {}),
+                st.session_state.get("dict_aliases", {}),
+                st.session_state.get("df_aliases"),
+                st.session_state.get("dados_periodos"),
+            )
             if not df_cet1_check.empty:
                 indicadores_disponiveis['Índice de CET1'] = 'Índice de CET1'
         if 'Índice de CET1' not in indicadores_disponiveis:
-            df_cet1_check = construir_cet1_capital(st.session_state.get("dados_capital", {}))
+            df_cet1_check = construir_cet1_capital(
+                st.session_state.get("dados_capital", {}),
+                st.session_state.get("dict_aliases", {}),
+                st.session_state.get("df_aliases"),
+                st.session_state.get("dados_periodos"),
+            )
             if not df_cet1_check.empty:
                 indicadores_disponiveis['Índice de CET1'] = 'Índice de CET1'
 
@@ -4082,15 +4101,24 @@ elif menu == "Rankings":
 
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = adicionar_indice_cet1(df)
-        if "Índice de CET1" not in df.columns:
-            df_cet1 = construir_cet1_capital(st.session_state.get("dados_capital", {}))
-            if not df_cet1.empty:
-                df = df.merge(
-                    df_cet1,
-                    on=["Período", "Instituição"],
-                    how="left",
-                    suffixes=("", "_cet1")
-                )
+        df_cet1 = construir_cet1_capital(
+            st.session_state.get("dados_capital", {}),
+            st.session_state.get("dict_aliases", {}),
+            st.session_state.get("df_aliases"),
+            st.session_state.get("dados_periodos"),
+        )
+        if not df_cet1.empty:
+            df = df.merge(
+                df_cet1,
+                on=["Período", "Instituição"],
+                how="left",
+                suffixes=("", "_cet1"),
+            )
+            if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
+                df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
+            elif "Índice de CET1_cet1" in df.columns:
+                df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
+                df = df.drop(columns=["Índice de CET1_cet1"])
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
@@ -4146,7 +4174,12 @@ elif menu == "Rankings":
             if coluna_valida:
                 indicadores_disponiveis[label] = coluna_valida
         if 'Índice de CET1' not in indicadores_disponiveis:
-            df_cet1_check = construir_cet1_capital(st.session_state.get("dados_capital", {}))
+            df_cet1_check = construir_cet1_capital(
+                st.session_state.get("dados_capital", {}),
+                st.session_state.get("dict_aliases", {}),
+                st.session_state.get("df_aliases"),
+                st.session_state.get("dados_periodos"),
+            )
             if not df_cet1_check.empty:
                 indicadores_disponiveis['Índice de CET1'] = 'Índice de CET1'
 
