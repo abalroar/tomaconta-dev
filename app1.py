@@ -550,6 +550,25 @@ VARS_CAPITAL_MERGE = [
     'Adicional de Capital Principal',
 ]
 
+def normalizar_colunas_capital(df_capital: pd.DataFrame) -> pd.DataFrame:
+    mapa_colunas = {
+        'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
+        'RWA Total': [
+            'RWA Total',
+            'Ativos Ponderados pelo Risco (RWA) (j) = (f) + (g) + (h) + (i)',
+            'Ativos Ponderados pelo Risco (RWA) (j)',
+            'RWA',
+        ],
+    }
+    df_capital = df_capital.copy()
+    for nome_padrao, alternativas in mapa_colunas.items():
+        if nome_padrao in df_capital.columns:
+            continue
+        alternativa = next((col for col in alternativas if col in df_capital.columns), None)
+        if alternativa:
+            df_capital = df_capital.rename(columns={alternativa: nome_padrao})
+    return df_capital
+
 def mesclar_dados_capital(dados_periodos, dados_capital):
     """Mescla dados de capital (Relatório 5) com os dados principais.
 
@@ -583,6 +602,8 @@ def mesclar_dados_capital(dados_periodos, dados_capital):
             else:
                 dados_mesclados[periodo] = df_merged
                 continue
+
+        df_capital = normalizar_colunas_capital(df_capital)
 
         # Fazer merge por nome da instituição
         if 'Instituição' in df_capital.columns:
@@ -1262,6 +1283,10 @@ def get_axis_format(variavel):
 
 def adicionar_indice_cet1(df_base: pd.DataFrame) -> pd.DataFrame:
     if df_base.empty or "Índice de CET1" in df_base.columns:
+        return df_base
+    if "CET1 (%)" in df_base.columns:
+        df_base = df_base.copy()
+        df_base["Índice de CET1"] = df_base["CET1 (%)"] / 100
         return df_base
     if "Capital Principal" not in df_base.columns or "RWA Total" not in df_base.columns:
         return df_base
