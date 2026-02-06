@@ -288,6 +288,7 @@ SENHA_ADMIN = "m4th3u$987"
 VARS_PERCENTUAL = [
     'ROE Ac. YTD an. (%)',
     'Índice de Basileia',
+    'Índice de CET1',
     'Crédito/Captações (%)',
     'Crédito/Ativo (%)',
     'Índice de Imobilização',
@@ -1259,6 +1260,18 @@ def get_axis_format(variavel):
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
 
+def adicionar_indice_cet1(df_base: pd.DataFrame) -> pd.DataFrame:
+    if df_base.empty or "Índice de CET1" in df_base.columns:
+        return df_base
+    if "Capital Principal" not in df_base.columns or "RWA Total" not in df_base.columns:
+        return df_base
+    df_base = df_base.copy()
+    df_base["Índice de CET1"] = (
+        df_base["Capital Principal"] / df_base["RWA Total"].replace(0, np.nan)
+    )
+    return df_base
+
+
 @st.cache_resource(show_spinner=False)
 def _carregar_logo_base64(logo_path: str, target_width: int = 200) -> str:
     """Carrega e processa o logo uma única vez, retornando base64.
@@ -1846,7 +1859,17 @@ with col_header:
     """, unsafe_allow_html=True)
 
 # Lista de opções do menu principal (análise)
-MENU_PRINCIPAL = ["Painel", "Histórico Individual", "Histórico Peers", "Scatter Plot", "Rankings", "Capital Regulatório", "DRE", "Carteira 4.966", "Taxas de Juros por Produto", "Crie sua métrica!"]
+MENU_PRINCIPAL = [
+    "Rankings",
+    "Histórico Individual",
+    "Histórico Peers",
+    "Scatter Plot",
+    "Capital Regulatório",
+    "DRE",
+    "Carteira 4.966",
+    "Taxas de Juros por Produto",
+    "Crie sua métrica!",
+]
 
 # Lista de opções do menu secundário (utilitários)
 MENU_SECUNDARIO = ["Sobre", "Atualizar Base", "Glossário"]
@@ -1859,6 +1882,8 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
         st.session_state['menu_atual'] = "Taxas de Juros por Produto"
     elif st.session_state['menu_atual'] == "Atualização Base":
         st.session_state['menu_atual'] = "Atualizar Base"
+    elif st.session_state['menu_atual'] == "Painel":
+        st.session_state['menu_atual'] = "Rankings"
     else:
         st.session_state['menu_atual'] = "Sobre"
 
@@ -1866,7 +1891,6 @@ menu_atual = st.session_state['menu_atual']
 
 # Carregamento sob demanda para reduzir uso de RAM
 menus_precisam_principal = {
-    "Painel",
     "Histórico Individual",
     "Histórico Peers",
     "Scatter Plot",
@@ -2266,7 +2290,7 @@ if menu == "Sobre":
     with col1:
         st.markdown("""
         <div class="feature-card">
-            <h4>painel comparativo</h4>
+            <h4>ranking comparativo</h4>
             <p>rankings e gráficos de composição para comparar instituições em um período específico. inclui médias ponderadas do grupo e diferenças calculadas automaticamente.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -2412,7 +2436,7 @@ if menu == "Sobre":
     ### como utilizar
 
     1. **dados pré-carregados**: a plataforma já possui dados históricos prontos para análise imediata
-    2. **navegue pelos módulos**: use o menu superior para acessar painel, histórico, scatter plot, deltas ou capital regulatório
+    2. **navegue pelos módulos**: use o menu superior para acessar rankings, histórico, scatter plot, deltas ou capital regulatório
     3. **aplique filtros**: selecione instituições por top n ou lista customizada
     4. **personalize análises**: ajuste variáveis, períodos e ponderações conforme sua necessidade
     5. **exporte resultados**: baixe em excel, csv ou gere pdf scorecards para compartilhar
@@ -2439,7 +2463,7 @@ if menu == "Sobre":
     st.markdown("---")
     st.caption("desenvolvido em 2026 por matheus prates, cfa | ferramenta open-source para análise do sistema financeiro brasileiro")
 
-elif menu == "Painel":
+elif False and menu == "Painel":
     st.markdown("## resumo comparativo por período")
     st.caption("compare múltiplas instituições em um único trimestre, com ranking e média do grupo selecionado.")
 
@@ -2454,6 +2478,7 @@ elif menu == "Painel":
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
             'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
+            'Índice de CET1': ['Índice de CET1'],
             'Patrimônio de Referência': [
                 'Patrimônio de Referência para Comparação com o RWA (e)',
                 'Patrimônio de Referência',
@@ -3904,19 +3929,37 @@ elif menu == "Scatter Plot":
 
 elif menu == "Rankings":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        if not st.session_state.get('_dados_capital_mesclados'):
+            carregar_dados_capital()
+            if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
+                st.session_state['dados_periodos'] = mesclar_dados_capital(
+                    st.session_state['dados_periodos'],
+                    st.session_state['dados_capital']
+                )
+                st.session_state['_dados_capital_mesclados'] = True
+
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
+        df = adicionar_indice_cet1(df)
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
         st.markdown("### ranking")
-        grafico_escolhido = st.radio(
+        if "grafico_rankings_toggle_v2" not in st.session_state:
+            st.session_state["grafico_rankings_toggle_v2"] = "Ranking (barras)"
+        grafico_escolhido = st.segmented_control(
             "gráfico",
-            ["Ranking", "Deltas (antes e depois)"],
-            horizontal=True,
-            key="grafico_rankings_toggle",
-            index=0
+            ["Ranking (barras)", "Deltas (barras)", "Deltas (pontos)"],
+            key="grafico_rankings_toggle_v2"
         )
+        grafico_base = "Ranking" if grafico_escolhido.startswith("Ranking") else "Deltas (antes e depois)"
+        modo_visualizacao_deltas = None
+        if grafico_base == "Deltas (antes e depois)":
+            modo_visualizacao_deltas = (
+                "Barras (delta)"
+                if grafico_escolhido == "Deltas (barras)"
+                else "Pontos (antes/depois)"
+            )
 
         indicadores_config = {
             'Ativo Total': ['Ativo Total'],
@@ -3926,6 +3969,7 @@ elif menu == "Rankings":
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
             'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
+            'Índice de CET1': ['Índice de CET1'],
             'Patrimônio de Referência': [
                 'Patrimônio de Referência para Comparação com o RWA (e)',
                 'Patrimônio de Referência',
@@ -3952,6 +3996,18 @@ elif menu == "Rankings":
             st.warning("nenhum dos indicadores requeridos foi encontrado nos dados atuais.")
         else:
             periodos = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
+            ordem_prioritaria = [
+                'Ativo Total',
+                'Carteira de Crédito',
+                'Captações',
+                'Patrimônio Líquido',
+                'Lucro Líquido Acumulado YTD',
+                'Índice de CET1',
+                'Índice de Basileia',
+            ]
+            indicadores_ordenados = [i for i in ordem_prioritaria if i in indicadores_disponiveis]
+            indicadores_restantes = [i for i in indicadores_disponiveis.keys() if i not in indicadores_ordenados]
+            indicadores_ordenados.extend(indicadores_restantes)
 
             col_periodo, col_indicador, col_media = st.columns([1.2, 2, 1.8])
             with col_periodo:
@@ -3965,7 +4021,7 @@ elif menu == "Rankings":
             with col_indicador:
                 indicador_label = st.selectbox(
                     "indicador",
-                    list(indicadores_disponiveis.keys()),
+                    indicadores_ordenados,
                     key="indicador_resumo"
                 )
             with col_media:
@@ -4032,7 +4088,7 @@ elif menu == "Rankings":
             else:
                 df_selecionado = pd.DataFrame()
 
-            if grafico_escolhido == "Ranking":
+            if grafico_base == "Ranking":
                 if df_selecionado.empty:
                     st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
                 else:
@@ -4175,7 +4231,7 @@ elif menu == "Rankings":
                             key="exportar_resumo_excel"
                         )
 
-            if grafico_escolhido == "Deltas (antes e depois)":
+            if grafico_base == "Deltas (antes e depois)":
                 st.markdown("---")
 
                 st.markdown("### deltas (antes e depois)")
@@ -4190,7 +4246,7 @@ elif menu == "Rankings":
                     periodos_subsequentes = periodos_dropdown
 
                 # ===== LINHA 2: Seleção de período subsequente e tipo de variação =====
-                col_p2, col_tipo_var, col_viz = st.columns([2, 1, 1.6])
+                col_p2, col_tipo_var = st.columns([2, 1])
                 with col_p2:
                     periodo_subsequente_delta = st.selectbox(
                         "período subsequente",
@@ -4208,14 +4264,6 @@ elif menu == "Rankings":
                         ["Δ absoluto", "Δ %"],
                         index=1,
                         key="tipo_variacao_delta",
-                        horizontal=True
-                    )
-                with col_viz:
-                    modo_visualizacao_deltas = st.radio(
-                        "visualização",
-                        ["Pontos (antes/depois)", "Barras (delta)"],
-                        index=0,
-                        key="modo_visualizacao_deltas",
                         horizontal=True
                     )
                 bancos_selecionados_delta = bancos_selecionados
