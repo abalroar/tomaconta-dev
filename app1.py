@@ -1683,15 +1683,16 @@ def _preparar_metricas_extra_peers(
     )
 
     # Depósitos Totais: Depósitos (a) do relatório de Passivo (Rel. 3)
+    # Nota: BCB mudou nome de "Depósito Total (a)" (até 2024) para "Depósitos (a)" (2025+)
     col_depositos_passivo = _resolver_coluna_peers(
         cache_passivo,
         [
             "Depósitos (a)",
+            "Depósito Total (a)",
             "Depositos (a)",
+            "Deposito Total (a)",
             "Depósitos",
             "Depositos",
-            "Depósitos (a) =",
-            "Depósitos (a) +",
         ],
     )
 
