@@ -4146,26 +4146,12 @@ elif menu == "Rankings":
         indicadores_config = {
             'Ativo Total': ['Ativo Total'],
             'Carteira de Crédito': ['Carteira de Crédito'],
-            'Títulos e Valores Mobiliários': ['Títulos e Valores Mobiliários'],
-            'Passivo Exigível': ['Passivo Exigível'],
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
-            'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
-            'Índice de CET1': ['Índice de CET1'],
-            'Patrimônio de Referência': [
-                'Patrimônio de Referência para Comparação com o RWA (e)',
-                'Patrimônio de Referência',
-            ],
-            'Índice de Basileia': ['Índice de Basileia'],
-            'Índice de Imobilização': ['Índice de Imobilização'],
-            'Número de Agências': ['Número de Agências'],
-            'Número de Postos de Atendimento': ['Número de Postos de Atendimento'],
-            # Variáveis de Capital (Relatório 5)
-            'RWA Total': ['RWA Total'],
-            'Capital Principal': ['Capital Principal'],
             'Índice de Capital Principal': ['Índice de Capital Principal'],
-            'Índice de Capital Nível I': ['Índice de Capital Nível I'],
-            'Razão de Alavancagem': ['Razão de Alavancagem'],
+            'Índice de Basileia': ['Índice de Basileia'],
+            'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
+            'ROE Ac. Anualizado (%)': ['ROE Ac. YTD an. (%)'],
         }
 
         indicadores_disponiveis = {}
@@ -4173,15 +4159,6 @@ elif menu == "Rankings":
             coluna_valida = next((col for col in colunas if col in df.columns), None)
             if coluna_valida:
                 indicadores_disponiveis[label] = coluna_valida
-        if 'Índice de CET1' not in indicadores_disponiveis:
-            df_cet1_check = construir_cet1_capital(
-                st.session_state.get("dados_capital", {}),
-                st.session_state.get("dict_aliases", {}),
-                st.session_state.get("df_aliases"),
-                st.session_state.get("dados_periodos"),
-            )
-            if not df_cet1_check.empty:
-                indicadores_disponiveis['Índice de CET1'] = 'Índice de CET1'
 
         if not indicadores_disponiveis:
             st.warning("nenhum dos indicadores requeridos foi encontrado nos dados atuais.")
@@ -4192,9 +4169,10 @@ elif menu == "Rankings":
                 'Carteira de Crédito',
                 'Captações',
                 'Patrimônio Líquido',
-                'Lucro Líquido Acumulado YTD',
-                'Índice de CET1',
+                'Índice de Capital Principal',
                 'Índice de Basileia',
+                'Lucro Líquido Acumulado YTD',
+                'ROE Ac. Anualizado (%)',
             ]
             indicadores_ordenados = [i for i in ordem_prioritaria if i in indicadores_disponiveis]
             indicadores_restantes = [i for i in indicadores_disponiveis.keys() if i not in indicadores_ordenados]
@@ -4227,20 +4205,6 @@ elif menu == "Rankings":
             col_bancos = st.columns([1])[0]
 
             df_periodo = df[df['Período'] == periodo_resumo].copy()
-            if indicador_label == "Índice de CET1":
-                df_cet1_periodo = obter_cet1_periodo(
-                    periodo_resumo,
-                    st.session_state.get("dados_capital", {}),
-                    st.session_state.get("dict_aliases", {}),
-                    st.session_state.get("df_aliases"),
-                    st.session_state.get("dados_periodos"),
-                )
-                if not df_cet1_periodo.empty:
-                    df_periodo = df_periodo.merge(
-                        df_cet1_periodo,
-                        on="Instituição",
-                        how="left",
-                    )
 
             bancos_todos = df_periodo['Instituição'].dropna().unique().tolist()
             dict_aliases = st.session_state.get('dict_aliases', {})
