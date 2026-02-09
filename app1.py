@@ -1428,6 +1428,19 @@ def get_axis_format(variavel, serie: Optional[pd.Series] = None):
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
 
+def _normalizar_percentual_display(serie: pd.Series) -> pd.Series:
+    serie_num = pd.to_numeric(serie, errors="coerce")
+    if serie_num.empty:
+        return serie_num
+    return serie_num.where(serie_num.abs() > 1, serie_num * 100)
+
+
+def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
+    if _is_variavel_percentual(variavel):
+        return _normalizar_percentual_display(serie)
+    return serie * format_info['multiplicador']
+
+
 def _normalizar_label_peers(texto: str) -> str:
     if texto is None:
         return ""
@@ -4574,14 +4587,14 @@ elif menu == "Scatter Plot":
         format_y = get_axis_format(var_y, df_scatter[var_y] if var_y in df_scatter.columns else None)
 
         df_scatter_plot = df_scatter.copy()
-        df_scatter_plot['x_display'] = df_scatter_plot[var_x] * format_x['multiplicador']
-        df_scatter_plot['y_display'] = df_scatter_plot[var_y] * format_y['multiplicador']
+        df_scatter_plot['x_display'] = _calcular_valores_display(df_scatter_plot[var_x], var_x, format_x)
+        df_scatter_plot['y_display'] = _calcular_valores_display(df_scatter_plot[var_y], var_y, format_y)
 
         if var_size == 'Tamanho Fixo':
             tamanho_constante = 25
         else:
             format_size = get_axis_format(var_size, df_scatter[var_size] if var_size in df_scatter.columns else None)
-            df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
+            df_scatter_plot['size_display'] = _calcular_valores_display(df_scatter_plot[var_size], var_size, format_size)
 
         fig_scatter = go.Figure()
         cores_plotly = px.colors.qualitative.Plotly
@@ -4739,16 +4752,16 @@ elif menu == "Scatter Plot":
                 format_y_n2 = get_axis_format(var_y_n2, df_p1[var_y_n2] if var_y_n2 in df_p1.columns else None)
 
                 # Prepara dados com valores de exibição
-                df_p1['x_display'] = df_p1[var_x_n2] * format_x_n2['multiplicador']
-                df_p1['y_display'] = df_p1[var_y_n2] * format_y_n2['multiplicador']
-                df_p2['x_display'] = df_p2[var_x_n2] * format_x_n2['multiplicador']
-                df_p2['y_display'] = df_p2[var_y_n2] * format_y_n2['multiplicador']
+                df_p1['x_display'] = _calcular_valores_display(df_p1[var_x_n2], var_x_n2, format_x_n2)
+                df_p1['y_display'] = _calcular_valores_display(df_p1[var_y_n2], var_y_n2, format_y_n2)
+                df_p2['x_display'] = _calcular_valores_display(df_p2[var_x_n2], var_x_n2, format_x_n2)
+                df_p2['y_display'] = _calcular_valores_display(df_p2[var_y_n2], var_y_n2, format_y_n2)
 
                 # Tamanho dos pontos
                 if var_size_n2 != 'Tamanho Fixo':
                     format_size_n2 = get_axis_format(var_size_n2, df_p1[var_size_n2] if var_size_n2 in df_p1.columns else None)
-                    df_p1['size_display'] = df_p1[var_size_n2] * format_size_n2['multiplicador']
-                    df_p2['size_display'] = df_p2[var_size_n2] * format_size_n2['multiplicador']
+                    df_p1['size_display'] = _calcular_valores_display(df_p1[var_size_n2], var_size_n2, format_size_n2)
+                    df_p2['size_display'] = _calcular_valores_display(df_p2[var_size_n2], var_size_n2, format_size_n2)
                     max_size = max(df_p1['size_display'].max(), df_p2['size_display'].max())
 
                 fig_scatter_n2 = go.Figure()
