@@ -422,7 +422,7 @@ PEERS_TABELA_LAYOUT = [
             },
             {
                 "label": "Índice de Basileia Total",
-                "data_keys": ["Índice de Basileia", "Índice de Basileia Total (%)"],
+                "data_keys": ["Índice de Basileia Total (%)", "Índice de Basileia"],
                 "format_key": "Índice de Basileia",
             },
         ],
