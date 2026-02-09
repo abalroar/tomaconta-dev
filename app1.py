@@ -294,6 +294,8 @@ VARS_PERCENTUAL = [
     'Crédito/Ativo (%)',
     'Ativo/PL',
     'Índice de Imobilização',
+    'Perda Esperada / Carteira',
+    'Carteira de Créd. Class. C4+C5 / Carteira Bruta',
     # Variáveis de Capital (Relatório 5)
     'Índice de Capital Principal',
     'Índice de Capital Nível I',
@@ -304,6 +306,11 @@ VARS_PERCENTUAL = [
 VARS_RAZAO = ['Crédito/PL (%)']
 VARS_MOEDAS = [
     'Carteira de Crédito',
+    'Carteira de Crédito Bruta',
+    'Ativos Líquidos',
+    'Depósitos Totais',
+    'Perda Esperada',
+    'Carteira de Créd. Class. C4+C5',
     'Lucro Líquido Acumulado YTD',
     'Patrimônio Líquido',
     'Captações',
@@ -338,19 +345,16 @@ PEERS_TABELA_LAYOUT = [
                 "label": "Ativos Líquidos",
                 "data_keys": [],
                 "format_key": "Ativos Líquidos",
-                "todo": "TODO: Integrar Ativos Líquidos a partir das fontes do projeto.",
             },
             {
                 "label": "Carteira de Crédito Bruta",
                 "data_keys": [],
-                "format_key": "Carteira de Crédito",
-                "todo": "TODO: Integrar Carteira de Crédito Bruta a partir das fontes do projeto.",
+                "format_key": "Carteira de Crédito Bruta",
             },
             {
                 "label": "Depósitos Totais",
                 "data_keys": [],
                 "format_key": "Depósitos Totais",
-                "todo": "TODO: Integrar Depósitos Totais a partir das fontes do projeto.",
             },
             {
                 "label": "Patrimônio Líquido (PL)",
@@ -363,28 +367,24 @@ PEERS_TABELA_LAYOUT = [
         "section": "Qualidade Carteira",
         "rows": [
             {
-                "label": "Provisão do Banco",
+                "label": "Perda Esperada",
                 "data_keys": [],
-                "format_key": "Provisão do Banco",
-                "todo": "TODO: Integrar Provisão do Banco a partir das fontes do projeto.",
+                "format_key": "Perda Esperada",
             },
             {
-                "label": "Provisão / Carteira",
+                "label": "Perda Esperada / Carteira",
                 "data_keys": [],
-                "format_key": "Provisão / Carteira",
-                "todo": "TODO: Integrar Provisão/Carteira a partir das fontes do projeto.",
+                "format_key": "Perda Esperada / Carteira",
             },
             {
-                "label": "Estágio 3",
+                "label": "Carteira de Créd. Class. C4+C5",
                 "data_keys": [],
-                "format_key": "Estágio 3",
-                "todo": "TODO: Integrar Estágio 3 a partir das fontes do projeto.",
+                "format_key": "Carteira de Créd. Class. C4+C5",
             },
             {
-                "label": "Estágio 3 / Carteira Bruta",
+                "label": "Carteira de Créd. Class. C4+C5 / Carteira Bruta",
                 "data_keys": [],
-                "format_key": "Estágio 3 / Carteira Bruta",
-                "todo": "TODO: Integrar Estágio 3/Carteira Bruta a partir das fontes do projeto.",
+                "format_key": "Carteira de Créd. Class. C4+C5 / Carteira Bruta",
             },
             {
                 "label": "Provisão / Estágio 3",
@@ -598,15 +598,15 @@ def recalcular_metricas_derivadas(dados_periodos):
 
         # Extrair mês do período para cálculo do fator de anualização
         try:
-            if 'Período' in df_atualizado.columns:
-                periodo_str = df_atualizado['Período'].iloc[0] if len(df_atualizado) > 0 else None
-                if periodo_str and '/' in str(periodo_str):
-                    mes = int(str(periodo_str).split('/')[0])
-                else:
-                    mes = int(periodo[4:6]) if len(periodo) >= 6 else 12
+            periodo_str = None
+            if 'Período' in df_atualizado.columns and len(df_atualizado) > 0:
+                periodo_str = df_atualizado['Período'].iloc[0]
+            if periodo_str and '/' in str(periodo_str):
+                parte = int(str(periodo_str).split('/')[0])
+                mes = {1: 3, 2: 6, 3: 9, 4: 12}.get(parte, parte)
             else:
                 mes = int(periodo[4:6]) if len(periodo) >= 6 else 12
-        except (ValueError, IndexError):
+        except (ValueError, IndexError, TypeError):
             mes = 12
 
         # ROE Anualizado - SEMPRE recalcular
@@ -1533,12 +1533,165 @@ def _periodo_mesma_estrutura(periodo: str, novo_parte: int) -> Optional[str]:
 
 
 def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optional[str]):
-    if coluna is None:
+    if coluna is None or df is None or df.empty:
         return None
     df_cell = df[(df["Instituição"] == banco) & (df["Período"] == periodo)]
     if df_cell.empty:
         return None
     return df_cell.iloc[0].get(coluna)
+
+
+def _coerce_numeric_value(valor):
+    if valor is None or pd.isna(valor):
+        return None
+    if isinstance(valor, str):
+        cleaned = valor.replace(".", "").replace(",", ".")
+        valor = cleaned
+    return pd.to_numeric(valor, errors="coerce")
+
+
+def _somar_valores(valores: list) -> Optional[float]:
+    numeros = []
+    for valor in valores:
+        val_num = _coerce_numeric_value(valor)
+        if val_num is not None and not pd.isna(val_num):
+            numeros.append(float(val_num))
+    if not numeros:
+        return None
+    return float(sum(numeros))
+
+
+def _aplicar_aliases_df(df: Optional[pd.DataFrame], dict_aliases: dict) -> Optional[pd.DataFrame]:
+    if df is None or df.empty or not dict_aliases:
+        return df
+    df_out = df.copy()
+    if "Instituição" in df_out.columns:
+        df_out["Instituição"] = df_out["Instituição"].apply(
+            lambda nome: dict_aliases.get(nome, dict_aliases.get(normalizar_nome_instituicao(nome), nome))
+            if pd.notna(nome) else nome
+        )
+    return df_out
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
+    manager = get_cache_manager()
+    if manager is None:
+        return None
+    resultado = manager.carregar(tipo_cache)
+    if resultado.sucesso and resultado.dados is not None:
+        return resultado.dados
+    return None
+
+
+def _preparar_metricas_extra_peers(
+    bancos: list,
+    periodos: list,
+    cache_ativo: Optional[pd.DataFrame],
+    cache_passivo: Optional[pd.DataFrame],
+    cache_carteira_pf: Optional[pd.DataFrame],
+    cache_carteira_pj: Optional[pd.DataFrame],
+    cache_carteira_instr: Optional[pd.DataFrame],
+) -> dict:
+    extra = {
+        "Carteira de Crédito Bruta": {},
+        "Ativos Líquidos": {},
+        "Depósitos Totais": {},
+        "Perda Esperada": {},
+        "Perda Esperada / Carteira": {},
+        "Carteira de Créd. Class. C4+C5": {},
+        "Carteira de Créd. Class. C4+C5 / Carteira Bruta": {},
+    }
+    periodos_base = {_periodo_ano_anterior(periodo) for periodo in periodos}
+    periodos_ext = [p for p in periodos + sorted(periodos_base) if p]
+
+    col_pf_total = _resolver_coluna_peers(
+        cache_carteira_pf,
+        [
+            "Total da Carteira de Pessoa Física",
+            "Total da Carteira Pessoa Física",
+            "Total da Carteira PF",
+            "Total da Carteira de Pessoa Fisica",
+        ],
+    )
+    col_pj_total = _resolver_coluna_peers(
+        cache_carteira_pj,
+        [
+            "Total da Carteira de Pessoa Jurídica",
+            "Total da Carteira Pessoa Jurídica",
+            "Total da Carteira PJ",
+            "Total da Carteira de Pessoa Juridica",
+        ],
+    )
+
+    col_ativos_liquidos = _resolver_coluna_peers(cache_ativo, ["Depósitos (a)", "Depositos (a)", "Depósitos"])
+
+    col_disp = _resolver_coluna_peers(cache_passivo, ["Disponibilidades (a)", "Disponibilidades"])
+    col_aplic = _resolver_coluna_peers(
+        cache_passivo,
+        ["Aplicações Interfinanceiras de Liquidez (b)", "Aplicacoes Interfinanceiras de Liquidez (b)"],
+    )
+    col_tvm = _resolver_coluna_peers(
+        cache_passivo,
+        ["Títulos e Valores Mobiliários (c)", "Titulos e Valores Mobiliarios (c)"],
+    )
+
+    perda_colunas_base = [
+        "Perda Esperada (e2)",
+        "Hedge de Valor Justo (e3)",
+        "Ajuste a Valor Justo (e4)",
+        "Perda Esperada (f2)",
+        "Hedge de Valor Justo (f3)",
+        "Perda Esperada (g2)",
+        "Hedge de Valor Justo (g3)",
+        "Ajuste a Valor Justo (g4)",
+        "Perda Esperada (h2)",
+    ]
+    perda_colunas = []
+    for coluna in perda_colunas_base:
+        col_resolvida = _resolver_coluna_peers(cache_ativo, [coluna])
+        if col_resolvida and col_resolvida not in perda_colunas:
+            perda_colunas.append(col_resolvida)
+
+    col_c4 = _resolver_coluna_peers(cache_carteira_instr, ["C4"])
+    col_c5 = _resolver_coluna_peers(cache_carteira_instr, ["C5"])
+
+    for banco in bancos:
+        for periodo in periodos_ext:
+            chave = (banco, periodo)
+            valor_pf = _obter_valor_peers(cache_carteira_pf, banco, periodo, col_pf_total)
+            valor_pj = _obter_valor_peers(cache_carteira_pj, banco, periodo, col_pj_total)
+            carteira_bruta = _somar_valores([valor_pf, valor_pj])
+            extra["Carteira de Crédito Bruta"][chave] = carteira_bruta
+
+            ativos_liquidos = _obter_valor_peers(cache_ativo, banco, periodo, col_ativos_liquidos)
+            extra["Ativos Líquidos"][chave] = _coerce_numeric_value(ativos_liquidos)
+
+            depositos_totais = _somar_valores([
+                _obter_valor_peers(cache_passivo, banco, periodo, col_disp),
+                _obter_valor_peers(cache_passivo, banco, periodo, col_aplic),
+                _obter_valor_peers(cache_passivo, banco, periodo, col_tvm),
+            ])
+            extra["Depósitos Totais"][chave] = depositos_totais
+
+            perda_vals = [
+                _obter_valor_peers(cache_ativo, banco, periodo, col)
+                for col in perda_colunas
+            ]
+            perda_esperada = _somar_valores(perda_vals)
+            extra["Perda Esperada"][chave] = perda_esperada
+            extra["Perda Esperada / Carteira"][chave] = _calcular_ratio_peers(perda_esperada, carteira_bruta)
+
+            valor_c4 = _obter_valor_peers(cache_carteira_instr, banco, periodo, col_c4)
+            valor_c5 = _obter_valor_peers(cache_carteira_instr, banco, periodo, col_c5)
+            carteira_c4_c5 = _somar_valores([valor_c4, valor_c5])
+            extra["Carteira de Créd. Class. C4+C5"][chave] = carteira_c4_c5
+            extra["Carteira de Créd. Class. C4+C5 / Carteira Bruta"][chave] = _calcular_ratio_peers(
+                carteira_c4_c5,
+                carteira_bruta,
+            )
+
+    return extra
 
 
 def _calcular_ratio_peers(valor_num, valor_den) -> Optional[float]:
@@ -1587,6 +1740,7 @@ def _montar_tabela_peers(
     df: pd.DataFrame,
     bancos: list,
     periodos: list,
+    caches_extras: Optional[dict] = None,
 ):
     """Monta estrutura da tabela peers com valores por banco/período."""
     valores = {}
@@ -1595,6 +1749,15 @@ def _montar_tabela_peers(
     delta_flags = {}
     coluna_ativo = _resolver_coluna_peers(df, ["Ativo Total"])
     coluna_pl = _resolver_coluna_peers(df, ["Patrimônio Líquido"])
+    extra_values = _preparar_metricas_extra_peers(
+        bancos,
+        periodos,
+        (caches_extras or {}).get("ativo"),
+        (caches_extras or {}).get("passivo"),
+        (caches_extras or {}).get("carteira_pf"),
+        (caches_extras or {}).get("carteira_pj"),
+        (caches_extras or {}).get("carteira_instrumentos"),
+    )
 
     for section in PEERS_TABELA_LAYOUT:
         for row in section["rows"]:
@@ -1611,7 +1774,9 @@ def _montar_tabela_peers(
                 for periodo in periodos:
                     chave = (label, banco, periodo)
                     valor = None
-                    if label == "Ativo / PL":
+                    if label in extra_values:
+                        valor = extra_values[label].get((banco, periodo))
+                    elif label == "Ativo / PL":
                         valor_ativo = _obter_valor_peers(df, banco, periodo, coluna_ativo)
                         valor_pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
                         valor = _calcular_ratio_peers(valor_pl, valor_ativo)
@@ -1624,7 +1789,9 @@ def _montar_tabela_peers(
 
                     delta_flag = None
                     periodo_base = _periodo_ano_anterior(periodo)
-                    if periodo_base and coluna:
+                    if periodo_base and label in extra_values:
+                        valor_base = extra_values[label].get((banco, periodo_base))
+                    elif periodo_base and coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor_base = _ajustar_lucro_acumulado_peers(df, banco, periodo_base, coluna)
                         else:
@@ -4440,10 +4607,29 @@ elif menu == "Peers (Tabela)":
 
                 if bancos_selecionados and periodos_selecionados:
                     periodos_selecionados = ordenar_periodos(periodos_selecionados)
+                    cache_ativo = _carregar_cache_relatorio("ativo")
+                    cache_passivo = _carregar_cache_relatorio("passivo")
+                    cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
+                    cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
+                    cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
+
+                    cache_ativo = _aplicar_aliases_df(cache_ativo, dict_aliases)
+                    cache_passivo = _aplicar_aliases_df(cache_passivo, dict_aliases)
+                    cache_carteira_pf = _aplicar_aliases_df(cache_carteira_pf, dict_aliases)
+                    cache_carteira_pj = _aplicar_aliases_df(cache_carteira_pj, dict_aliases)
+                    cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
+
                     valores, colunas_usadas, faltas, delta_flags = _montar_tabela_peers(
                         df,
                         bancos_selecionados,
                         periodos_selecionados,
+                        caches_extras={
+                            "ativo": cache_ativo,
+                            "passivo": cache_passivo,
+                            "carteira_pf": cache_carteira_pf,
+                            "carteira_pj": cache_carteira_pj,
+                            "carteira_instrumentos": cache_carteira_instr,
+                        },
                     )
 
                     if faltas:
@@ -4462,58 +4648,37 @@ elif menu == "Peers (Tabela)":
                     st.markdown(html_tabela, unsafe_allow_html=True)
 
                     with st.expander("📥 exportar visualização"):
-                        st.caption(
-                            "Exporta a tabela no layout atual. "
-                            "A versão PowerPoint usa maior resolução para slides."
+                        st.caption("Exporta a tabela no layout atual.")
+                        excel_buffer = _gerar_excel_peers_tabela(
+                            bancos_selecionados,
+                            periodos_selecionados,
+                            valores,
+                            colunas_usadas,
+                            delta_flags,
                         )
-                        col_png, col_ppt, col_excel = st.columns(3)
-                        with col_png:
-                            img_buffer = _gerar_imagem_peers_tabela(
-                                bancos_selecionados,
-                                periodos_selecionados,
-                                valores,
-                                colunas_usadas,
-                                delta_flags,
-                                scale=1.0,
-                            )
-                            st.download_button(
-                                label="baixar PNG",
-                                data=img_buffer,
-                                file_name="peers_tabela.png",
-                                mime="image/png",
-                                key="peers_tabela_png",
-                            )
-                        with col_ppt:
-                            img_buffer_ppt = _gerar_imagem_peers_tabela(
-                                bancos_selecionados,
-                                periodos_selecionados,
-                                valores,
-                                colunas_usadas,
-                                delta_flags,
-                                scale=1.6,
-                            )
-                            st.download_button(
-                                label="baixar PNG (powerpoint)",
-                                data=img_buffer_ppt,
-                                file_name="peers_tabela_ppt.png",
-                                mime="image/png",
-                                key="peers_tabela_png_ppt",
-                            )
-                        with col_excel:
-                            excel_buffer = _gerar_excel_peers_tabela(
-                                bancos_selecionados,
-                                periodos_selecionados,
-                                valores,
-                                colunas_usadas,
-                                delta_flags,
-                            )
-                            st.download_button(
-                                label="baixar Excel",
-                                data=excel_buffer,
-                                file_name="peers_tabela.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="peers_tabela_excel",
-                            )
+                        st.download_button(
+                            label="baixar Excel",
+                            data=excel_buffer,
+                            file_name="peers_tabela.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="peers_tabela_excel",
+                        )
+
+                    st.markdown(
+                        """
+                        <div style="font-size: 12px; color: #666; margin-top: 12px;">
+                            <strong>mini-glossário:</strong><br>
+                            <strong>Carteira de Crédito Bruta</strong> = Total da Carteira de Pessoa Física (Rel. 11) + Total da Carteira de Pessoa Jurídica (Rel. 13).<br>
+                            <strong>Ativos Líquidos</strong> = Depósitos (a) no relatório de Ativo (Rel. 2).<br>
+                            <strong>Depósitos Totais</strong> = Disponibilidades (a) + Aplicações Interfinanceiras de Liquidez (b) + Títulos e Valores Mobiliários (c) no relatório de Passivo (Rel. 3).<br>
+                            <strong>Perda Esperada</strong> = soma das linhas Perda Esperada (e2), Hedge de Valor Justo (e3), Ajuste a Valor Justo (e4), Perda Esperada (f2), Hedge de Valor Justo (f3), Perda Esperada (g2), Hedge de Valor Justo (g3), Ajuste a Valor Justo (g4) e Perda Esperada (h2) no relatório de Ativo (Rel. 2).<br>
+                            <strong>Perda Esperada / Carteira</strong> = Perda Esperada ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Carteira de Créd. Class. C4+C5</strong> = soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
+                            <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                 else:
                     st.info("selecione instituições e períodos para visualizar a tabela.")
             else:
@@ -6826,42 +6991,85 @@ elif menu == "Carteira 4.966":
                 # Exportação Excel
                 st.markdown("---")
 
-                def criar_excel_carteira_4966(df, instituicao, periodos):
-                    """Cria arquivo Excel com colunas flattened."""
+                def criar_excel_carteira_4966(df, periodos):
+                    """Cria arquivo Excel com layout similar ao visual da tabela."""
                     import io
                     buffer = io.BytesIO()
+                    workbook = xlsxwriter.Workbook(buffer, {"in_memory": True})
+                    worksheet = workbook.add_worksheet("Carteira 4.966")
 
-                    # Preparar DataFrame para exportação com colunas flattened
-                    df_export = df.copy()
+                    n_cols = 1 + len(periodos) * 2
+                    border = {"border": 1, "border_color": "#dddddd"}
+                    header_fmt = workbook.add_format(
+                        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#4a4a4a", "font_color": "white", **border}
+                    )
+                    subheader_fmt = workbook.add_format(
+                        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6a6a6a", "font_color": "white", **border}
+                    )
+                    row_even = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+                    row_odd = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", **border})
+                    row_even_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+                    row_odd_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#ffffff", **border})
+                    total_row = workbook.add_format(
+                        {"align": "right", "valign": "vcenter", "bg_color": "#e8f4e8", "bold": True, **border}
+                    )
+                    total_row_label = workbook.add_format(
+                        {"align": "left", "valign": "vcenter", "bg_color": "#e8f4e8", "bold": True, **border}
+                    )
 
-                    # Renomear colunas para formato explícito
-                    colunas_rename = {"Tipo de Carteira": "Tipo de Carteira"}
+                    worksheet.set_column(0, 0, 30)
+                    worksheet.set_column(1, max(1, n_cols - 1), 16)
+
+                    row_idx = 0
+                    worksheet.write(row_idx, 0, "Tipo de Carteira", header_fmt)
+                    col_idx = 1
                     for periodo in periodos:
                         periodo_exib = periodo_para_exibicao_mes(periodo)
-                        colunas_rename[f"{periodo_exib}"] = f"{periodo_exib} Valor"
-                        colunas_rename[f"{periodo_exib} %"] = f"{periodo_exib} %"
+                        worksheet.merge_range(row_idx, col_idx, row_idx, col_idx + 1, periodo_exib, header_fmt)
+                        col_idx += 2
+                    row_idx += 1
 
-                    df_export = df_export.rename(columns=colunas_rename)
+                    worksheet.write(row_idx, 0, "", subheader_fmt)
+                    col_idx = 1
+                    for _ in periodos:
+                        worksheet.write(row_idx, col_idx, "Valor", subheader_fmt)
+                        worksheet.write(row_idx, col_idx + 1, "% Carteira Total", subheader_fmt)
+                        col_idx += 2
+                    row_idx += 1
 
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        df_export.to_excel(writer, index=False, sheet_name='Carteira 4.966')
+                    zebra_idx = 0
+                    for _, row in df.iterrows():
+                        tipo = row["Tipo de Carteira"]
+                        is_total = tipo == "Carteira Total"
+                        is_even = zebra_idx % 2 == 0
+                        label_fmt = total_row_label if is_total else (row_even_label if is_even else row_odd_label)
+                        cell_fmt = total_row if is_total else (row_even if is_even else row_odd)
 
-                        # Ajustar largura das colunas
-                        worksheet = writer.sheets['Carteira 4.966']
-                        for i, col in enumerate(df_export.columns):
-                            max_length = max(
-                                df_export[col].astype(str).map(len).max() if len(df_export) > 0 else 0,
-                                len(col)
-                            )
-                            worksheet.column_dimensions[chr(65 + i)].width = min(max_length + 2, 30)
+                        worksheet.write(row_idx, 0, tipo, label_fmt)
+                        col_idx = 1
+                        for periodo in periodos:
+                            periodo_exib = periodo_para_exibicao_mes(periodo)
+                            valor = row.get(f"{periodo_exib}")
+                            pct = row.get(f"{periodo_exib} %")
+                            valor_fmt = formatar_valor_br(valor)
+                            if tipo in ["Carteira Não Informada", "Carteira no Exterior", "Total não Individualizado"]:
+                                pct_fmt = "-"
+                            else:
+                                pct_fmt = formatar_percentual(pct) if pct is not None else "-"
+                            worksheet.write(row_idx, col_idx, valor_fmt, cell_fmt)
+                            worksheet.write(row_idx, col_idx + 1, pct_fmt, cell_fmt)
+                            col_idx += 2
+                        row_idx += 1
+                        zebra_idx += 1
 
+                    workbook.close()
                     buffer.seek(0)
                     return buffer.getvalue()
 
                 col_btn1, col_btn2 = st.columns(2)
 
                 with col_btn1:
-                    excel_data = criar_excel_carteira_4966(df_resultado, instituicao_selecionada, periodos_ordenados)
+                    excel_data = criar_excel_carteira_4966(df_resultado, periodos_ordenados)
                     periodos_str = "_".join([periodo_para_exibicao_mes(p).replace("/", "-") for p in periodos_ordenados])
                     st.download_button(
                         label="Baixar Excel (Tabela Atual)",
