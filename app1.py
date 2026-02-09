@@ -287,6 +287,7 @@ SENHA_ADMIN = "m4th3u$987"
 
 VARS_PERCENTUAL = [
     'ROE Ac. YTD an. (%)',
+    'ROE Acumulado YTD anualizado (%)',
     'Índice de Basileia',
     'Índice de CET1',
     'Crédito/Captações (%)',
@@ -296,12 +297,11 @@ VARS_PERCENTUAL = [
     'Índice de Capital Principal',
     'Índice de Capital Nível I',
     'Razão de Alavancagem',
-    # Métricas derivadas
-    *DERIVED_METRICS,
 ]
 VARS_RAZAO = ['Crédito/PL (%)']
 VARS_MOEDAS = [
     'Carteira de Crédito',
+    'Carteira de Crédito Classificada (líquida)',
     'Lucro Líquido Acumulado YTD',
     'Patrimônio Líquido',
     'Captações',
@@ -325,6 +325,45 @@ VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
 # Variáveis ratio adicionais (tabela peers)
 VARS_RAZAO.append('Ativo/PL')
+
+SCATTER_VARIAVEIS_FIXAS = [
+    {
+        "label": "Ativo Total",
+        "candidatos": ["Ativo Total"],
+    },
+    {
+        "label": "Captações",
+        "candidatos": ["Captações"],
+    },
+    {
+        "label": "Carteira de Crédito Classificada (líquida)",
+        "candidatos": [
+            "Carteira de Crédito Classificada (líquida)",
+            "Carteira de Crédito Classificada",
+            "Carteira de Crédito",
+        ],
+    },
+    {
+        "label": "Lucro Líquido Acumulado YTD",
+        "candidatos": ["Lucro Líquido Acumulado YTD", "Lucro Líquido"],
+    },
+    {
+        "label": "Patrimônio Líquido",
+        "candidatos": ["Patrimônio Líquido"],
+    },
+    {
+        "label": "ROE Acumulado YTD anualizado (%)",
+        "candidatos": ["ROE Acumulado YTD anualizado (%)", "ROE Ac. YTD an. (%)", "ROE An. (%)"],
+    },
+    {
+        "label": "Índice de Basileia",
+        "candidatos": ["Índice de Basileia"],
+    },
+    {
+        "label": "Índice de Capital Principal",
+        "candidatos": ["Índice de Capital Principal"],
+    },
+]
 
 PEERS_TABELA_LAYOUT = [
     {
@@ -652,6 +691,13 @@ def recalcular_metricas_derivadas(dados_periodos):
         if "Carteira/Ativo (%)" in df_atualizado.columns and "Crédito/Ativo (%)" not in df_atualizado.columns:
             df_atualizado["Crédito/Ativo (%)"] = df_atualizado["Carteira/Ativo (%)"]
 
+        # Normalizar Índice de Basileia se vier em escala percentual (0.0015 = 0.15%)
+        if "Índice de Basileia" in df_atualizado.columns:
+            serie_basileia = pd.to_numeric(df_atualizado["Índice de Basileia"], errors="coerce")
+            max_basileia = serie_basileia.dropna().max()
+            if pd.notna(max_basileia) and max_basileia < 0.01:
+                df_atualizado["Índice de Basileia"] = serie_basileia * 100
+
         dados_atualizados[periodo] = df_atualizado
 
     return dados_atualizados
@@ -695,7 +741,7 @@ def mesclar_dados_capital(dados_periodos, dados_capital):
     """Mescla dados de capital (Relatório 5) com os dados principais.
 
     Permite que as variáveis de capital estejam disponíveis nas abas
-    Resumo, Análise Individual, Série Histórica, Scatter Plot, Deltas e Brincar.
+    Resumo, Scatter Plot, Deltas e Brincar.
     """
     if not dados_periodos or not dados_capital:
         return dados_periodos
@@ -1443,7 +1489,7 @@ def _resolver_coluna_peers(df: pd.DataFrame, candidatos: list) -> Optional[str]:
 def _formatar_valor_peers(valor, format_key: str, coluna_origem: Optional[str] = None) -> str:
     if valor is None or pd.isna(valor):
         return "—"
-    if coluna_origem and "(%)" in coluna_origem:
+    if coluna_origem and "(%)" in coluna_origem and format_key not in VARS_RAZAO:
         try:
             return f"{float(valor):.2f}%"
         except Exception:
@@ -1895,6 +1941,8 @@ def _load_cache_metadata(cache_obj) -> dict:
 
 
 def ensure_derived_metrics_cache() -> Tuple[Optional[object], Optional[str], dict]:
+    if not DERIVED_METRICS:
+        return None, "métricas derivadas desativadas", {}
     manager = get_cache_manager()
     cache_derivado = manager.get_cache("derived_metrics") if manager else None
     if cache_derivado is None:
@@ -1940,6 +1988,8 @@ def ensure_derived_metrics_cache() -> Tuple[Optional[object], Optional[str], dic
 
 
 def carregar_metricas_derivadas_slice(periodos=None, instituicoes=None, metricas=None) -> pd.DataFrame:
+    if not DERIVED_METRICS:
+        return pd.DataFrame()
     cache_derivado, erro, _ = ensure_derived_metrics_cache()
     if cache_derivado is None or erro:
         return pd.DataFrame()
@@ -1959,6 +2009,8 @@ def _df_mem_mb(df: Optional[pd.DataFrame]) -> float:
 
 def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
     if df_periodo is None or df_periodo.empty:
+        return df_periodo, {}
+    if not DERIVED_METRICS:
         return df_periodo, {}
     _perf_start("scatter_derived_load")
     df_derived = carregar_metricas_derivadas_slice(
@@ -1990,6 +2042,21 @@ def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
         "mem_mb": _df_mem_mb(df_derived),
     }
     return df_out, diag
+
+
+def preparar_variaveis_scatter(df_base: pd.DataFrame) -> Tuple[pd.DataFrame, list, list]:
+    df_out = df_base.copy()
+    variaveis = []
+    faltantes = []
+    for item in SCATTER_VARIAVEIS_FIXAS:
+        col_existente = next((c for c in item["candidatos"] if c in df_out.columns), None)
+        if col_existente is None:
+            faltantes.append(item["label"])
+            continue
+        if col_existente != item["label"]:
+            df_out[item["label"]] = df_out[col_existente]
+        variaveis.append(item["label"])
+    return df_out, variaveis, faltantes
 
 
 # FIX PROBLEMA 3: Busca de cor com normalização
@@ -2402,8 +2469,6 @@ with col_header:
 # Lista de opções do menu principal (análise)
 MENU_PRINCIPAL = [
     "Rankings",
-    "Histórico Individual",
-    "Histórico Peers",
     "Peers (Tabela)",
     "Scatter Plot",
     "Capital Regulatório",
@@ -2433,8 +2498,6 @@ menu_atual = st.session_state['menu_atual']
 
 # Carregamento sob demanda para reduzir uso de RAM
 menus_precisam_principal = {
-    "Histórico Individual",
-    "Histórico Peers",
     "Peers (Tabela)",
     "Scatter Plot",
     "Rankings",
@@ -3809,338 +3872,6 @@ elif menu == "Capital Regulatório":
             "para usar esta aba, extraia os dados de capital na seção 'controle avançado' → 'extrair capital (relatório 5)' na sidebar."
         )
 
-elif menu == "Histórico Individual":
-    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-
-        if len(df) > 0 and 'Instituição' in df.columns:
-            bancos_todos = df['Instituição'].dropna().unique().tolist()
-            dict_aliases = st.session_state.get('dict_aliases', {})
-            bancos_disponiveis = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
-
-            if len(bancos_disponiveis) > 0:
-                banco_selecionado = st.selectbox("selecione uma instituição", bancos_disponiveis, key="banco_individual")
-
-                if banco_selecionado:
-                    df_banco = df[df['Instituição'] == banco_selecionado].copy()
-                    df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
-                    df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
-                    df_banco = df_banco.sort_values(['ano', 'trimestre'])
-
-                    st.markdown(f"## {banco_selecionado}")
-
-                    periodos_disponiveis = ordenar_periodos(df_banco['Período'].unique())
-                    periodos_dropdown = ordenar_periodos(df_banco['Período'].unique(), reverso=True)
-
-                    # Seletores de período
-                    col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
-                    with col_p1:
-                        periodo_inicial = st.selectbox(
-                            "período inicial",
-                            periodos_dropdown,
-                            index=len(periodos_dropdown) - 1,
-                            key="periodo_ini_individual",
-                            format_func=periodo_para_exibicao
-                        )
-                    with col_p2:
-                        periodo_final = st.selectbox(
-                            "período final",
-                            periodos_dropdown,
-                            index=0,
-                            key="periodo_fin_individual",
-                            format_func=periodo_para_exibicao
-                        )
-                    with col_p3:
-                        if len(periodos_disponiveis) >= 2:
-                            pdf_buffer = gerar_scorecard_pdf(banco_selecionado, df_banco, periodo_inicial, periodo_final)
-                            if pdf_buffer:
-                                st.markdown("")  # Espaçamento
-                                st.download_button(
-                                    label="baixar scorecard",
-                                    data=pdf_buffer.getvalue(),
-                                    file_name=f"scorecard_{banco_selecionado.replace(' ', '_')}.pdf",
-                                    mime="application/pdf"
-                                )
-
-                    # Filtra dados pelo período selecionado
-                    idx_ini = periodos_disponiveis.index(periodo_inicial)
-                    idx_fin = periodos_disponiveis.index(periodo_final)
-                    if idx_ini > idx_fin:
-                        idx_ini, idx_fin = idx_fin, idx_ini
-                    periodos_filtrados = periodos_disponiveis[idx_ini:idx_fin + 1]
-                    df_banco_filtrado = df_banco[df_banco['Período'].isin(periodos_filtrados)]
-
-                    # Dados do período final para as métricas
-                    dados_periodo_final = df_banco[df_banco['Período'] == periodo_final].iloc[0]
-
-                    # Métricas com colunas flexíveis
-                    st.markdown(
-                        """
-                        <style>
-                        div[data-testid="stMetric"] {
-                            min-width: fit-content !important;
-                        }
-                        </style>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                    col1, col2, col3, col4 = st.columns([1.3, 1, 1, 1])
-
-                    with col1:
-                        st.metric("carteira de crédito", formatar_valor(dados_periodo_final.get('Carteira de Crédito'), 'Carteira de Crédito'))
-                    with col2:
-                        st.metric("roe ac. ytd an.", formatar_valor(dados_periodo_final.get('ROE Ac. YTD an. (%)'), 'ROE Ac. YTD an. (%)'))
-                    with col3:
-                        st.metric("índice de basileia", formatar_valor(dados_periodo_final.get('Índice de Basileia'), 'Índice de Basileia'))
-                    with col4:
-                        st.metric("crédito/pl (%)", formatar_valor(dados_periodo_final.get('Crédito/PL (%)'), 'Crédito/PL (%)'))
-
-                    st.markdown("---")
-                    st.markdown("### evolução histórica das variáveis")
-
-                    ordem_variaveis = [
-                        'Ativo Total',
-                        'Captações',
-                        'Patrimônio Líquido',
-                        'Carteira de Crédito',
-                        'Crédito/Ativo (%)',
-                        'Crédito/PL (%)',
-                        'Crédito/Captações (%)',
-                        'Lucro Líquido Acumulado YTD',
-                        'ROE Ac. YTD an. (%)',
-                        # Variáveis de Capital (Relatório 5)
-                        'RWA Total',
-                        'Capital Principal',
-                        'Índice de Capital Principal',
-                        'Índice de Capital Nível I',
-                        'Razão de Alavancagem',
-                    ]
-
-                    # Filtra apenas as variáveis que existem e têm dados
-                    variaveis = [v for v in ordem_variaveis if v in df_banco_filtrado.columns and df_banco_filtrado[v].notna().any()]
-
-                    for i in range(0, len(variaveis), 3):
-                        cols = st.columns(3)
-                        for j, col_obj in enumerate(cols):
-                            if i + j < len(variaveis):
-                                var = variaveis[i + j]
-                                with col_obj:
-                                    # Usa gráfico de barras para Lucro Líquido Acumulado YTD
-                                    tipo_grafico = 'barra' if var == 'Lucro Líquido Acumulado YTD' else 'linha'
-                                    fig = criar_mini_grafico(df_banco_filtrado, var, var, tipo=tipo_grafico)
-                                    st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
-            else:
-                st.warning("nenhuma instituição encontrada nos dados")
-        else:
-            st.warning("dados incompletos ou vazios")
-    else:
-        st.info("carregando dados automaticamente do github...")
-        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
-
-elif menu == "Histórico Peers":
-    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-
-        if len(df) > 0 and 'Instituição' in df.columns:
-            bancos_todos = df['Instituição'].dropna().unique().tolist()
-            dict_aliases = st.session_state.get('dict_aliases', {})
-            bancos_disponiveis = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
-
-            if len(bancos_disponiveis) > 0:
-                col_select, col_vars, col_periodo = st.columns([2, 2, 2])
-
-                with col_select:
-                    bancos_selecionados = st.multiselect(
-                        "selecionar instituições",
-                        bancos_disponiveis,
-                        default=bancos_disponiveis[:2],
-                        key="bancos_serie_historica"
-                    )
-
-                with col_vars:
-                    variaveis_disponiveis = [
-                        'Ativo Total',
-                        'Captações',
-                        'Patrimônio Líquido',
-                        'Carteira de Crédito',
-                        'Crédito/Ativo (%)',
-                        'Índice de Basileia',
-                        'Crédito/PL (%)',
-                        'Crédito/Captações (%)',
-                        'Lucro Líquido Acumulado YTD',
-                        'ROE Ac. YTD an. (%)',
-                        # Variáveis de Capital (Relatório 5)
-                        'RWA Total',
-                        'Capital Principal',
-                        'Índice de Capital Principal',
-                        'Índice de Capital Nível I',
-                        'Razão de Alavancagem',
-                    ]
-                    defaults_variaveis = [
-                        'Carteira de Crédito',
-                        'Patrimônio Líquido',
-                        'Lucro Líquido Acumulado YTD',
-                        'ROE Ac. YTD an. (%)',
-                        'Índice de Basileia'
-                    ]
-                    defaults_variaveis = [v for v in defaults_variaveis if v in variaveis_disponiveis]
-
-                    variaveis_selecionadas = st.multiselect(
-                        "selecionar variáveis (até 10)",
-                        variaveis_disponiveis,
-                        default=defaults_variaveis,
-                        max_selections=10,
-                        key="variaveis_serie_historica"
-                    )
-
-                periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
-                periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
-                with col_periodo:
-                    periodo_inicial = st.selectbox(
-                        "período inicial",
-                        periodos_dropdown,
-                        index=len(periodos_dropdown) - 1,
-                        key="periodo_ini_serie_historica",
-                        format_func=periodo_para_exibicao
-                    )
-                    periodo_final = st.selectbox(
-                        "período final",
-                        periodos_dropdown,
-                        index=0,
-                        key="periodo_fin_serie_historica",
-                        format_func=periodo_para_exibicao
-                    )
-
-                bancos_para_comparar = bancos_selecionados
-
-                if bancos_para_comparar and variaveis_selecionadas:
-                    idx_ini = periodos_disponiveis.index(periodo_inicial)
-                    idx_fin = periodos_disponiveis.index(periodo_final)
-                    if idx_ini > idx_fin:
-                        idx_ini, idx_fin = idx_fin, idx_ini
-                    periodos_filtrados = periodos_disponiveis[idx_ini:idx_fin + 1]
-
-                    for variavel in variaveis_selecionadas:
-                        format_info = get_axis_format(variavel)
-                        fig = go.Figure()
-                        export_frames = []
-                        periodos_filtrados_lucro = periodos_filtrados
-                        if variavel == 'Lucro Líquido Acumulado YTD':
-                            st.markdown("**período lucro líquido acumulado ytd**")
-                            col_lucro_ini, col_lucro_fim = st.columns(2)
-                            with col_lucro_ini:
-                                periodo_inicial_lucro = st.selectbox(
-                                    "período inicial",
-                                    periodos_dropdown,
-                                    index=len(periodos_dropdown) - 1,
-                                    key="periodo_ini_lucro_liquido",
-                                    format_func=periodo_para_exibicao
-                                )
-                            with col_lucro_fim:
-                                periodo_final_lucro = st.selectbox(
-                                    "período final",
-                                    periodos_dropdown,
-                                    index=0,
-                                    key="periodo_fin_lucro_liquido",
-                                    format_func=periodo_para_exibicao
-                                )
-                            idx_lucro_ini = periodos_disponiveis.index(periodo_inicial_lucro)
-                            idx_lucro_fin = periodos_disponiveis.index(periodo_final_lucro)
-                            if idx_lucro_ini > idx_lucro_fin:
-                                idx_lucro_ini, idx_lucro_fin = idx_lucro_fin, idx_lucro_ini
-                            periodos_filtrados_lucro = periodos_disponiveis[idx_lucro_ini:idx_lucro_fin + 1]
-
-                        for instituicao in bancos_para_comparar:
-                            df_banco = df[df['Instituição'] == instituicao].copy()
-                            if df_banco.empty or variavel not in df_banco.columns:
-                                continue
-
-                            df_banco = df_banco[df_banco['Período'].isin(
-                                periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else periodos_filtrados
-                            )]
-                            df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
-                            df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
-                            df_banco = df_banco.sort_values(['ano', 'trimestre'])
-
-                            y_values = df_banco[variavel] * format_info['multiplicador']
-                            cor_banco = obter_cor_banco(instituicao) or None
-
-                            if variavel == 'Lucro Líquido Acumulado YTD':
-                                fig.add_trace(go.Bar(
-                                    x=df_banco['Período'],
-                                    y=y_values,
-                                    name=instituicao,
-                                    marker=dict(color=cor_banco),
-                                    hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
-                                ))
-                            else:
-                                fig.add_trace(go.Scatter(
-                                    x=df_banco['Período'],
-                                    y=y_values,
-                                    mode='lines',
-                                    name=instituicao,
-                                    line=dict(width=2, color=cor_banco),
-                                    hovertemplate=f'<b>{instituicao}</b><br>%{{x}}<br>%{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
-                                ))
-
-                            export_frames.append(
-                                df_banco[['Período', 'Instituição', variavel]].copy()
-                            )
-
-                        st.markdown(f"### {variavel}")
-                        st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
-                        fig.update_layout(
-                            height=320,
-                            margin=dict(l=10, r=10, t=40, b=30),
-                            plot_bgcolor='#f8f9fa',
-                            paper_bgcolor='white',
-                            showlegend=True,
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                            xaxis=dict(
-                                showgrid=False,
-                                tickmode='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                tickvals=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                ticktext=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                categoryorder='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                categoryarray=periodos_filtrados_lucro if variavel == 'Lucro Líquido Acumulado YTD' else None
-                            ),
-                            yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat=format_info['tickformat'], ticksuffix=format_info['ticksuffix']),
-                            font=dict(family='IBM Plex Sans'),
-                            barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else None
-                        )
-
-                        st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
-
-                        if export_frames:
-                            df_export = pd.concat(export_frames, ignore_index=True)
-                            df_export['ano'] = df_export['Período'].str.split('/').str[1].astype(int)
-                            df_export['trimestre'] = df_export['Período'].str.split('/').str[0].astype(int)
-                            df_export = df_export.sort_values(['ano', 'trimestre', 'Instituição']).drop(columns=['ano', 'trimestre'])
-
-                            buffer_excel = BytesIO()
-                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                df_export.to_excel(writer, index=False, sheet_name='dados')
-                            buffer_excel.seek(0)
-
-                            nome_variavel = variavel.replace(' ', '_').replace('/', '_')
-                            st.download_button(
-                                label="Exportar Excel",
-                                data=buffer_excel,
-                                file_name="Serie_Historica_.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"exportar_excel_{nome_variavel}"
-                            )
-                else:
-                    st.info("selecione instituições e variáveis para comparar")
-            else:
-                st.warning("nenhuma instituição encontrada nos dados")
-        else:
-            st.warning("dados incompletos ou vazios")
-    else:
-        st.info("carregando dados automaticamente do github...")
-        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
-
 elif menu == "Peers (Tabela)":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()
@@ -4246,13 +3977,18 @@ elif menu == "Peers (Tabela)":
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-
-        colunas_base = [
-            col for col in df.columns
-            if col not in ['Instituição', 'Período'] and pd.api.types.is_numeric_dtype(df[col])
-        ]
-        colunas_numericas = colunas_base + [m for m in DERIVED_METRICS if m not in colunas_base]
+        df, colunas_numericas, faltantes_scatter = preparar_variaveis_scatter(df)
         periodos = ordenar_periodos(df['Período'].unique(), reverso=True)
+
+        if faltantes_scatter:
+            st.info(
+                "Variáveis não disponíveis para o Scatter Plot: "
+                + ", ".join(faltantes_scatter)
+            )
+
+        if not colunas_numericas:
+            st.warning("Não há variáveis disponíveis para o Scatter Plot.")
+            st.stop()
 
         # Lista de todos os bancos disponíveis com ordenação por alias
         bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -4263,12 +3999,24 @@ elif menu == "Scatter Plot":
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            var_x = st.selectbox("eixo x", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
+            var_x = st.selectbox(
+                "eixo x",
+                colunas_numericas,
+                index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0
+            )
         with col2:
-            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1)
+            var_y = st.selectbox(
+                "eixo y",
+                colunas_numericas,
+                index=(
+                    colunas_numericas.index('ROE Acumulado YTD anualizado (%)')
+                    if 'ROE Acumulado YTD anualizado (%)' in colunas_numericas
+                    else 0
+                )
+            )
         with col3:
             opcoes_tamanho = ['Tamanho Fixo'] + colunas_numericas
-            default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
+            default_idx = opcoes_tamanho.index('Ativo Total') if 'Ativo Total' in opcoes_tamanho else 1
             var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
         with col4:
             periodo_scatter = st.selectbox("período", periodos, index=0, format_func=periodo_para_exibicao)
@@ -4279,7 +4027,15 @@ elif menu == "Scatter Plot":
         with col_t1:
             top_n_scatter = st.slider("top n", 5, 50, 15)
         with col_t2:
-            var_top_n = st.selectbox("top n por", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
+            var_top_n = st.selectbox(
+                "top n por",
+                colunas_numericas,
+                index=(
+                    colunas_numericas.index('Carteira de Crédito Classificada (líquida)')
+                    if 'Carteira de Crédito Classificada (líquida)' in colunas_numericas
+                    else 0
+                )
+            )
 
         # Terceira linha: Seleção de bancos
         col_f = st.columns(1)[0]
@@ -4392,7 +4148,11 @@ elif menu == "Scatter Plot":
             var_y_n2 = st.selectbox(
                 "eixo y",
                 colunas_numericas,
-                index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1,
+                index=(
+                    colunas_numericas.index('ROE Acumulado YTD anualizado (%)')
+                    if 'ROE Acumulado YTD anualizado (%)' in colunas_numericas
+                    else 0
+                ),
                 key="var_y_n2"
             )
         with col_p3:
@@ -4424,12 +4184,16 @@ elif menu == "Scatter Plot":
             var_top_n_n2 = st.selectbox(
                 "top n por",
                 colunas_numericas,
-                index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0,
+                index=(
+                    colunas_numericas.index('Carteira de Crédito Classificada (líquida)')
+                    if 'Carteira de Crédito Classificada (líquida)' in colunas_numericas
+                    else 0
+                ),
                 key="var_top_n_n2"
             )
         with col_n2_t3:
             opcoes_tamanho_n2 = ['Tamanho Fixo'] + colunas_numericas
-            default_idx_n2 = opcoes_tamanho_n2.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho_n2 else 1
+            default_idx_n2 = opcoes_tamanho_n2.index('Ativo Total') if 'Ativo Total' in opcoes_tamanho_n2 else 1
             var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=default_idx_n2, key="var_size_n2")
 
         # Terceira linha: Seleção de bancos
@@ -5387,24 +5151,6 @@ elif menu == "DRE":
                 "original_label": "Despesas de Captações (g)",
             },
             {
-                "label": "Desp PDD / NIM bruta",
-                "derived_metric": "Desp PDD / NIM bruta",
-                "format": "pct",
-                "concept": "Desp. PDD dividido pela NIM bruta (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito).",
-            },
-            {
-                "label": "Desp PDD / Resultado Intermediação Fin. Bruto",
-                "derived_metric": "Desp PDD / Resultado Intermediação Fin. Bruto",
-                "format": "pct",
-                "concept": "Desp. PDD dividido pelo Resultado de Intermediação Financeira Bruto.",
-            },
-            {
-                "label": "Desp Captação / Captação",
-                "derived_metric": "Desp Captação / Captação",
-                "format": "pct",
-                "concept": "Desp. Captação anualizada dividida por Captações.",
-            },
-            {
                 "label": "Desp. Dívida Elegível a Capital",
                 "sources": ["Despesas de Instrumentos de Dívida Elegíveis a Capital (h)"],
                 "concept": "Despesas com dívida elegível a capital.",
@@ -6106,6 +5852,7 @@ elif menu == "Carteira 4.966":
                     periodos_inst,
                     default=periodos_inst[:2] if len(periodos_inst) >= 2 else periodos_inst,
                     key="carteira_4966_periodos",
+                    format_func=periodo_para_exibicao,
                     help="Selecione múltiplos períodos para comparar. O delta será calculado em relação ao período anterior na lista."
                 )
 
@@ -8080,10 +7827,4 @@ elif menu == "Glossário":
     **Crédito/Captações (%):** Carteira de Crédito Líquida dividida pelas Captações.
 
     **Crédito/Ativo (%):** Carteira de Crédito Líquida dividida pelo Ativo Total.
-
-    **Desp PDD / NIM bruta (%):** Desp. PDD dividido pela NIM bruta (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito). Fórmula: Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito).
-
-    **Desp PDD / Resultado Intermediação Fin. Bruto (%):** Desp. PDD dividido pelo Resultado de Intermediação Financeira Bruto. Fórmula: Desp. PDD / Resultado de Intermediação Financeira Bruto.
-
-    **Desp Captação / Captação (%):** Desp. Captação anualizada dividida por Captações. Fórmula: (Desp. Captação * (12 / meses_do_período)) / Captações.
     """)
