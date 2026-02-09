@@ -1465,6 +1465,8 @@ def _normalizar_label_peers(texto: str) -> str:
         return ""
     return (
         str(texto)
+        .replace("\n", " ")
+        .replace("\r", " ")
         .strip()
         .lower()
         .replace(".", "")
@@ -1945,13 +1947,18 @@ def _calcular_roe_anualizado_peers(
 ) -> Optional[float]:
     """Calcula ROE anualizado: (LL_acumulado_YTD * 12/meses) / PL.
 
+    IMPORTANTE: O LL do BCB para Set (período 3) traz apenas o trimestre
+    Jul-Sep, não o acumulado YTD. Por isso, usa _ajustar_lucro_acumulado_peers
+    para somar o valor de Jun (Jan-Jun) e obter o YTD completo (Jan-Sep).
+
     Anualização explícita por mês do período:
       Mar (3 meses): fator = 4      (12/3)
       Jun (6 meses): fator = 2      (12/6)
       Set (9 meses): fator = 12/9 ≈ 1,333
       Dez (12 meses): fator = 1     (ano cheio, sem anualização)
     """
-    lucro = _obter_valor_peers(df, banco, periodo, coluna_lucro)
+    # Obter LL ajustado para YTD (soma Jun para Set)
+    lucro = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna_lucro)
     pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
     lucro_num = _coerce_numeric_value(lucro)
     pl_num = _coerce_numeric_value(pl)
@@ -4964,7 +4971,7 @@ elif menu == "Peers (Tabela)":
                             <br>
                             <em>Desempenho</em><br>
                             <strong>Lucro Líquido Acumulado</strong> = Lucro Líquido acumulado no ano (YTD) até o fim do período (Rel. 1).<br>
-                            <strong>ROE AC. Anualizado (%)</strong> = (Lucro Líquido acumulado YTD × 12 / meses do período) ÷ Patrimônio Líquido. Fator de anualização: Mar=4, Jun=2, Set=12/9, Dez=1.<br>
+                            <strong>ROE AC. Anualizado (%)</strong> = (Lucro Líquido acumulado YTD × 12 / meses do período) ÷ Patrimônio Líquido. O LL YTD de Set é obtido somando o valor de Jun (Jan-Jun) ao de Set (Jul-Sep). Fator de anualização: Mar=4, Jun=2, Set=12/9, Dez=1.<br>
                             <br>
                             <strong>Δ (▲/▼)</strong> = Variação vs. mesmo período do ano anterior.
                         </div>
