@@ -420,6 +420,11 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Crédito/PL (%)",
             },
             {
+                "label": "Índice de Capital Principal",
+                "data_keys": ["Índice de Capital Principal", "Índice de CET1"],
+                "format_key": "Índice de Capital Principal",
+            },
+            {
                 "label": "Índice de Basileia Total",
                 "data_keys": ["Índice de Basileia", "Índice de Basileia Total (%)"],
                 "format_key": "Índice de Basileia",
@@ -596,16 +601,11 @@ def recalcular_metricas_derivadas(dados_periodos):
             df_atualizado = df_atualizado.drop(columns=colunas_remover)
 
         # Extrair mês do período para cálculo do fator de anualização
-        try:
-            periodo_str = None
-            if 'Período' in df_atualizado.columns and len(df_atualizado) > 0:
-                periodo_str = df_atualizado['Período'].iloc[0]
-            if periodo_str and '/' in str(periodo_str):
-                parte = int(str(periodo_str).split('/')[0])
-                mes = {1: 3, 2: 6, 3: 9, 4: 12}.get(parte, parte)
-            else:
-                mes = int(periodo[4:6]) if len(periodo) >= 6 else 12
-        except (ValueError, IndexError, TypeError):
+        periodo_str = None
+        if 'Período' in df_atualizado.columns and len(df_atualizado) > 0:
+            periodo_str = df_atualizado['Período'].iloc[0]
+        mes = _extrair_mes_periodo(periodo_str, periodo)
+        if mes is None:
             mes = 12
 
         # ROE Anualizado - SEMPRE recalcular
@@ -653,6 +653,26 @@ def recalcular_metricas_derivadas(dados_periodos):
         dados_atualizados[periodo] = df_atualizado
 
     return dados_atualizados
+
+
+def _extrair_mes_periodo(periodo_preferencial: Optional[str], periodo_fallback: Optional[str]) -> Optional[int]:
+    for periodo_raw in (periodo_preferencial, periodo_fallback):
+        if not periodo_raw:
+            continue
+        periodo_str = str(periodo_raw)
+        if "/" in periodo_str:
+            parte = periodo_str.split("/")[0].strip()
+            if parte.isdigit():
+                parte_int = int(parte)
+                if 1 <= parte_int <= 4:
+                    return {1: 3, 2: 6, 3: 9, 4: 12}.get(parte_int)
+                if 1 <= parte_int <= 12:
+                    return parte_int
+        if periodo_str.isdigit() and len(periodo_str) >= 6:
+            mes = periodo_str[4:6]
+            if mes.isdigit():
+                return int(mes)
+    return None
 
 # Variáveis de capital que serão mescladas com os dados principais
 VARS_CAPITAL_MERGE = [
@@ -1808,6 +1828,30 @@ def _ajustar_lucro_acumulado_peers(
     return valor_atual + valor_junho
 
 
+def _calcular_roe_anualizado_peers(
+    df: pd.DataFrame,
+    banco: str,
+    periodo: str,
+    coluna_lucro: Optional[str],
+    coluna_pl: Optional[str],
+) -> Optional[float]:
+    lucro = _obter_valor_peers(df, banco, periodo, coluna_lucro)
+    pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
+    lucro_num = _coerce_numeric_value(lucro)
+    pl_num = _coerce_numeric_value(pl)
+    if lucro_num is None or pl_num is None or pd.isna(lucro_num) or pd.isna(pl_num):
+        return None
+    try:
+        pl_float = float(pl_num)
+    except Exception:
+        return None
+    if pl_float == 0:
+        return None
+    mes = _extrair_mes_periodo(periodo, periodo)
+    fator = 12 / mes if mes else 1
+    return float(lucro_num) * fator / pl_float
+
+
 def _montar_tabela_peers(
     df: pd.DataFrame,
     bancos: list,
@@ -1821,6 +1865,7 @@ def _montar_tabela_peers(
     delta_flags = {}
     coluna_ativo = _resolver_coluna_peers(df, ["Ativo Total"])
     coluna_pl = _resolver_coluna_peers(df, ["Patrimônio Líquido"])
+    coluna_lucro = _resolver_coluna_peers(df, ["Lucro Líquido Acumulado YTD", "Lucro Líquido"])
     extra_values = _preparar_metricas_extra_peers(
         bancos,
         periodos,
@@ -1849,6 +1894,14 @@ def _montar_tabela_peers(
                     valor = None
                     if label in extra_values:
                         valor = extra_values[label].get((banco, periodo))
+                    elif label == "ROE AC. Anualizado (%)":
+                        valor = _calcular_roe_anualizado_peers(
+                            df,
+                            banco,
+                            periodo,
+                            coluna_lucro,
+                            coluna_pl,
+                        )
                     elif label == "Ativo / PL":
                         valor_ativo = _obter_valor_peers(df, banco, periodo, coluna_ativo)
                         valor_pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
@@ -1864,6 +1917,14 @@ def _montar_tabela_peers(
                     periodo_base = _periodo_ano_anterior(periodo)
                     if periodo_base and label in extra_values:
                         valor_base = extra_values[label].get((banco, periodo_base))
+                    elif periodo_base and label == "ROE AC. Anualizado (%)":
+                        valor_base = _calcular_roe_anualizado_peers(
+                            df,
+                            banco,
+                            periodo_base,
+                            coluna_lucro,
+                            coluna_pl,
+                        )
                     elif periodo_base and coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor_base = _ajustar_lucro_acumulado_peers(df, banco, periodo_base, coluna)
@@ -2283,22 +2344,27 @@ def _calcular_basileia_periodo(
             df_periodo_cap['AT1 (%)'] +
             df_periodo_cap['T2 (%)']
         )
-        return df_periodo_cap, info
-
-    if 'Índice de Basileia Capital' in colunas_encontradas:
-        col_indice_basileia = colunas_encontradas['Índice de Basileia Capital']
-        valores_ib = df_periodo_cap[col_indice_basileia]
-        if valores_ib.max() <= 1:
-            df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib * 100
-        else:
-            df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib
-
-        df_periodo_cap['RWA_valido'] = True
+    else:
+        df_periodo_cap['Índice de Basileia Total (%)'] = np.nan
         df_periodo_cap['CET1 (%)'] = np.nan
         df_periodo_cap['AT1 (%)'] = np.nan
         df_periodo_cap['T2 (%)'] = np.nan
-        info["usou_precalc"] = True
-        info["mensagem"] = "ℹ️ Usando Índice de Basileia pré-calculado (composição CET1/AT1/T2 não disponível)"
+        df_periodo_cap['RWA_valido'] = False
+
+    if 'Índice de Basileia Capital' in colunas_encontradas:
+        col_indice_basileia = colunas_encontradas['Índice de Basileia Capital']
+        valores_ib = pd.to_numeric(df_periodo_cap[col_indice_basileia], errors="coerce")
+        max_ib = valores_ib.dropna().max() if not valores_ib.dropna().empty else None
+        fator_ib = 100 if max_ib is not None and max_ib <= 1 else 1
+        mask_preencher = df_periodo_cap['Índice de Basileia Total (%)'].isna() & valores_ib.notna()
+        if mask_preencher.any():
+            df_periodo_cap.loc[mask_preencher, 'Índice de Basileia Total (%)'] = valores_ib[mask_preencher] * fator_ib
+            df_periodo_cap.loc[mask_preencher, 'RWA_valido'] = True
+            info["usou_precalc"] = True
+            if pode_calcular_composicao:
+                info["mensagem"] = "ℹ️ Alguns bancos usam Índice de Basileia pré-calculado (composição CET1/AT1/T2 não disponível)"
+            else:
+                info["mensagem"] = "ℹ️ Usando Índice de Basileia pré-calculado (composição CET1/AT1/T2 não disponível)"
         return df_periodo_cap, info
 
     info["mensagem"] = "Não foi possível calcular o Índice de Basileia. Verifique se o cache possui as colunas necessárias."
@@ -4744,15 +4810,24 @@ elif menu == "Peers (Tabela)":
                         """
                         <div style="font-size: 12px; color: #666; margin-top: 12px;">
                             <strong>mini-glossário:</strong><br>
+                            <strong>Ativo Total</strong> = Ativo Total (balanço principal).<br>
                             <strong>Carteira de Crédito Bruta</strong> = Total da Carteira de Pessoa Física (Rel. 11) + Total da Carteira de Pessoa Jurídica (Rel. 13).<br>
                             <strong>Ativos Líquidos</strong> = Depósitos (a) no relatório de Ativo (Rel. 2).<br>
                             <strong>Depósitos Totais</strong> = Disponibilidades (a) + Aplicações Interfinanceiras de Liquidez (b) + Títulos e Valores Mobiliários (c) no relatório de Passivo (Rel. 3).<br>
+                            <strong>Patrimônio Líquido (PL)</strong> = Patrimônio Líquido (balanço principal).<br>
                             <strong>Perda Esperada</strong> = soma das linhas Perda Esperada (e2), Hedge de Valor Justo (e3), Ajuste a Valor Justo (e4), Perda Esperada (f2), Hedge de Valor Justo (f3), Perda Esperada (g2), Hedge de Valor Justo (g3), Ajuste a Valor Justo (g4) e Perda Esperada (h2) no relatório de Ativo (Rel. 2).<br>
                             <strong>Perda Esperada / Carteira Bruta</strong> = Perda Esperada ÷ Carteira de Crédito Bruta.<br>
                             <strong>Carteira de Créd. Class. C4+C5</strong> = soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
                             <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.<br>
                             <strong>Perda Esperada / (Carteira C4 + C5)</strong> = Perda Esperada ÷ (C4 + C5).<br>
                             <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Desp. PDD anualizada) ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Desp PDD / NII (ref: período acumulado)</strong> = Desp. PDD acumulada ÷ NII (resultado de intermediação financeira) acumulado.<br>
+                            <strong>Ativo / PL</strong> = Ativo Total ÷ Patrimônio Líquido.<br>
+                            <strong>Crédito / PL</strong> = Carteira de Crédito ÷ Patrimônio Líquido.<br>
+                            <strong>Índice de Capital Principal</strong> = Capital Principal ÷ RWA Total (Rel. 5).<br>
+                            <strong>Índice de Basileia Total</strong> = (Capital Principal + Capital Complementar + Capital Nível II) ÷ RWA Total (Rel. 5).<br>
+                            <strong>Lucro Líquido Acumulado</strong> = Lucro Líquido acumulado no ano até o fim do período.<br>
+                            <strong>ROE AC. Anualizado (%)</strong> = (Lucro Líquido acumulado no ano × 12/meses do período) ÷ Patrimônio Líquido.<br>
                             <strong>Δ (▲/▼)</strong> = variação vs. mesmo período do ano anterior.
                         </div>
                         """,
@@ -8916,7 +8991,7 @@ elif menu == "Glossário":
 
     ## **Métricas Calculadas**
 
-    **ROE Ac. YTD an. (%):** Lucro Líquido acumulado entre janeiro e o fim do período, dividido pelo Patrimônio Líquido.
+    **ROE Ac. YTD an. (%):** Lucro Líquido acumulado entre janeiro e o fim do período, anualizado pelo fator (12 / meses do período), dividido pelo Patrimônio Líquido.
 
     **Crédito/PL (%):** Carteira de Crédito Líquida dividida pelo Patrimônio Líquido.
 
