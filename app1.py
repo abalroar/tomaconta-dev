@@ -1376,12 +1376,32 @@ def ordenar_bancos_com_alias(bancos: list, dict_aliases: dict = None) -> list:
     return bancos_com_alias_sorted + bancos_sem_alias_sorted
 
 
+def _is_variavel_percentual(variavel: str) -> bool:
+    if not variavel:
+        return False
+    if variavel in VARS_PERCENTUAL:
+        return True
+    return "Basileia" in variavel
+
+
+def _formatar_percentual(valor, decimais: int = 2) -> str:
+    if valor is None or pd.isna(valor):
+        return "N/A"
+    try:
+        valor_float = float(valor)
+    except Exception:
+        return "N/A"
+    if abs(valor_float) <= 1:
+        valor_float *= 100
+    return f"{valor_float:.{decimais}f}%"
+
+
 def formatar_valor(valor, variavel):
     if pd.isna(valor) or valor == 0:
         return "N/A"
 
-    if variavel in VARS_PERCENTUAL:
-        return f"{valor*100:.2f}%"
+    if _is_variavel_percentual(variavel):
+        return _formatar_percentual(valor)
     elif variavel in VARS_RAZAO:
         return f"{valor:.2f}x"
     elif variavel in VARS_MOEDAS:
@@ -1392,9 +1412,15 @@ def formatar_valor(valor, variavel):
     else:
         return f"{valor:.2f}"
 
-def get_axis_format(variavel):
-    if variavel in VARS_PERCENTUAL:
-        return {'tickformat': '.2f', 'ticksuffix': '%', 'multiplicador': 100}
+def get_axis_format(variavel, serie: Optional[pd.Series] = None):
+    if _is_variavel_percentual(variavel):
+        multiplicador = 100
+        if serie is not None:
+            serie_num = pd.to_numeric(serie, errors="coerce")
+            max_abs = serie_num.abs().max()
+            if pd.notna(max_abs) and max_abs > 1:
+                multiplicador = 1
+        return {'tickformat': '.2f', 'ticksuffix': '%', 'multiplicador': multiplicador}
     elif variavel in VARS_MOEDAS:
         return {'tickformat': ',.0f', 'ticksuffix': 'M', 'multiplicador': 1/1e6}
     elif variavel in VARS_CONTAGEM:
@@ -1445,10 +1471,84 @@ def _formatar_valor_peers(valor, format_key: str, coluna_origem: Optional[str] =
         return "—"
     if coluna_origem and "(%)" in coluna_origem:
         try:
-            return f"{float(valor):.2f}%"
+            return _formatar_percentual(float(valor))
         except Exception:
             return "—"
     return formatar_valor(valor, format_key)
+
+
+def _parse_periodo(periodo: str) -> Optional[Tuple[str, int, int]]:
+    if not periodo or "/" not in str(periodo):
+        return None
+    partes = str(periodo).split("/")
+    if len(partes) != 2:
+        return None
+    parte, ano_str = partes
+    try:
+        ano = int(ano_str)
+    except ValueError:
+        return None
+    return parte, ano, len(ano_str)
+
+
+def _periodo_ano_anterior(periodo: str) -> Optional[str]:
+    parsed = _parse_periodo(periodo)
+    if not parsed:
+        return None
+    parte, ano, ano_len = parsed
+    ano_anterior = ano - 1
+    if ano_len == 2:
+        return f"{parte}/{str(ano_anterior)[-2:]}"
+    return f"{parte}/{ano_anterior}"
+
+
+def _periodo_mesma_estrutura(periodo: str, novo_parte: int) -> Optional[str]:
+    parsed = _parse_periodo(periodo)
+    if not parsed:
+        return None
+    parte, ano, ano_len = parsed
+    nova_parte = str(novo_parte).zfill(len(str(parte)))
+    if ano_len == 2:
+        return f"{nova_parte}/{str(ano)[-2:]}"
+    return f"{nova_parte}/{ano}"
+
+
+def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optional[str]):
+    if coluna is None:
+        return None
+    df_cell = df[(df["Instituição"] == banco) & (df["Período"] == periodo)]
+    if df_cell.empty:
+        return None
+    return df_cell.iloc[0].get(coluna)
+
+
+def _ajustar_lucro_acumulado_peers(
+    df: pd.DataFrame,
+    banco: str,
+    periodo: str,
+    coluna: Optional[str],
+):
+    valor_atual = _obter_valor_peers(df, banco, periodo, coluna)
+    if valor_atual is None or pd.isna(valor_atual):
+        return valor_atual
+    parsed = _parse_periodo(periodo)
+    if not parsed:
+        return valor_atual
+    parte, _, _ = parsed
+    try:
+        parte_int = int(parte)
+    except ValueError:
+        return valor_atual
+    if parte_int not in {3, 9}:
+        return valor_atual
+    parte_junho = 2 if parte_int == 3 else 6
+    periodo_junho = _periodo_mesma_estrutura(periodo, parte_junho)
+    if not periodo_junho:
+        return valor_atual
+    valor_junho = _obter_valor_peers(df, banco, periodo_junho, coluna)
+    if valor_junho is None or pd.isna(valor_junho):
+        return valor_atual
+    return valor_atual + valor_junho
 
 
 def _montar_tabela_peers(
@@ -1460,6 +1560,7 @@ def _montar_tabela_peers(
     valores = {}
     colunas_usadas = {}
     faltas = set()
+    delta_flags = {}
 
     for section in PEERS_TABELA_LAYOUT:
         for row in section["rows"]:
@@ -1475,15 +1576,28 @@ def _montar_tabela_peers(
                     chave = (label, banco, periodo)
                     valor = None
                     if coluna:
-                        df_cell = df[
-                            (df["Instituição"] == banco) &
-                            (df["Período"] == periodo)
-                        ]
-                        if not df_cell.empty:
-                            valor = df_cell.iloc[0].get(coluna)
+                        if label == "Lucro Líquido Acumulado":
+                            valor = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna)
+                        else:
+                            valor = _obter_valor_peers(df, banco, periodo, coluna)
                     valores[chave] = valor
 
-    return valores, colunas_usadas, faltas
+                    delta_flag = None
+                    periodo_base = _periodo_ano_anterior(periodo)
+                    if periodo_base and coluna:
+                        if label == "Lucro Líquido Acumulado":
+                            valor_base = _ajustar_lucro_acumulado_peers(df, banco, periodo_base, coluna)
+                        else:
+                            valor_base = _obter_valor_peers(df, banco, periodo_base, coluna)
+                        if valor_base is not None and valor is not None and not pd.isna(valor) and not pd.isna(valor_base):
+                            delta = valor - valor_base
+                            if delta > 0:
+                                delta_flag = "up"
+                            elif delta < 0:
+                                delta_flag = "down"
+                    delta_flags[chave] = delta_flag
+
+    return valores, colunas_usadas, faltas, delta_flags
 
 
 def _render_peers_table_html(
@@ -1491,6 +1605,7 @@ def _render_peers_table_html(
     periodos: list,
     valores: dict,
     colunas_usadas: dict,
+    delta_flags: dict,
 ):
     colunas_total = 1 + len(bancos) * len(periodos)
     html = """
@@ -1570,7 +1685,6 @@ def _render_peers_table_html(
             html += f'<tr class="peer-item {zebra_class}"><td>{row["label"]}</td>'
 
             for banco in bancos:
-                valor_anterior = None
                 for periodo in periodos:
                     chave = (row["label"], banco, periodo)
                     coluna = colunas_usadas.get(row["label"])
@@ -1578,14 +1692,12 @@ def _render_peers_table_html(
                     valor_fmt = _formatar_valor_peers(valor, row["format_key"], coluna_origem=coluna)
 
                     delta_html = ""
-                    if valor_anterior is not None and valor is not None and not pd.isna(valor):
-                        delta = valor - valor_anterior
-                        if delta > 0:
-                            delta_html = ' <span class="delta-pos">▲</span>'
-                        elif delta < 0:
-                            delta_html = ' <span class="delta-neg">▼</span>'
+                    delta_flag = delta_flags.get(chave)
+                    if delta_flag == "up":
+                        delta_html = ' <span class="delta-pos">▲</span>'
+                    elif delta_flag == "down":
+                        delta_html = ' <span class="delta-neg">▼</span>'
                     html += f"<td>{valor_fmt}{delta_html}</td>"
-                    valor_anterior = valor
 
             html += "</tr>"
 
@@ -1598,6 +1710,7 @@ def _gerar_imagem_peers_tabela(
     periodos: list,
     valores: dict,
     colunas_usadas: dict,
+    delta_flags: dict,
     scale: float = 1.0,
 ):
     """Gera imagem PNG da tabela peers para exportação."""
@@ -1611,39 +1724,34 @@ def _gerar_imagem_peers_tabela(
             header_row_2.append(periodo_para_exibicao(periodo))
 
     rows = [header_row_1, header_row_2]
-    delta_flags = []
+    delta_flags_rows = []
     row_styles = ["header", "subheader"]
 
     for section in PEERS_TABELA_LAYOUT:
         rows.append([section["section"]] + [""] * (len(bancos) * len(periodos)))
         row_styles.append("section")
-        delta_flags.append([None] * len(rows[-1]))
+        delta_flags_rows.append([None] * len(rows[-1]))
 
         for row in section["rows"]:
             linha = [row["label"]]
             deltas = [None]
             for banco in bancos:
-                valor_anterior = None
                 for periodo in periodos:
                     chave = (row["label"], banco, periodo)
                     coluna = colunas_usadas.get(row["label"])
                     valor = valores.get(chave)
                     valor_fmt = _formatar_valor_peers(valor, row["format_key"], coluna_origem=coluna)
                     delta_flag = None
-                    if valor_anterior is not None and valor is not None and not pd.isna(valor):
-                        delta = valor - valor_anterior
-                        if delta > 0:
-                            delta_flag = "up"
-                            valor_fmt = f"{valor_fmt} ▲"
-                        elif delta < 0:
-                            delta_flag = "down"
-                            valor_fmt = f"{valor_fmt} ▼"
+                    delta_flag = delta_flags.get(chave)
+                    if delta_flag == "up":
+                        valor_fmt = f"{valor_fmt} ▲"
+                    elif delta_flag == "down":
+                        valor_fmt = f"{valor_fmt} ▼"
                     linha.append(valor_fmt)
                     deltas.append(delta_flag)
-                    valor_anterior = valor
             rows.append(linha)
             row_styles.append("data")
-            delta_flags.append(deltas)
+            delta_flags_rows.append(deltas)
 
     n_rows = len(rows)
     n_cols = len(rows[0])
@@ -1695,7 +1803,7 @@ def _gerar_imagem_peers_tabela(
                 cell.set_facecolor("#ffffff" if row_idx % 2 == 0 else "#f8f9fa")
                 if col_idx == 0:
                     cell.get_text().set_ha("left")
-                delta_flag = delta_flags[row_idx - 2][col_idx] if row_idx >= 2 else None
+                delta_flag = delta_flags_rows[row_idx - 2][col_idx] if row_idx >= 2 else None
                 if delta_flag == "up":
                     cell.get_text().set_color("#28a745")
                 elif delta_flag == "down":
@@ -4177,7 +4285,7 @@ elif menu == "Peers (Tabela)":
 
                 if bancos_selecionados and periodos_selecionados:
                     periodos_selecionados = ordenar_periodos(periodos_selecionados)
-                    valores, colunas_usadas, faltas = _montar_tabela_peers(
+                    valores, colunas_usadas, faltas, delta_flags = _montar_tabela_peers(
                         df,
                         bancos_selecionados,
                         periodos_selecionados,
@@ -4194,6 +4302,7 @@ elif menu == "Peers (Tabela)":
                         periodos_selecionados,
                         valores,
                         colunas_usadas,
+                        delta_flags,
                     )
                     st.markdown(html_tabela, unsafe_allow_html=True)
 
@@ -4209,6 +4318,7 @@ elif menu == "Peers (Tabela)":
                                 periodos_selecionados,
                                 valores,
                                 colunas_usadas,
+                                delta_flags,
                                 scale=1.0,
                             )
                             st.download_button(
@@ -4224,6 +4334,7 @@ elif menu == "Peers (Tabela)":
                                 periodos_selecionados,
                                 valores,
                                 colunas_usadas,
+                                delta_flags,
                                 scale=1.6,
                             )
                             st.download_button(
@@ -4302,8 +4413,8 @@ elif menu == "Scatter Plot":
             df_periodo_valid = df_periodo.dropna(subset=[var_top_n])
             df_scatter = df_periodo_valid.nlargest(top_n_scatter, var_top_n)
 
-        format_x = get_axis_format(var_x)
-        format_y = get_axis_format(var_y)
+        format_x = get_axis_format(var_x, df_scatter[var_x] if var_x in df_scatter.columns else None)
+        format_y = get_axis_format(var_y, df_scatter[var_y] if var_y in df_scatter.columns else None)
 
         df_scatter_plot = df_scatter.copy()
         df_scatter_plot['x_display'] = df_scatter_plot[var_x] * format_x['multiplicador']
@@ -4312,7 +4423,7 @@ elif menu == "Scatter Plot":
         if var_size == 'Tamanho Fixo':
             tamanho_constante = 25
         else:
-            format_size = get_axis_format(var_size)
+            format_size = get_axis_format(var_size, df_scatter[var_size] if var_size in df_scatter.columns else None)
             df_scatter_plot['size_display'] = df_scatter_plot[var_size] * format_size['multiplicador']
 
         fig_scatter = go.Figure()
@@ -4467,8 +4578,8 @@ elif menu == "Scatter Plot":
                 st.warning("Nenhum banco encontrado em ambos os períodos selecionados.")
             else:
                 # Formatos dos eixos
-                format_x_n2 = get_axis_format(var_x_n2)
-                format_y_n2 = get_axis_format(var_y_n2)
+                format_x_n2 = get_axis_format(var_x_n2, df_p1[var_x_n2] if var_x_n2 in df_p1.columns else None)
+                format_y_n2 = get_axis_format(var_y_n2, df_p1[var_y_n2] if var_y_n2 in df_p1.columns else None)
 
                 # Prepara dados com valores de exibição
                 df_p1['x_display'] = df_p1[var_x_n2] * format_x_n2['multiplicador']
@@ -4478,7 +4589,7 @@ elif menu == "Scatter Plot":
 
                 # Tamanho dos pontos
                 if var_size_n2 != 'Tamanho Fixo':
-                    format_size_n2 = get_axis_format(var_size_n2)
+                    format_size_n2 = get_axis_format(var_size_n2, df_p1[var_size_n2] if var_size_n2 in df_p1.columns else None)
                     df_p1['size_display'] = df_p1[var_size_n2] * format_size_n2['multiplicador']
                     df_p2['size_display'] = df_p2[var_size_n2] * format_size_n2['multiplicador']
                     max_size = max(df_p1['size_display'].max(), df_p2['size_display'].max())
@@ -6116,6 +6227,7 @@ elif menu == "Carteira 4.966":
                 # Construir dados da tabela
                 dados_tabela = []
 
+                linha_colunas = {}
                 for nome_linha, coluna_api in LINHAS_CARTEIRA_4966:
                     linha_dados = {"Tipo de Carteira": nome_linha}
 
@@ -6132,8 +6244,9 @@ elif menu == "Carteira 4.966":
                             if coluna_api.lower() in col.lower():
                                 coluna_encontrada = col
                                 break
+                    linha_colunas[nome_linha] = coluna_encontrada
 
-                    for i, periodo in enumerate(periodos_ordenados):
+                    for periodo in periodos_ordenados:
                         df_periodo = df_inst[df_inst[col_periodo] == periodo]
 
                         if not df_periodo.empty and coluna_encontrada and coluna_encontrada in df_periodo.columns:
@@ -6233,7 +6346,6 @@ elif menu == "Carteira 4.966":
 
                     html_tabela += f"<tr {row_class}><td>{tipo}</td>"
 
-                    valor_anterior = None
                     for i, periodo in enumerate(periodos_ordenados):
                         periodo_exib = periodo_para_exibicao_mes(periodo)
                         valor = row.get(f"{periodo_exib}")
@@ -6248,16 +6360,21 @@ elif menu == "Carteira 4.966":
 
                         # Adicionar delta visual se houver período anterior
                         delta_html = ""
-                        if i > 0 and valor_anterior is not None and valor is not None:
-                            delta = valor - valor_anterior
+                        periodo_base = _periodo_ano_anterior(periodo)
+                        coluna_base = linha_colunas.get(tipo)
+                        valor_base = None
+                        if periodo_base and coluna_base:
+                            df_base = df_inst[df_inst[col_periodo] == periodo_base]
+                            if not df_base.empty and coluna_base in df_base.columns:
+                                valor_base = df_base[coluna_base].iloc[0]
+                        if valor_base is not None and valor is not None:
+                            delta = valor - valor_base
                             if delta > 0:
                                 delta_html = f' <span class="delta-pos">▲</span>'
                             elif delta < 0:
                                 delta_html = f' <span class="delta-neg">▼</span>'
 
                         html_tabela += f"<td>{valor_fmt}{delta_html}</td><td>{pct_fmt}</td>"
-                        valor_anterior = valor
-
                     html_tabela += "</tr>"
 
                 html_tabela += "</tbody></table>"
@@ -6872,7 +6989,8 @@ elif menu == "Crie sua métrica!":
                                 else:
                                     return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
                             else:
-                                return get_axis_format(var_name)
+                                serie_ref = df_scatter_brincar[var_name] if var_name in df_scatter_brincar.columns else None
+                                return get_axis_format(var_name, serie_ref)
 
                         format_x = get_format_for_var(eixo_x_brincar)
                         format_y = get_format_for_var(eixo_y_brincar)
