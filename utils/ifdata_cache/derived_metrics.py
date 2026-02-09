@@ -23,11 +23,30 @@ from .base import BaseCache, CacheConfig
 logger = logging.getLogger("ifdata_cache")
 
 
-DERIVED_METRICS: List[str] = []
+METRIC_PDD_NIM = "Desp PDD / NIM bruta"
+METRIC_PDD_INTERMED = "Desp PDD / Resultado Intermediação Fin. Bruto"
+METRIC_DESP_CAPT = "Desp Captação / Captação"
 
-DERIVED_METRICS_FORMAT: Dict[str, str] = {}
+DERIVED_METRICS = [
+    METRIC_PDD_NIM,
+    METRIC_PDD_INTERMED,
+    METRIC_DESP_CAPT,
+]
 
-DERIVED_METRICS_FORMULAS: Dict[str, str] = {}
+DERIVED_METRICS_FORMAT = {
+    METRIC_PDD_NIM: "pct",
+    METRIC_PDD_INTERMED: "pct",
+    METRIC_DESP_CAPT: "pct",
+}
+
+DERIVED_METRICS_FORMULAS = {
+    METRIC_PDD_NIM: (
+        "Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + "
+        "Rec. Outras Operações c/ Características de Crédito)"
+    ),
+    METRIC_PDD_INTERMED: "Desp. PDD / Resultado de Intermediação Financeira Bruto",
+    METRIC_DESP_CAPT: "Desp. Captação anualizada / Captações",
+}
 
 
 DRE_REQUIRED_COLUMNS = {
@@ -226,18 +245,106 @@ def build_derived_metrics(
     df_principal: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, DerivedMetricsStats]:
     """Calcula métricas derivadas no formato LONG/TIDY."""
-    period_type = _detect_period_type(
-        df_dre["Período"].dropna().unique() if "Período" in df_dre.columns else []
+    df_base, colunas_dre = _prepare_base_dre(df_dre)
+    df_principal_base = _prepare_base_principal(df_principal)
+
+    periodo_type = _detect_period_type(df_base["Período"].dropna().unique())
+
+    denominador_counts: Dict[str, int] = {metric: 0 for metric in DERIVED_METRICS}
+
+    def _col(key: str) -> Optional[pd.Series]:
+        col = colunas_dre.get(key)
+        if col is None:
+            return None
+        return df_base[col]
+
+    desp_pdd = _col("desp_pdd")
+    rec_credito = _col("rec_credito")
+    rec_arrendamento = _col("rec_arrendamento")
+    rec_outras = _col("rec_outras")
+    rec_liquidez = _col("rec_liquidez")
+    rec_tvm = _col("rec_tvm")
+    desp_captacao = _col("desp_captacao")
+
+    if desp_pdd is None:
+        raise ValueError("Coluna de Desp. PDD não encontrada no DRE")
+
+    if rec_credito is None or rec_arrendamento is None or rec_outras is None:
+        raise ValueError("Colunas para NIM bruta não encontradas no DRE")
+
+    nim_bruta = rec_credito + rec_arrendamento + rec_outras
+
+    if rec_liquidez is None or rec_tvm is None:
+        raise ValueError("Colunas para Resultado de Intermediação Financeira Bruto não encontradas no DRE")
+
+    resultado_intermed_bruto = rec_liquidez + rec_tvm + rec_credito + rec_arrendamento + rec_outras
+
+    if desp_captacao is None:
+        raise ValueError("Coluna de Desp. Captação não encontrada no DRE")
+
+    periodos = df_base["Período"].astype(str)
+    meses = periodos.apply(lambda x: _parse_periodo(x)[1])
+    meses = meses.where(meses.notna() & (meses > 0), pd.NA)
+    fator_anualizacao = 12 / meses.astype("float32")
+    desp_captacao_anualizada = desp_captacao * fator_anualizacao
+
+    df_merge = df_base[["Instituição", "Período"]].copy()
+    df_merge = df_merge.merge(
+        df_principal_base,
+        on=["Instituição", "Período"],
+        how="left",
+        suffixes=("", "_principal"),
     )
-    df_final = pd.DataFrame(
-        columns=["Instituição", "Período", "Métrica", "Valor", "Unidade"]
+
+    dados_metricas = []
+
+    serie_metric_1 = _safe_ratio(
+        desp_pdd,
+        nim_bruta,
+        METRIC_PDD_NIM,
+        denominador_counts,
     )
+    dados_metricas.append((METRIC_PDD_NIM, serie_metric_1))
+
+    serie_metric_2 = _safe_ratio(
+        desp_pdd,
+        resultado_intermed_bruto,
+        METRIC_PDD_INTERMED,
+        denominador_counts,
+    )
+    dados_metricas.append((METRIC_PDD_INTERMED, serie_metric_2))
+
+    serie_metric_3 = _safe_ratio(
+        desp_captacao_anualizada,
+        df_merge["Captações"],
+        METRIC_DESP_CAPT,
+        denominador_counts,
+    )
+    dados_metricas.append((METRIC_DESP_CAPT, serie_metric_3))
+
+    registros = []
+    for label, serie in dados_metricas:
+        df_metric = df_base[["Instituição", "Período"]].copy()
+        df_metric["Métrica"] = label
+        df_metric["Valor"] = serie
+        df_metric["Unidade"] = "pct"
+        registros.append(df_metric)
+
+    df_final = pd.concat(registros, ignore_index=True)
+
+    df_final["Instituição"] = df_final["Instituição"].astype("category")
+    df_final["Período"] = df_final["Período"].astype("category")
+    df_final["Métrica"] = df_final["Métrica"].astype("category")
+    df_final["Unidade"] = df_final["Unidade"].astype("category")
+    df_final["Valor"] = df_final["Valor"].astype("float32")
+
     stats = DerivedMetricsStats(
-        denominador_zero_ou_nan={},
-        periodos_detectados=[],
-        period_type=period_type,
-        total_registros=0,
+        denominador_zero_ou_nan=denominador_counts,
+        periodos_detectados=sorted(df_final["Período"].astype(str).unique().tolist()),
+        period_type=periodo_type,
+        total_registros=len(df_final),
     )
+
     return df_final, stats
 
 
