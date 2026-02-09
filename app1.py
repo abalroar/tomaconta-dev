@@ -421,12 +421,12 @@ PEERS_TABELA_LAYOUT = [
             },
             {
                 "label": "Índice de Capital Principal",
-                "data_keys": ["Índice de Capital Principal", "Índice de CET1"],
+                "data_keys": [],
                 "format_key": "Índice de Capital Principal",
             },
             {
                 "label": "Índice de Basileia Total",
-                "data_keys": ["Índice de Basileia", "Índice de Basileia Total (%)"],
+                "data_keys": [],
                 "format_key": "Índice de Basileia",
             },
         ],
@@ -1619,6 +1619,7 @@ def _preparar_metricas_extra_peers(
     cache_carteira_pj: Optional[pd.DataFrame],
     cache_carteira_instr: Optional[pd.DataFrame],
     cache_dre: Optional[pd.DataFrame],
+    cache_capital: Optional[pd.DataFrame] = None,
 ) -> dict:
     extra = {
         "Carteira de Crédito Bruta": {},
@@ -1630,6 +1631,8 @@ def _preparar_metricas_extra_peers(
         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": {},
         "Perda Esperada / (Carteira C4 + C5)": {},
         "Desp PDD Anualizada / Carteira Bruta": {},
+        "Índice de Capital Principal": {},
+        "Índice de Basileia Total": {},
     }
     periodos_base = {_periodo_ano_anterior(periodo) for periodo in periodos}
     periodos_ext = [p for p in periodos + sorted(periodos_base) if p]
@@ -1653,8 +1656,33 @@ def _preparar_metricas_extra_peers(
         ],
     )
 
-    col_ativos_liquidos = _resolver_coluna_peers(
+    # Ativos Líquidos: Disponibilidades (a) + Aplicações Interfinanceiras de Liquidez (b)
+    # + TVM (c) do relatório de Ativo (Rel. 2)
+    col_disp_ativo = _resolver_coluna_peers(
         cache_ativo,
+        ["Disponibilidades (a)", "Disponibilidades", "Disponibilidades (a) ="],
+    )
+    col_aplic_ativo = _resolver_coluna_peers(
+        cache_ativo,
+        [
+            "Aplicações Interfinanceiras de Liquidez (b)",
+            "Aplicacoes Interfinanceiras de Liquidez (b)",
+            "Aplicações Interfinanceiras de Liquidez",
+        ],
+    )
+    col_tvm_ativo = _resolver_coluna_peers(
+        cache_ativo,
+        [
+            "Títulos e Valores Mobiliários (c)",
+            "Titulos e Valores Mobiliarios (c)",
+            "Títulos e Valores Mobiliários e Instrumentos Financeiros Derivativos (c)",
+            "Títulos e Valores Mobiliários",
+        ],
+    )
+
+    # Depósitos Totais: Depósitos (a) do relatório de Passivo (Rel. 3)
+    col_depositos_passivo = _resolver_coluna_peers(
+        cache_passivo,
         [
             "Depósitos (a)",
             "Depositos (a)",
@@ -1663,16 +1691,6 @@ def _preparar_metricas_extra_peers(
             "Depósitos (a) =",
             "Depósitos (a) +",
         ],
-    )
-
-    col_disp = _resolver_coluna_peers(cache_passivo, ["Disponibilidades (a)", "Disponibilidades"])
-    col_aplic = _resolver_coluna_peers(
-        cache_passivo,
-        ["Aplicações Interfinanceiras de Liquidez (b)", "Aplicacoes Interfinanceiras de Liquidez (b)"],
-    )
-    col_tvm = _resolver_coluna_peers(
-        cache_passivo,
-        ["Títulos e Valores Mobiliários (c)", "Titulos e Valores Mobiliarios (c)"],
     )
 
     perda_colunas_base = [
@@ -1705,6 +1723,44 @@ def _preparar_metricas_extra_peers(
         ],
     )
 
+    # Capital: colunas para Índice de Capital Principal e Índice de Basileia Total
+    col_cap_principal = _resolver_coluna_peers(
+        cache_capital,
+        ["Capital Principal", "Capital Principal para Comparação com RWA (a)"],
+    )
+    col_cap_complementar = _resolver_coluna_peers(
+        cache_capital,
+        ["Capital Complementar", "Capital Complementar (b)"],
+    )
+    col_cap_nivel2 = _resolver_coluna_peers(
+        cache_capital,
+        ["Capital Nível II", "Capital Nível II (d)", "Capital Nivel II"],
+    )
+    col_rwa_total = _resolver_coluna_peers(
+        cache_capital,
+        [
+            "RWA Total",
+            "Ativos Ponderados pelo Risco (RWA) (j) = (f) + (g) + (h) + (i)",
+            "Ativos Ponderados pelo Risco (RWA) (j)",
+            "RWA",
+        ],
+    )
+    col_indice_cap_principal = _resolver_coluna_peers(
+        cache_capital,
+        [
+            "Índice de Capital Principal",
+            "Índice de Capital Principal (l) = (a) / (j)",
+        ],
+    )
+    col_indice_basileia_precalc = _resolver_coluna_peers(
+        cache_capital,
+        [
+            "Índice de Basileia",
+            "Índice de Basileia Capital",
+            "Índice de Basileia (n) = (e) / (j)",
+        ],
+    )
+
     for banco in bancos:
         for periodo in periodos_ext:
             chave = (banco, periodo)
@@ -1713,15 +1769,18 @@ def _preparar_metricas_extra_peers(
             carteira_bruta = _somar_valores([valor_pf, valor_pj])
             extra["Carteira de Crédito Bruta"][chave] = carteira_bruta
 
-            ativos_liquidos = _obter_valor_peers(cache_ativo, banco, periodo, col_ativos_liquidos)
-            extra["Ativos Líquidos"][chave] = _coerce_numeric_value(ativos_liquidos)
-
-            depositos_totais = _somar_valores([
-                _obter_valor_peers(cache_passivo, banco, periodo, col_disp),
-                _obter_valor_peers(cache_passivo, banco, periodo, col_aplic),
-                _obter_valor_peers(cache_passivo, banco, periodo, col_tvm),
+            # Ativos Líquidos = Disponibilidades (a) + Aplicações Interfinanceiras (b) + TVM (c)
+            # do relatório de Ativo (Rel. 2)
+            ativos_liquidos = _somar_valores([
+                _obter_valor_peers(cache_ativo, banco, periodo, col_disp_ativo),
+                _obter_valor_peers(cache_ativo, banco, periodo, col_aplic_ativo),
+                _obter_valor_peers(cache_ativo, banco, periodo, col_tvm_ativo),
             ])
-            extra["Depósitos Totais"][chave] = depositos_totais
+            extra["Ativos Líquidos"][chave] = ativos_liquidos
+
+            # Depósitos Totais = Depósitos (a) do relatório de Passivo (Rel. 3)
+            depositos_totais = _obter_valor_peers(cache_passivo, banco, periodo, col_depositos_passivo)
+            extra["Depósitos Totais"][chave] = _coerce_numeric_value(depositos_totais)
 
             perda_vals = [
                 _obter_valor_peers(cache_ativo, banco, periodo, col)
@@ -1750,6 +1809,55 @@ def _preparar_metricas_extra_peers(
                 desp_pdd_anual,
                 carteira_bruta,
             )
+
+            # Capital: Índice de Capital Principal e Índice de Basileia Total
+            # Prioridade: calcular da composição (Capital Principal / RWA);
+            # fallback: usar valor pré-calculado do cache de capital.
+            indice_cap_principal = None
+            if col_cap_principal and col_rwa_total:
+                val_cp = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_cap_principal)
+                )
+                val_rwa = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_rwa_total)
+                )
+                if val_cp is not None and val_rwa is not None and not pd.isna(val_cp) and not pd.isna(val_rwa) and float(val_rwa) != 0:
+                    indice_cap_principal = float(val_cp) / float(val_rwa)
+            if indice_cap_principal is None and col_indice_cap_principal:
+                val_precalc = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_indice_cap_principal)
+                )
+                if val_precalc is not None and not pd.isna(val_precalc):
+                    indice_cap_principal = float(val_precalc)
+            extra["Índice de Capital Principal"][chave] = indice_cap_principal
+
+            indice_basileia = None
+            if col_cap_principal and col_cap_complementar and col_cap_nivel2 and col_rwa_total:
+                val_cp = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_cap_principal)
+                )
+                val_cc = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_cap_complementar)
+                )
+                val_n2 = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_cap_nivel2)
+                )
+                val_rwa = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_rwa_total)
+                )
+                if (
+                    val_cp is not None and val_cc is not None and val_n2 is not None and val_rwa is not None
+                    and not pd.isna(val_cp) and not pd.isna(val_cc) and not pd.isna(val_n2) and not pd.isna(val_rwa)
+                    and float(val_rwa) != 0
+                ):
+                    indice_basileia = (float(val_cp) + float(val_cc) + float(val_n2)) / float(val_rwa)
+            if indice_basileia is None and col_indice_basileia_precalc:
+                val_precalc = _coerce_numeric_value(
+                    _obter_valor_peers(cache_capital, banco, periodo, col_indice_basileia_precalc)
+                )
+                if val_precalc is not None and not pd.isna(val_precalc):
+                    indice_basileia = float(val_precalc)
+            extra["Índice de Basileia Total"][chave] = indice_basileia
 
     return extra
 
@@ -1835,6 +1943,14 @@ def _calcular_roe_anualizado_peers(
     coluna_lucro: Optional[str],
     coluna_pl: Optional[str],
 ) -> Optional[float]:
+    """Calcula ROE anualizado: (LL_acumulado_YTD * 12/meses) / PL.
+
+    Anualização explícita por mês do período:
+      Mar (3 meses): fator = 4      (12/3)
+      Jun (6 meses): fator = 2      (12/6)
+      Set (9 meses): fator = 12/9 ≈ 1,333
+      Dez (12 meses): fator = 1     (ano cheio, sem anualização)
+    """
     lucro = _obter_valor_peers(df, banco, periodo, coluna_lucro)
     pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
     lucro_num = _coerce_numeric_value(lucro)
@@ -1848,7 +1964,16 @@ def _calcular_roe_anualizado_peers(
     if pl_float == 0:
         return None
     mes = _extrair_mes_periodo(periodo, periodo)
-    fator = 12 / mes if mes else 1
+    if mes == 3:
+        fator = 4          # Mar: 12/3
+    elif mes == 6:
+        fator = 2          # Jun: 12/6
+    elif mes == 9:
+        fator = 12 / 9     # Set: 12/9
+    elif mes == 12:
+        fator = 1           # Dez: ano cheio
+    else:
+        fator = 12 / mes if mes and mes > 0 else 1
     return float(lucro_num) * fator / pl_float
 
 
@@ -1875,6 +2000,7 @@ def _montar_tabela_peers(
         (caches_extras or {}).get("carteira_pj"),
         (caches_extras or {}).get("carteira_instrumentos"),
         (caches_extras or {}).get("dre"),
+        (caches_extras or {}).get("capital"),
     )
 
     for section in PEERS_TABELA_LAYOUT:
@@ -4752,6 +4878,7 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
                     cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
                     cache_dre = _carregar_cache_relatorio("dre")
+                    cache_capital = _carregar_cache_relatorio("capital")
 
                     cache_ativo = _aplicar_aliases_df(cache_ativo, dict_aliases)
                     cache_passivo = _aplicar_aliases_df(cache_passivo, dict_aliases)
@@ -4759,6 +4886,7 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_pj = _aplicar_aliases_df(cache_carteira_pj, dict_aliases)
                     cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
+                    cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
 
                     valores, colunas_usadas, faltas, delta_flags = _montar_tabela_peers(
                         df,
@@ -4771,6 +4899,7 @@ elif menu == "Peers (Tabela)":
                             "carteira_pj": cache_carteira_pj,
                             "carteira_instrumentos": cache_carteira_instr,
                             "dre": cache_dre,
+                            "capital": cache_capital,
                         },
                     )
 
@@ -4810,25 +4939,34 @@ elif menu == "Peers (Tabela)":
                         """
                         <div style="font-size: 12px; color: #666; margin-top: 12px;">
                             <strong>mini-glossário:</strong><br>
-                            <strong>Ativo Total</strong> = Ativo Total (balanço principal).<br>
+                            <br>
+                            <em>Balanço</em><br>
+                            <strong>Ativo Total</strong> = Ativo Total do balanço principal (Rel. 1).<br>
+                            <strong>Ativos Líquidos</strong> = Disponibilidades (a) + Aplicações Interfinanceiras de Liquidez (b) + Títulos e Valores Mobiliários (c) no relatório de Ativo (Rel. 2).<br>
                             <strong>Carteira de Crédito Bruta</strong> = Total da Carteira de Pessoa Física (Rel. 11) + Total da Carteira de Pessoa Jurídica (Rel. 13).<br>
-                            <strong>Ativos Líquidos</strong> = Depósitos (a) no relatório de Ativo (Rel. 2).<br>
-                            <strong>Depósitos Totais</strong> = Disponibilidades (a) + Aplicações Interfinanceiras de Liquidez (b) + Títulos e Valores Mobiliários (c) no relatório de Passivo (Rel. 3).<br>
-                            <strong>Patrimônio Líquido (PL)</strong> = Patrimônio Líquido (balanço principal).<br>
-                            <strong>Perda Esperada</strong> = soma das linhas Perda Esperada (e2), Hedge de Valor Justo (e3), Ajuste a Valor Justo (e4), Perda Esperada (f2), Hedge de Valor Justo (f3), Perda Esperada (g2), Hedge de Valor Justo (g3), Ajuste a Valor Justo (g4) e Perda Esperada (h2) no relatório de Ativo (Rel. 2).<br>
+                            <strong>Depósitos Totais</strong> = Depósitos (a) no relatório de Passivo (Rel. 3).<br>
+                            <strong>Patrimônio Líquido (PL)</strong> = Patrimônio Líquido do balanço principal (Rel. 1).<br>
+                            <br>
+                            <em>Qualidade Carteira</em><br>
+                            <strong>Perda Esperada</strong> = Soma das linhas Perda Esperada (e2), Hedge de Valor Justo (e3), Ajuste a Valor Justo (e4), Perda Esperada (f2), Hedge de Valor Justo (f3), Perda Esperada (g2), Hedge de Valor Justo (g3), Ajuste a Valor Justo (g4) e Perda Esperada (h2) no relatório de Ativo (Rel. 2).<br>
                             <strong>Perda Esperada / Carteira Bruta</strong> = Perda Esperada ÷ Carteira de Crédito Bruta.<br>
-                            <strong>Carteira de Créd. Class. C4+C5</strong> = soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
+                            <strong>Carteira de Créd. Class. C4+C5</strong> = Soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
                             <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.<br>
                             <strong>Perda Esperada / (Carteira C4 + C5)</strong> = Perda Esperada ÷ (C4 + C5).<br>
-                            <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Desp. PDD anualizada) ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Resultado com Perda Esperada anualizado) ÷ Carteira de Crédito Bruta. Anualização: valor acumulado YTD × (12 / meses do período).<br>
                             <strong>Desp PDD / NII (ref: período acumulado)</strong> = Desp. PDD acumulada ÷ NII (resultado de intermediação financeira) acumulado.<br>
+                            <br>
+                            <em>Alavancagem</em><br>
                             <strong>Ativo / PL</strong> = Ativo Total ÷ Patrimônio Líquido.<br>
-                            <strong>Crédito / PL</strong> = Carteira de Crédito ÷ Patrimônio Líquido.<br>
-                            <strong>Índice de Capital Principal</strong> = Capital Principal ÷ RWA Total (Rel. 5).<br>
-                            <strong>Índice de Basileia Total</strong> = (Capital Principal + Capital Complementar + Capital Nível II) ÷ RWA Total (Rel. 5).<br>
-                            <strong>Lucro Líquido Acumulado</strong> = Lucro Líquido acumulado no ano até o fim do período.<br>
-                            <strong>ROE AC. Anualizado (%)</strong> = (Lucro Líquido acumulado no ano × 12/meses do período) ÷ Patrimônio Líquido.<br>
-                            <strong>Δ (▲/▼)</strong> = variação vs. mesmo período do ano anterior.
+                            <strong>Crédito / PL</strong> = Carteira de Crédito (Rel. 1) ÷ Patrimônio Líquido.<br>
+                            <strong>Índice de Capital Principal</strong> = Capital Principal ÷ RWA Total, extraído do relatório de Informações de Capital (Rel. 5). Equivale ao CET1.<br>
+                            <strong>Índice de Basileia Total</strong> = (Capital Principal + Capital Complementar + Capital Nível II) ÷ RWA Total (Rel. 5). Equivale à soma CET1 + AT1 + T2.<br>
+                            <br>
+                            <em>Desempenho</em><br>
+                            <strong>Lucro Líquido Acumulado</strong> = Lucro Líquido acumulado no ano (YTD) até o fim do período (Rel. 1).<br>
+                            <strong>ROE AC. Anualizado (%)</strong> = (Lucro Líquido acumulado YTD × 12 / meses do período) ÷ Patrimônio Líquido. Fator de anualização: Mar=4, Jun=2, Set=12/9, Dez=1.<br>
+                            <br>
+                            <strong>Δ (▲/▼)</strong> = Variação vs. mesmo período do ano anterior.
                         </div>
                         """,
                         unsafe_allow_html=True,
