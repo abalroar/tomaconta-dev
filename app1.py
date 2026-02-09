@@ -292,9 +292,10 @@ VARS_PERCENTUAL = [
     'Índice de CET1',
     'Crédito/Captações (%)',
     'Crédito/Ativo (%)',
-    'Ativo/PL',
     'Índice de Imobilização',
-    'Perda Esperada / Carteira',
+    'Perda Esperada / Carteira Bruta',
+    'Perda Esperada / (Carteira C4 + C5)',
+    'Desp PDD Anualizada / Carteira Bruta',
     'Carteira de Créd. Class. C4+C5 / Carteira Bruta',
     # Variáveis de Capital (Relatório 5)
     'Índice de Capital Principal',
@@ -303,7 +304,7 @@ VARS_PERCENTUAL = [
     # Métricas derivadas
     *DERIVED_METRICS,
 ]
-VARS_RAZAO = ['Crédito/PL (%)']
+VARS_RAZAO = ['Crédito/PL (%)', 'Ativo/PL']
 VARS_MOEDAS = [
     'Carteira de Crédito',
     'Carteira de Crédito Bruta',
@@ -372,9 +373,9 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Perda Esperada",
             },
             {
-                "label": "Perda Esperada / Carteira",
+                "label": "Perda Esperada / Carteira Bruta",
                 "data_keys": [],
-                "format_key": "Perda Esperada / Carteira",
+                "format_key": "Perda Esperada / Carteira Bruta",
             },
             {
                 "label": "Carteira de Créd. Class. C4+C5",
@@ -387,16 +388,14 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Carteira de Créd. Class. C4+C5 / Carteira Bruta",
             },
             {
-                "label": "Provisão / Estágio 3",
+                "label": "Perda Esperada / (Carteira C4 + C5)",
                 "data_keys": [],
-                "format_key": "Provisão / Estágio 3",
-                "todo": "TODO: Integrar Provisão/Estágio 3 a partir das fontes do projeto.",
+                "format_key": "Perda Esperada / (Carteira C4 + C5)",
             },
             {
                 "label": "Desp PDD Anualizada / Carteira Bruta",
                 "data_keys": [],
                 "format_key": "Desp PDD Anualizada / Carteira Bruta",
-                "todo": "TODO: Integrar despesa PDD anualizada/Carteira Bruta a partir das fontes do projeto.",
             },
             {
                 "label": "Desp PDD / NII (ref: período acumulado)",
@@ -422,7 +421,7 @@ PEERS_TABELA_LAYOUT = [
             },
             {
                 "label": "Índice de Basileia Total",
-                "data_keys": ["Índice de Basileia Total (%)", "Índice de Basileia"],
+                "data_keys": ["Índice de Basileia", "Índice de Basileia Total (%)"],
                 "format_key": "Índice de Basileia",
             },
         ],
@@ -1475,6 +1474,10 @@ def _resolver_coluna_peers(df: pd.DataFrame, candidatos: list) -> Optional[str]:
         col_norm = _normalizar_label_peers(col)
         if col_norm in candidatos_norm:
             return col
+    for col in df.columns:
+        col_norm = _normalizar_label_peers(col)
+        if any(cand in col_norm for cand in candidatos_norm):
+            return col
     return None
 
 
@@ -1482,7 +1485,10 @@ def _formatar_valor_peers(valor, format_key: str, coluna_origem: Optional[str] =
     if valor is None or pd.isna(valor):
         return "—"
     if format_key == "Ativo/PL":
-        return _formatar_percentual(valor)
+        try:
+            return f"{float(valor):.2f}x"
+        except Exception:
+            return "—"
     if format_key == "Crédito/PL (%)":
         try:
             return f"{float(valor):.2f}x"
@@ -1592,15 +1598,18 @@ def _preparar_metricas_extra_peers(
     cache_carteira_pf: Optional[pd.DataFrame],
     cache_carteira_pj: Optional[pd.DataFrame],
     cache_carteira_instr: Optional[pd.DataFrame],
+    cache_dre: Optional[pd.DataFrame],
 ) -> dict:
     extra = {
         "Carteira de Crédito Bruta": {},
         "Ativos Líquidos": {},
         "Depósitos Totais": {},
         "Perda Esperada": {},
-        "Perda Esperada / Carteira": {},
+        "Perda Esperada / Carteira Bruta": {},
         "Carteira de Créd. Class. C4+C5": {},
         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": {},
+        "Perda Esperada / (Carteira C4 + C5)": {},
+        "Desp PDD Anualizada / Carteira Bruta": {},
     }
     periodos_base = {_periodo_ano_anterior(periodo) for periodo in periodos}
     periodos_ext = [p for p in periodos + sorted(periodos_base) if p]
@@ -1624,7 +1633,17 @@ def _preparar_metricas_extra_peers(
         ],
     )
 
-    col_ativos_liquidos = _resolver_coluna_peers(cache_ativo, ["Depósitos (a)", "Depositos (a)", "Depósitos"])
+    col_ativos_liquidos = _resolver_coluna_peers(
+        cache_ativo,
+        [
+            "Depósitos (a)",
+            "Depositos (a)",
+            "Depósitos",
+            "Depositos",
+            "Depósitos (a) =",
+            "Depósitos (a) +",
+        ],
+    )
 
     col_disp = _resolver_coluna_peers(cache_passivo, ["Disponibilidades (a)", "Disponibilidades"])
     col_aplic = _resolver_coluna_peers(
@@ -1656,6 +1675,16 @@ def _preparar_metricas_extra_peers(
     col_c4 = _resolver_coluna_peers(cache_carteira_instr, ["C4"])
     col_c5 = _resolver_coluna_peers(cache_carteira_instr, ["C5"])
 
+    col_desp_pdd = _resolver_coluna_peers(
+        cache_dre,
+        [
+            "Resultado com Perda Esperada (f)",
+            "Resultado com Perda Esperada",
+            "Desp. PDD",
+            "Despesa com Perda Esperada",
+        ],
+    )
+
     for banco in bancos:
         for periodo in periodos_ext:
             chave = (banco, periodo)
@@ -1680,7 +1709,7 @@ def _preparar_metricas_extra_peers(
             ]
             perda_esperada = _somar_valores(perda_vals)
             extra["Perda Esperada"][chave] = perda_esperada
-            extra["Perda Esperada / Carteira"][chave] = _calcular_ratio_peers(perda_esperada, carteira_bruta)
+            extra["Perda Esperada / Carteira Bruta"][chave] = _calcular_ratio_peers(perda_esperada, carteira_bruta)
 
             valor_c4 = _obter_valor_peers(cache_carteira_instr, banco, periodo, col_c4)
             valor_c5 = _obter_valor_peers(cache_carteira_instr, banco, periodo, col_c5)
@@ -1688,6 +1717,17 @@ def _preparar_metricas_extra_peers(
             extra["Carteira de Créd. Class. C4+C5"][chave] = carteira_c4_c5
             extra["Carteira de Créd. Class. C4+C5 / Carteira Bruta"][chave] = _calcular_ratio_peers(
                 carteira_c4_c5,
+                carteira_bruta,
+            )
+            extra["Perda Esperada / (Carteira C4 + C5)"][chave] = _calcular_ratio_peers(
+                perda_esperada,
+                carteira_c4_c5,
+            )
+
+            desp_pdd = _obter_valor_peers(cache_dre, banco, periodo, col_desp_pdd)
+            desp_pdd_anual = _anualizar_valor_dre(desp_pdd, periodo)
+            extra["Desp PDD Anualizada / Carteira Bruta"][chave] = _calcular_ratio_peers(
+                desp_pdd_anual,
                 carteira_bruta,
             )
 
@@ -1708,6 +1748,33 @@ def _calcular_ratio_peers(valor_num, valor_den) -> Optional[float]:
         return None
 
 
+def _anualizar_valor_dre(valor, periodo: str) -> Optional[float]:
+    if valor is None or pd.isna(valor):
+        return None
+    valor_num = _coerce_numeric_value(valor)
+    if valor_num is None or pd.isna(valor_num):
+        return None
+    parsed = _parse_periodo(periodo)
+    if not parsed:
+        return float(valor_num)
+    parte, _, _ = parsed
+    try:
+        parte_int = int(parte)
+    except ValueError:
+        return float(valor_num)
+    if 1 <= parte_int <= 4:
+        meses = parte_int * 3
+    elif 1 <= parte_int <= 12:
+        meses = parte_int
+    else:
+        meses = None
+    if not meses:
+        return float(valor_num)
+    if meses == 0:
+        return None
+    return float(valor_num) / meses * 12
+
+
 def _ajustar_lucro_acumulado_peers(
     df: pd.DataFrame,
     banco: str,
@@ -1725,9 +1792,14 @@ def _ajustar_lucro_acumulado_peers(
         parte_int = int(parte)
     except ValueError:
         return valor_atual
-    if parte_int != 9:
-        return valor_atual
-    periodo_junho = _periodo_mesma_estrutura(periodo, 6)
+    if 1 <= parte_int <= 4:
+        if parte_int != 3:
+            return valor_atual
+        periodo_junho = _periodo_mesma_estrutura(periodo, 2)
+    else:
+        if parte_int != 9:
+            return valor_atual
+        periodo_junho = _periodo_mesma_estrutura(periodo, 6)
     if not periodo_junho:
         return valor_atual
     valor_junho = _obter_valor_peers(df, banco, periodo_junho, coluna)
@@ -1757,6 +1829,7 @@ def _montar_tabela_peers(
         (caches_extras or {}).get("carteira_pf"),
         (caches_extras or {}).get("carteira_pj"),
         (caches_extras or {}).get("carteira_instrumentos"),
+        (caches_extras or {}).get("dre"),
     )
 
     for section in PEERS_TABELA_LAYOUT:
@@ -1779,7 +1852,7 @@ def _montar_tabela_peers(
                     elif label == "Ativo / PL":
                         valor_ativo = _obter_valor_peers(df, banco, periodo, coluna_ativo)
                         valor_pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
-                        valor = _calcular_ratio_peers(valor_pl, valor_ativo)
+                        valor = _calcular_ratio_peers(valor_ativo, valor_pl)
                     elif coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna)
@@ -1799,7 +1872,7 @@ def _montar_tabela_peers(
                     elif periodo_base and label == "Ativo / PL":
                         valor_ativo_base = _obter_valor_peers(df, banco, periodo_base, coluna_ativo)
                         valor_pl_base = _obter_valor_peers(df, banco, periodo_base, coluna_pl)
-                        valor_base = _calcular_ratio_peers(valor_pl_base, valor_ativo_base)
+                        valor_base = _calcular_ratio_peers(valor_ativo_base, valor_pl_base)
                     else:
                         valor_base = None
                     if valor_base is not None and valor is not None and not pd.isna(valor) and not pd.isna(valor_base):
@@ -4612,12 +4685,14 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
                     cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
                     cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
+                    cache_dre = _carregar_cache_relatorio("dre")
 
                     cache_ativo = _aplicar_aliases_df(cache_ativo, dict_aliases)
                     cache_passivo = _aplicar_aliases_df(cache_passivo, dict_aliases)
                     cache_carteira_pf = _aplicar_aliases_df(cache_carteira_pf, dict_aliases)
                     cache_carteira_pj = _aplicar_aliases_df(cache_carteira_pj, dict_aliases)
                     cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
+                    cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
 
                     valores, colunas_usadas, faltas, delta_flags = _montar_tabela_peers(
                         df,
@@ -4629,6 +4704,7 @@ elif menu == "Peers (Tabela)":
                             "carteira_pf": cache_carteira_pf,
                             "carteira_pj": cache_carteira_pj,
                             "carteira_instrumentos": cache_carteira_instr,
+                            "dre": cache_dre,
                         },
                     )
 
@@ -4672,9 +4748,12 @@ elif menu == "Peers (Tabela)":
                             <strong>Ativos Líquidos</strong> = Depósitos (a) no relatório de Ativo (Rel. 2).<br>
                             <strong>Depósitos Totais</strong> = Disponibilidades (a) + Aplicações Interfinanceiras de Liquidez (b) + Títulos e Valores Mobiliários (c) no relatório de Passivo (Rel. 3).<br>
                             <strong>Perda Esperada</strong> = soma das linhas Perda Esperada (e2), Hedge de Valor Justo (e3), Ajuste a Valor Justo (e4), Perda Esperada (f2), Hedge de Valor Justo (f3), Perda Esperada (g2), Hedge de Valor Justo (g3), Ajuste a Valor Justo (g4) e Perda Esperada (h2) no relatório de Ativo (Rel. 2).<br>
-                            <strong>Perda Esperada / Carteira</strong> = Perda Esperada ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Perda Esperada / Carteira Bruta</strong> = Perda Esperada ÷ Carteira de Crédito Bruta.<br>
                             <strong>Carteira de Créd. Class. C4+C5</strong> = soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
-                            <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.
+                            <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Perda Esperada / (Carteira C4 + C5)</strong> = Perda Esperada ÷ (C4 + C5).<br>
+                            <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Desp. PDD anualizada) ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Δ (▲/▼)</strong> = variação vs. mesmo período do ano anterior.
                         </div>
                         """,
                         unsafe_allow_html=True,
