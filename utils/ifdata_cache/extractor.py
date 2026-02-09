@@ -375,17 +375,16 @@ def _calcular_metricas_derivadas(df: pd.DataFrame, periodo: str) -> pd.DataFrame
     # Lucro Líquido Acumulado YTD
     if "Lucro Líquido" in df.columns:
         mes = periodo[4:6]
-        # Fator de anualização baseado no trimestre
-        fator_map = {"03": 4, "06": 2, "09": 4/3, "12": 1}
-        fator = fator_map.get(mes, 1)
+        mes_int = int(mes) if str(mes).isdigit() else None
+        fator = 12 / mes_int if mes_int else 1
         df["Lucro Líquido Acumulado YTD"] = df["Lucro Líquido"]
         # Nota: o Lucro Líquido já vem acumulado do BCB
 
     # ROE Acumulado YTD Anualizado (%)
     if "Lucro Líquido" in df.columns and "Patrimônio Líquido" in df.columns:
         mes = periodo[4:6]
-        fator_map = {"03": 4, "06": 2, "09": 4/3, "12": 1}
-        fator = fator_map.get(mes, 1)
+        mes_int = int(mes) if str(mes).isdigit() else None
+        fator = 12 / mes_int if mes_int else 1
 
         # ROE = (Lucro / PL) * fator_anualização
         # Armazenado como decimal (0-1), não percentual
