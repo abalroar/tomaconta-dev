@@ -323,6 +323,128 @@ VARS_MOEDAS = [
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
+# Variáveis ratio adicionais (tabela peers)
+VARS_RAZAO.append('Ativo/PL')
+
+PEERS_TABELA_LAYOUT = [
+    {
+        "section": "Balanço",
+        "rows": [
+            {
+                "label": "Ativo Total",
+                "data_keys": ["Ativo Total"],
+                "format_key": "Ativo Total",
+            },
+            {
+                "label": "Ativos Líquidos",
+                "data_keys": [],
+                "format_key": "Ativos Líquidos",
+                "todo": "TODO: Integrar Ativos Líquidos a partir das fontes do projeto.",
+            },
+            {
+                "label": "Carteira de Crédito Bruta",
+                "data_keys": [],
+                "format_key": "Carteira de Crédito",
+                "todo": "TODO: Integrar Carteira de Crédito Bruta a partir das fontes do projeto.",
+            },
+            {
+                "label": "Depósitos Totais",
+                "data_keys": [],
+                "format_key": "Depósitos Totais",
+                "todo": "TODO: Integrar Depósitos Totais a partir das fontes do projeto.",
+            },
+            {
+                "label": "Patrimônio Líquido (PL)",
+                "data_keys": ["Patrimônio Líquido"],
+                "format_key": "Patrimônio Líquido",
+            },
+        ],
+    },
+    {
+        "section": "Qualidade Carteira",
+        "rows": [
+            {
+                "label": "Provisão do Banco",
+                "data_keys": [],
+                "format_key": "Provisão do Banco",
+                "todo": "TODO: Integrar Provisão do Banco a partir das fontes do projeto.",
+            },
+            {
+                "label": "Provisão / Carteira",
+                "data_keys": [],
+                "format_key": "Provisão / Carteira",
+                "todo": "TODO: Integrar Provisão/Carteira a partir das fontes do projeto.",
+            },
+            {
+                "label": "Estágio 3",
+                "data_keys": [],
+                "format_key": "Estágio 3",
+                "todo": "TODO: Integrar Estágio 3 a partir das fontes do projeto.",
+            },
+            {
+                "label": "Estágio 3 / Carteira Bruta",
+                "data_keys": [],
+                "format_key": "Estágio 3 / Carteira Bruta",
+                "todo": "TODO: Integrar Estágio 3/Carteira Bruta a partir das fontes do projeto.",
+            },
+            {
+                "label": "Provisão / Estágio 3",
+                "data_keys": [],
+                "format_key": "Provisão / Estágio 3",
+                "todo": "TODO: Integrar Provisão/Estágio 3 a partir das fontes do projeto.",
+            },
+            {
+                "label": "Desp PDD Anualizada / Carteira Bruta",
+                "data_keys": [],
+                "format_key": "Desp PDD Anualizada / Carteira Bruta",
+                "todo": "TODO: Integrar despesa PDD anualizada/Carteira Bruta a partir das fontes do projeto.",
+            },
+            {
+                "label": "Desp PDD / NII (ref: período acumulado)",
+                "data_keys": [],
+                "format_key": "Desp PDD / NII",
+                "todo": "TODO: Integrar despesa PDD/NII (período acumulado) a partir das fontes do projeto.",
+            },
+        ],
+    },
+    {
+        "section": "Alavancagem",
+        "rows": [
+            {
+                "label": "Ativo / PL",
+                "data_keys": ["Ativo/PL", "Ativo / PL"],
+                "format_key": "Ativo/PL",
+                "todo": "TODO: Integrar Ativo/PL a partir das fontes do projeto (sem criar fórmula nova).",
+            },
+            {
+                "label": "Crédito / PL",
+                "data_keys": ["Crédito/PL (%)", "Crédito/PL"],
+                "format_key": "Crédito/PL (%)",
+            },
+            {
+                "label": "Índice de Basileia Total",
+                "data_keys": ["Índice de Basileia", "Índice de Basileia Total (%)"],
+                "format_key": "Índice de Basileia",
+            },
+        ],
+    },
+    {
+        "section": "Desempenho",
+        "rows": [
+            {
+                "label": "Lucro Líquido Acumulado",
+                "data_keys": ["Lucro Líquido Acumulado YTD"],
+                "format_key": "Lucro Líquido Acumulado YTD",
+            },
+            {
+                "label": "ROE AC. Anualizado (%)",
+                "data_keys": ["ROE Ac. YTD an. (%)"],
+                "format_key": "ROE Ac. YTD an. (%)",
+            },
+        ],
+    },
+]
+
 # Variáveis disponíveis para ponderação (variáveis de tamanho/volume em valores absolutos)
 # Mapeamento: label exibido -> nome da coluna no DataFrame
 VARIAVEIS_PONDERACAO = {
@@ -1281,6 +1403,310 @@ def get_axis_format(variavel):
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
 
+def _normalizar_label_peers(texto: str) -> str:
+    if texto is None:
+        return ""
+    return (
+        str(texto)
+        .strip()
+        .lower()
+        .replace(".", "")
+        .replace("á", "a")
+        .replace("à", "a")
+        .replace("ã", "a")
+        .replace("â", "a")
+        .replace("é", "e")
+        .replace("ê", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ô", "o")
+        .replace("õ", "o")
+        .replace("ú", "u")
+        .replace("ç", "c")
+    )
+
+
+def _resolver_coluna_peers(df: pd.DataFrame, candidatos: list) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    for candidato in candidatos:
+        if candidato in df.columns:
+            return candidato
+    candidatos_norm = [_normalizar_label_peers(c) for c in candidatos]
+    for col in df.columns:
+        col_norm = _normalizar_label_peers(col)
+        if col_norm in candidatos_norm:
+            return col
+    return None
+
+
+def _formatar_valor_peers(valor, format_key: str, coluna_origem: Optional[str] = None) -> str:
+    if valor is None or pd.isna(valor):
+        return "—"
+    if coluna_origem and "(%)" in coluna_origem:
+        try:
+            return f"{float(valor):.2f}%"
+        except Exception:
+            return "—"
+    return formatar_valor(valor, format_key)
+
+
+def _montar_tabela_peers(
+    df: pd.DataFrame,
+    bancos: list,
+    periodos: list,
+):
+    """Monta estrutura da tabela peers com valores por banco/período."""
+    valores = {}
+    colunas_usadas = {}
+    faltas = set()
+
+    for section in PEERS_TABELA_LAYOUT:
+        for row in section["rows"]:
+            label = row["label"]
+            candidatos = row.get("data_keys", [])
+            coluna = _resolver_coluna_peers(df, candidatos) if candidatos else None
+            colunas_usadas[label] = coluna
+            if coluna is None and row.get("todo"):
+                faltas.add(label)
+
+            for banco in bancos:
+                for periodo in periodos:
+                    chave = (label, banco, periodo)
+                    valor = None
+                    if coluna:
+                        df_cell = df[
+                            (df["Instituição"] == banco) &
+                            (df["Período"] == periodo)
+                        ]
+                        if not df_cell.empty:
+                            valor = df_cell.iloc[0].get(coluna)
+                    valores[chave] = valor
+
+    return valores, colunas_usadas, faltas
+
+
+def _render_peers_table_html(
+    bancos: list,
+    periodos: list,
+    valores: dict,
+    colunas_usadas: dict,
+):
+    colunas_total = 1 + len(bancos) * len(periodos)
+    html = """
+    <style>
+    .peers-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+        margin-top: 10px;
+        table-layout: auto;
+    }
+    .peers-table th, .peers-table td {
+        border: 1px solid #ddd;
+        padding: 6px 10px;
+        text-align: right;
+        vertical-align: top;
+        white-space: nowrap;
+    }
+    .peers-table th {
+        background-color: #f5f5f5;
+        font-weight: 600;
+        text-align: center;
+        white-space: normal;
+    }
+    .peers-table td:first-child {
+        text-align: left;
+        font-weight: 500;
+        white-space: nowrap;
+        width: 1%;
+        padding-right: 8px;
+    }
+    .peers-table thead tr:first-child th {
+        background-color: #4a4a4a;
+        color: white;
+    }
+    .peers-table thead tr:nth-child(2) th {
+        background-color: #6a6a6a;
+        color: white;
+    }
+    .peer-section {
+        background-color: #4a90e2;
+        color: white;
+        font-weight: 600;
+        text-align: left !important;
+    }
+    .peer-item td:first-child {
+        padding-left: 18px;
+        font-weight: 400;
+    }
+    .peer-zebra {
+        background-color: #f8f9fa;
+    }
+    .delta-pos { color: #28a745; margin-left: 4px; }
+    .delta-neg { color: #dc3545; margin-left: 4px; }
+    </style>
+    <table class="peers-table">
+    <thead>
+    <tr>
+        <th rowspan="2">R$ MM e %</th>
+    """
+
+    for banco in bancos:
+        html += f'<th colspan="{len(periodos)}">{banco}</th>'
+    html += "</tr><tr>"
+
+    for _ in bancos:
+        for periodo in periodos:
+            html += f"<th>{periodo_para_exibicao(periodo)}</th>"
+    html += "</tr></thead><tbody>"
+
+    zebra_idx = 0
+    for section in PEERS_TABELA_LAYOUT:
+        html += f'<tr><td class="peer-section" colspan="{colunas_total}">{section["section"]}</td></tr>'
+        for row in section["rows"]:
+            zebra_class = "peer-zebra" if zebra_idx % 2 == 0 else ""
+            zebra_idx += 1
+            html += f'<tr class="peer-item {zebra_class}"><td>{row["label"]}</td>'
+
+            for banco in bancos:
+                valor_anterior = None
+                for periodo in periodos:
+                    chave = (row["label"], banco, periodo)
+                    coluna = colunas_usadas.get(row["label"])
+                    valor = valores.get(chave)
+                    valor_fmt = _formatar_valor_peers(valor, row["format_key"], coluna_origem=coluna)
+
+                    delta_html = ""
+                    if valor_anterior is not None and valor is not None and not pd.isna(valor):
+                        delta = valor - valor_anterior
+                        if delta > 0:
+                            delta_html = ' <span class="delta-pos">▲</span>'
+                        elif delta < 0:
+                            delta_html = ' <span class="delta-neg">▼</span>'
+                    html += f"<td>{valor_fmt}{delta_html}</td>"
+                    valor_anterior = valor
+
+            html += "</tr>"
+
+    html += "</tbody></table>"
+    return html
+
+
+def _gerar_imagem_peers_tabela(
+    bancos: list,
+    periodos: list,
+    valores: dict,
+    colunas_usadas: dict,
+    scale: float = 1.0,
+):
+    """Gera imagem PNG da tabela peers para exportação."""
+    header_row_1 = ["R$ MM e %"]
+    for banco in bancos:
+        for idx in range(len(periodos)):
+            header_row_1.append(banco if idx == 0 else "")
+    header_row_2 = [""]
+    for _ in bancos:
+        for periodo in periodos:
+            header_row_2.append(periodo_para_exibicao(periodo))
+
+    rows = [header_row_1, header_row_2]
+    delta_flags = []
+    row_styles = ["header", "subheader"]
+
+    for section in PEERS_TABELA_LAYOUT:
+        rows.append([section["section"]] + [""] * (len(bancos) * len(periodos)))
+        row_styles.append("section")
+        delta_flags.append([None] * len(rows[-1]))
+
+        for row in section["rows"]:
+            linha = [row["label"]]
+            deltas = [None]
+            for banco in bancos:
+                valor_anterior = None
+                for periodo in periodos:
+                    chave = (row["label"], banco, periodo)
+                    coluna = colunas_usadas.get(row["label"])
+                    valor = valores.get(chave)
+                    valor_fmt = _formatar_valor_peers(valor, row["format_key"], coluna_origem=coluna)
+                    delta_flag = None
+                    if valor_anterior is not None and valor is not None and not pd.isna(valor):
+                        delta = valor - valor_anterior
+                        if delta > 0:
+                            delta_flag = "up"
+                            valor_fmt = f"{valor_fmt} ▲"
+                        elif delta < 0:
+                            delta_flag = "down"
+                            valor_fmt = f"{valor_fmt} ▼"
+                    linha.append(valor_fmt)
+                    deltas.append(delta_flag)
+                    valor_anterior = valor
+            rows.append(linha)
+            row_styles.append("data")
+            delta_flags.append(deltas)
+
+    n_rows = len(rows)
+    n_cols = len(rows[0])
+
+    col_widths = []
+    for col_idx in range(n_cols):
+        max_len = max(len(str(row[col_idx])) for row in rows)
+        base = 0.16 if col_idx == 0 else 0.12
+        col_widths.append(max(base, min(0.35, max_len * 0.012)))
+
+    fig_width = max(10, sum(col_widths) * 10 * scale)
+    fig_height = max(3, n_rows * 0.32 * scale)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=rows,
+        cellLoc="right",
+        colWidths=col_widths,
+        loc="upper left",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10 * scale)
+    table.scale(1, 1.2 * scale)
+
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        cell.set_edgecolor("#dddddd")
+        if row_idx == 0:
+            cell.set_facecolor("#4a4a4a")
+            cell.get_text().set_color("white")
+            cell.get_text().set_fontweight("bold")
+            cell.get_text().set_ha("center")
+        elif row_idx == 1:
+            cell.set_facecolor("#6a6a6a")
+            cell.get_text().set_color("white")
+            cell.get_text().set_fontweight("bold")
+            cell.get_text().set_ha("center")
+        else:
+            style = row_styles[row_idx]
+            if style == "section":
+                cell.set_facecolor("#4a90e2")
+                cell.get_text().set_color("white")
+                cell.get_text().set_fontweight("bold")
+                if col_idx == 0:
+                    cell.get_text().set_ha("left")
+                else:
+                    cell.get_text().set_text("")
+            else:
+                cell.set_facecolor("#ffffff" if row_idx % 2 == 0 else "#f8f9fa")
+                if col_idx == 0:
+                    cell.get_text().set_ha("left")
+                delta_flag = delta_flags[row_idx - 2][col_idx] if row_idx >= 2 else None
+                if delta_flag == "up":
+                    cell.get_text().set_color("#28a745")
+                elif delta_flag == "down":
+                    cell.get_text().set_color("#dc3545")
+
+    buffer = BytesIO()
+    fig.savefig(buffer, format="png", dpi=int(180 * scale), bbox_inches="tight")
+    plt.close(fig)
+    buffer.seek(0)
+    return buffer
+
 def adicionar_indice_cet1(df_base: pd.DataFrame) -> pd.DataFrame:
     if df_base.empty or "Índice de CET1" in df_base.columns:
         return df_base
@@ -1978,6 +2404,7 @@ MENU_PRINCIPAL = [
     "Rankings",
     "Histórico Individual",
     "Histórico Peers",
+    "Peers (Tabela)",
     "Scatter Plot",
     "Capital Regulatório",
     "DRE",
@@ -2008,6 +2435,7 @@ menu_atual = st.session_state['menu_atual']
 menus_precisam_principal = {
     "Histórico Individual",
     "Histórico Peers",
+    "Peers (Tabela)",
     "Scatter Plot",
     "Rankings",
     "Crie sua métrica!",
@@ -3709,6 +4137,108 @@ elif menu == "Histórico Peers":
                 st.warning("nenhuma instituição encontrada nos dados")
         else:
             st.warning("dados incompletos ou vazios")
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Peers (Tabela)":
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        df = get_dados_concatenados()
+
+        if len(df) > 0 and 'Instituição' in df.columns:
+            bancos_todos = df['Instituição'].dropna().unique().tolist()
+            dict_aliases = st.session_state.get('dict_aliases', {})
+            bancos_disponiveis = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
+            periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
+            periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
+
+            if bancos_disponiveis and periodos_disponiveis:
+                st.markdown("### Peers (Tabela)")
+                st.caption("comparativo multi-bancos com períodos sincronizados.")
+
+                col_bancos, col_periodos = st.columns([2, 2])
+                with col_bancos:
+                    bancos_selecionados = st.multiselect(
+                        "selecionar instituições (até 5)",
+                        bancos_disponiveis,
+                        default=bancos_disponiveis[:2],
+                        max_selections=5,
+                        key="peers_tabela_bancos",
+                    )
+                with col_periodos:
+                    periodos_selecionados = st.multiselect(
+                        "selecionar períodos (até 3)",
+                        periodos_dropdown,
+                        default=periodos_dropdown[:3],
+                        max_selections=3,
+                        key="peers_tabela_periodos",
+                        format_func=periodo_para_exibicao,
+                    )
+
+                if bancos_selecionados and periodos_selecionados:
+                    periodos_selecionados = ordenar_periodos(periodos_selecionados)
+                    valores, colunas_usadas, faltas = _montar_tabela_peers(
+                        df,
+                        bancos_selecionados,
+                        periodos_selecionados,
+                    )
+
+                    if faltas:
+                        st.info(
+                            "⚠️ Algumas métricas ainda aguardam integração (ver TODOs no código): "
+                            + ", ".join(sorted(faltas))
+                        )
+
+                    html_tabela = _render_peers_table_html(
+                        bancos_selecionados,
+                        periodos_selecionados,
+                        valores,
+                        colunas_usadas,
+                    )
+                    st.markdown(html_tabela, unsafe_allow_html=True)
+
+                    with st.expander("📥 exportar visualização"):
+                        st.caption(
+                            "Exporta a tabela no layout atual. "
+                            "A versão PowerPoint usa maior resolução para slides."
+                        )
+                        col_png, col_ppt = st.columns(2)
+                        with col_png:
+                            img_buffer = _gerar_imagem_peers_tabela(
+                                bancos_selecionados,
+                                periodos_selecionados,
+                                valores,
+                                colunas_usadas,
+                                scale=1.0,
+                            )
+                            st.download_button(
+                                label="baixar PNG",
+                                data=img_buffer,
+                                file_name="peers_tabela.png",
+                                mime="image/png",
+                                key="peers_tabela_png",
+                            )
+                        with col_ppt:
+                            img_buffer_ppt = _gerar_imagem_peers_tabela(
+                                bancos_selecionados,
+                                periodos_selecionados,
+                                valores,
+                                colunas_usadas,
+                                scale=1.6,
+                            )
+                            st.download_button(
+                                label="baixar PNG (powerpoint)",
+                                data=img_buffer_ppt,
+                                file_name="peers_tabela_ppt.png",
+                                mime="image/png",
+                                key="peers_tabela_png_ppt",
+                            )
+                else:
+                    st.info("selecione instituições e períodos para visualizar a tabela.")
+            else:
+                st.warning("nenhuma instituição ou período disponível nos dados.")
+        else:
+            st.warning("dados incompletos ou vazios.")
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
