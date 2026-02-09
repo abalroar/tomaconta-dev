@@ -81,6 +81,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import numpy as np
+import xlsxwriter
 from PIL import Image as PILImage
 from io import BytesIO
 
@@ -291,6 +292,7 @@ VARS_PERCENTUAL = [
     'Índice de CET1',
     'Crédito/Captações (%)',
     'Crédito/Ativo (%)',
+    'Ativo/PL',
     'Índice de Imobilização',
     # Variáveis de Capital (Relatório 5)
     'Índice de Capital Principal',
@@ -322,9 +324,6 @@ VARS_MOEDAS = [
     'Adicional de Capital Principal',
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
-
-# Variáveis ratio adicionais (tabela peers)
-VARS_RAZAO.append('Ativo/PL')
 
 PEERS_TABELA_LAYOUT = [
     {
@@ -1469,6 +1468,13 @@ def _resolver_coluna_peers(df: pd.DataFrame, candidatos: list) -> Optional[str]:
 def _formatar_valor_peers(valor, format_key: str, coluna_origem: Optional[str] = None) -> str:
     if valor is None or pd.isna(valor):
         return "—"
+    if format_key == "Ativo/PL":
+        return _formatar_percentual(valor)
+    if format_key == "Crédito/PL (%)":
+        try:
+            return f"{float(valor):.2f}x"
+        except Exception:
+            return "—"
     if coluna_origem and "(%)" in coluna_origem:
         try:
             return _formatar_percentual(float(valor))
@@ -1522,6 +1528,20 @@ def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optio
     return df_cell.iloc[0].get(coluna)
 
 
+def _calcular_ratio_peers(valor_num, valor_den) -> Optional[float]:
+    if valor_num is None or valor_den is None:
+        return None
+    if pd.isna(valor_num) or pd.isna(valor_den):
+        return None
+    try:
+        valor_den_float = float(valor_den)
+        if valor_den_float == 0:
+            return None
+        return float(valor_num) / valor_den_float
+    except Exception:
+        return None
+
+
 def _ajustar_lucro_acumulado_peers(
     df: pd.DataFrame,
     banco: str,
@@ -1539,10 +1559,9 @@ def _ajustar_lucro_acumulado_peers(
         parte_int = int(parte)
     except ValueError:
         return valor_atual
-    if parte_int not in {3, 9}:
+    if parte_int != 9:
         return valor_atual
-    parte_junho = 2 if parte_int == 3 else 6
-    periodo_junho = _periodo_mesma_estrutura(periodo, parte_junho)
+    periodo_junho = _periodo_mesma_estrutura(periodo, 6)
     if not periodo_junho:
         return valor_atual
     valor_junho = _obter_valor_peers(df, banco, periodo_junho, coluna)
@@ -1561,12 +1580,16 @@ def _montar_tabela_peers(
     colunas_usadas = {}
     faltas = set()
     delta_flags = {}
+    coluna_ativo = _resolver_coluna_peers(df, ["Ativo Total"])
+    coluna_pl = _resolver_coluna_peers(df, ["Patrimônio Líquido"])
 
     for section in PEERS_TABELA_LAYOUT:
         for row in section["rows"]:
             label = row["label"]
             candidatos = row.get("data_keys", [])
             coluna = _resolver_coluna_peers(df, candidatos) if candidatos else None
+            if label == "Ativo / PL":
+                coluna = None
             colunas_usadas[label] = coluna
             if coluna is None and row.get("todo"):
                 faltas.add(label)
@@ -1575,7 +1598,11 @@ def _montar_tabela_peers(
                 for periodo in periodos:
                     chave = (label, banco, periodo)
                     valor = None
-                    if coluna:
+                    if label == "Ativo / PL":
+                        valor_ativo = _obter_valor_peers(df, banco, periodo, coluna_ativo)
+                        valor_pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
+                        valor = _calcular_ratio_peers(valor_pl, valor_ativo)
+                    elif coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna)
                         else:
@@ -1589,12 +1616,18 @@ def _montar_tabela_peers(
                             valor_base = _ajustar_lucro_acumulado_peers(df, banco, periodo_base, coluna)
                         else:
                             valor_base = _obter_valor_peers(df, banco, periodo_base, coluna)
-                        if valor_base is not None and valor is not None and not pd.isna(valor) and not pd.isna(valor_base):
-                            delta = valor - valor_base
-                            if delta > 0:
-                                delta_flag = "up"
-                            elif delta < 0:
-                                delta_flag = "down"
+                    elif periodo_base and label == "Ativo / PL":
+                        valor_ativo_base = _obter_valor_peers(df, banco, periodo_base, coluna_ativo)
+                        valor_pl_base = _obter_valor_peers(df, banco, periodo_base, coluna_pl)
+                        valor_base = _calcular_ratio_peers(valor_pl_base, valor_ativo_base)
+                    else:
+                        valor_base = None
+                    if valor_base is not None and valor is not None and not pd.isna(valor) and not pd.isna(valor_base):
+                        delta = valor - valor_base
+                        if delta > 0:
+                            delta_flag = "up"
+                        elif delta < 0:
+                            delta_flag = "down"
                     delta_flags[chave] = delta_flag
 
     return valores, colunas_usadas, faltas, delta_flags
@@ -1814,6 +1847,209 @@ def _gerar_imagem_peers_tabela(
     plt.close(fig)
     buffer.seek(0)
     return buffer
+
+
+def _gerar_excel_peers_tabela(
+    bancos: list,
+    periodos: list,
+    valores: dict,
+    colunas_usadas: dict,
+    delta_flags: dict,
+) -> BytesIO:
+    output = BytesIO()
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    worksheet = workbook.add_worksheet("peers_tabela")
+
+    n_cols = 1 + len(bancos) * len(periodos)
+    border = {"border": 1, "border_color": "#dddddd"}
+    header_fmt = workbook.add_format(
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#4a4a4a", "font_color": "white", **border}
+    )
+    subheader_fmt = workbook.add_format(
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6a6a6a", "font_color": "white", **border}
+    )
+    section_fmt = workbook.add_format(
+        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#4a90e2", "font_color": "white", **border}
+    )
+    row_even = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+    row_odd = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", **border})
+    row_even_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+    row_odd_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#ffffff", **border})
+    row_even_up = workbook.add_format(
+        {"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", "font_color": "#28a745", **border}
+    )
+    row_even_down = workbook.add_format(
+        {"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", "font_color": "#dc3545", **border}
+    )
+    row_odd_up = workbook.add_format(
+        {"align": "right", "valign": "vcenter", "bg_color": "#ffffff", "font_color": "#28a745", **border}
+    )
+    row_odd_down = workbook.add_format(
+        {"align": "right", "valign": "vcenter", "bg_color": "#ffffff", "font_color": "#dc3545", **border}
+    )
+
+    worksheet.set_column(0, 0, 34)
+    worksheet.set_column(1, max(1, n_cols - 1), 16)
+
+    row_idx = 0
+    worksheet.write(row_idx, 0, "R$ MM e %", header_fmt)
+    col_idx = 1
+    for banco in bancos:
+        start_col = col_idx
+        end_col = col_idx + len(periodos) - 1
+        if start_col <= end_col:
+            worksheet.merge_range(row_idx, start_col, row_idx, end_col, banco, header_fmt)
+        col_idx = end_col + 1
+    row_idx += 1
+
+    worksheet.write(row_idx, 0, "", subheader_fmt)
+    col_idx = 1
+    for _ in bancos:
+        for periodo in periodos:
+            worksheet.write(row_idx, col_idx, periodo_para_exibicao(periodo), subheader_fmt)
+            col_idx += 1
+    row_idx += 1
+
+    zebra_idx = 0
+    for section in PEERS_TABELA_LAYOUT:
+        worksheet.merge_range(row_idx, 0, row_idx, n_cols - 1, section["section"], section_fmt)
+        row_idx += 1
+        for row in section["rows"]:
+            is_even = zebra_idx % 2 == 0
+            label_fmt = row_even_label if is_even else row_odd_label
+            base_fmt = row_even if is_even else row_odd
+            base_fmt_up = row_even_up if is_even else row_odd_up
+            base_fmt_down = row_even_down if is_even else row_odd_down
+
+            worksheet.write(row_idx, 0, row["label"], label_fmt)
+            col_idx = 1
+            for banco in bancos:
+                for periodo in periodos:
+                    chave = (row["label"], banco, periodo)
+                    coluna = colunas_usadas.get(row["label"])
+                    valor = valores.get(chave)
+                    valor_fmt = _formatar_valor_peers(valor, row["format_key"], coluna_origem=coluna)
+                    delta_flag = delta_flags.get(chave)
+                    cell_fmt = base_fmt
+                    if delta_flag == "up":
+                        valor_fmt = f"{valor_fmt} ▲"
+                        cell_fmt = base_fmt_up
+                    elif delta_flag == "down":
+                        valor_fmt = f"{valor_fmt} ▼"
+                        cell_fmt = base_fmt_down
+                    worksheet.write(row_idx, col_idx, valor_fmt, cell_fmt)
+                    col_idx += 1
+            row_idx += 1
+            zebra_idx += 1
+
+    workbook.close()
+    output.seek(0)
+    return output
+
+
+def _mapear_colunas_capital(df_capital: pd.DataFrame):
+    mapa_colunas_capital = {
+        'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
+        'Capital Complementar': ['Capital Complementar', 'Capital Complementar (b)'],
+        'Capital Nível II': ['Capital Nível II', 'Capital Nível II (d)'],
+        'RWA Total': ['RWA Total', 'Ativos Ponderados pelo Risco (RWA) (j) = (f) + (g) + (h) + (i)', 'Ativos Ponderados pelo Risco (RWA) (j)', 'RWA'],
+        'Índice de Basileia Capital': ['Índice de Basileia Capital', 'Índice de Basileia (n) = (e) / (j)', 'Índice de Basileia'],
+    }
+    colunas_encontradas = {}
+    colunas_faltantes = []
+    for nome_padrao, alternativas in mapa_colunas_capital.items():
+        encontrada = None
+        for alt in alternativas:
+            if alt in df_capital.columns:
+                encontrada = alt
+                break
+        if encontrada:
+            colunas_encontradas[nome_padrao] = encontrada
+        else:
+            colunas_faltantes.append(nome_padrao)
+    colunas_composicao = ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
+    faltantes_composicao = [c for c in colunas_composicao if c in colunas_faltantes]
+    tem_indice_basileia_precalc = 'Índice de Basileia Capital' in colunas_encontradas
+    return colunas_encontradas, colunas_faltantes, faltantes_composicao, tem_indice_basileia_precalc
+
+
+def _preparar_df_capital_base() -> pd.DataFrame:
+    if 'dados_capital' not in st.session_state or not st.session_state['dados_capital']:
+        return pd.DataFrame()
+    df_capital = pd.concat(st.session_state['dados_capital'].values(), ignore_index=True)
+    df_capital = normalizar_colunas_capital(df_capital)
+    dict_aliases = st.session_state.get('dict_aliases', {})
+    df_aliases = st.session_state.get('df_aliases', None)
+    dados_periodos = st.session_state.get('dados_periodos', None)
+    df_capital = resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases, dados_periodos)
+    return df_capital
+
+
+def _calcular_basileia_periodo(
+    df_capital: pd.DataFrame,
+    periodo: str,
+    colunas_encontradas: dict,
+) -> Tuple[pd.DataFrame, dict]:
+    df_periodo_cap = df_capital[df_capital['Período'] == periodo].copy()
+    info = {"usou_precalc": False, "mensagem": None}
+
+    pode_calcular_composicao = all(
+        col in colunas_encontradas
+        for col in ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
+    )
+
+    if pode_calcular_composicao:
+        col_capital_principal = colunas_encontradas['Capital Principal']
+        col_capital_complementar = colunas_encontradas['Capital Complementar']
+        col_capital_nivel2 = colunas_encontradas['Capital Nível II']
+        col_rwa_total = colunas_encontradas['RWA Total']
+
+        df_periodo_cap['RWA_valido'] = (
+            df_periodo_cap[col_rwa_total].notna() &
+            (df_periodo_cap[col_rwa_total] != 0)
+        )
+
+        df_periodo_cap['CET1 (%)'] = np.where(
+            df_periodo_cap['RWA_valido'],
+            (df_periodo_cap[col_capital_principal] / df_periodo_cap[col_rwa_total]) * 100,
+            np.nan
+        )
+        df_periodo_cap['AT1 (%)'] = np.where(
+            df_periodo_cap['RWA_valido'],
+            (df_periodo_cap[col_capital_complementar] / df_periodo_cap[col_rwa_total]) * 100,
+            np.nan
+        )
+        df_periodo_cap['T2 (%)'] = np.where(
+            df_periodo_cap['RWA_valido'],
+            (df_periodo_cap[col_capital_nivel2] / df_periodo_cap[col_rwa_total]) * 100,
+            np.nan
+        )
+
+        df_periodo_cap['Índice de Basileia Total (%)'] = (
+            df_periodo_cap['CET1 (%)'] +
+            df_periodo_cap['AT1 (%)'] +
+            df_periodo_cap['T2 (%)']
+        )
+        return df_periodo_cap, info
+
+    if 'Índice de Basileia Capital' in colunas_encontradas:
+        col_indice_basileia = colunas_encontradas['Índice de Basileia Capital']
+        valores_ib = df_periodo_cap[col_indice_basileia]
+        if valores_ib.max() <= 1:
+            df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib * 100
+        else:
+            df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib
+
+        df_periodo_cap['RWA_valido'] = True
+        df_periodo_cap['CET1 (%)'] = np.nan
+        df_periodo_cap['AT1 (%)'] = np.nan
+        df_periodo_cap['T2 (%)'] = np.nan
+        info["usou_precalc"] = True
+        info["mensagem"] = "ℹ️ Usando Índice de Basileia pré-calculado (composição CET1/AT1/T2 não disponível)"
+        return df_periodo_cap, info
+
+    info["mensagem"] = "Não foi possível calcular o Índice de Basileia. Verifique se o cache possui as colunas necessárias."
+    return pd.DataFrame(), info
 
 def adicionar_indice_cet1(df_base: pd.DataFrame) -> pd.DataFrame:
     if df_base.empty or "Índice de CET1" in df_base.columns:
@@ -2510,9 +2746,9 @@ with col_header:
 # Lista de opções do menu principal (análise)
 MENU_PRINCIPAL = [
     "Rankings",
+    "Peers (Tabela)",
     "Histórico Individual",
     "Histórico Peers",
-    "Peers (Tabela)",
     "Scatter Plot",
     "Capital Regulatório",
     "DRE",
@@ -3451,44 +3687,8 @@ elif menu == "Capital Regulatório":
     st.caption("análise de indicadores de capital usando dados do Relatório 5 (IFData/Olinda).")
 
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
-        df_capital = pd.concat(st.session_state['dados_capital'].values(), ignore_index=True)
-
-        # Resolver nomes de instituições que estão como códigos [IF xxxxx]
-        # Usa múltiplas fontes: dict_aliases, df_aliases, e dados_periodos como fallback
-        dict_aliases = st.session_state.get('dict_aliases', {})
-        df_aliases = st.session_state.get('df_aliases', None)
-        dados_periodos = st.session_state.get('dados_periodos', None)
-        df_capital = resolver_nomes_instituicoes_capital(df_capital, dict_aliases, df_aliases, dados_periodos)
-
-        # Mapeamento flexível de colunas (nome esperado -> alternativas)
-        mapa_colunas_capital = {
-            'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
-            'Capital Complementar': ['Capital Complementar', 'Capital Complementar (b)'],
-            'Capital Nível II': ['Capital Nível II', 'Capital Nível II (d)'],
-            'RWA Total': ['RWA Total', 'Ativos Ponderados pelo Risco (RWA) (j) = (f) + (g) + (h) + (i)', 'Ativos Ponderados pelo Risco (RWA) (j)', 'RWA'],
-            'Índice de Basileia Capital': ['Índice de Basileia Capital', 'Índice de Basileia (n) = (e) / (j)', 'Índice de Basileia'],
-        }
-
-        # Encontrar colunas disponíveis
-        colunas_encontradas = {}
-        colunas_faltantes = []
-        for nome_padrao, alternativas in mapa_colunas_capital.items():
-            encontrada = None
-            for alt in alternativas:
-                if alt in df_capital.columns:
-                    encontrada = alt
-                    break
-            if encontrada:
-                colunas_encontradas[nome_padrao] = encontrada
-            else:
-                colunas_faltantes.append(nome_padrao)
-
-        # Verificar colunas essenciais para gráfico de composição (CET1/AT1/T2)
-        colunas_composicao = ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
-        faltantes_composicao = [c for c in colunas_composicao if c in colunas_faltantes]
-
-        # Verificar se temos Índice de Basileia pré-calculado como fallback
-        tem_indice_basileia_precalc = 'Índice de Basileia Capital' in colunas_encontradas
+        df_capital = _preparar_df_capital_base()
+        colunas_encontradas, colunas_faltantes, faltantes_composicao, tem_indice_basileia_precalc = _mapear_colunas_capital(df_capital)
 
         if colunas_faltantes:
             # Mostrar aviso mas não bloquear
@@ -3532,73 +3732,15 @@ elif menu == "Capital Regulatório":
                 coluna_peso_capital = VARIAVEIS_PONDERACAO[tipo_media_cap_label]
 
             if tipo_grafico_capital == "Índice de Basileia Total":
-                # Filtrar dados do período
-                df_periodo_cap = df_capital[df_capital['Período'] == periodo_capital].copy()
-
-                # Verificar se podemos calcular composição (CET1/AT1/T2) ou usar índice pré-calculado
-                pode_calcular_composicao = all(
-                    col in colunas_encontradas
-                    for col in ['Capital Principal', 'Capital Complementar', 'Capital Nível II', 'RWA Total']
+                df_periodo_cap, basileia_info = _calcular_basileia_periodo(
+                    df_capital,
+                    periodo_capital,
+                    colunas_encontradas,
                 )
-
-                if pode_calcular_composicao:
-                    # Usar colunas mapeadas
-                    col_capital_principal = colunas_encontradas['Capital Principal']
-                    col_capital_complementar = colunas_encontradas['Capital Complementar']
-                    col_capital_nivel2 = colunas_encontradas['Capital Nível II']
-                    col_rwa_total = colunas_encontradas['RWA Total']
-
-                    # Calcular CET1, AT1, T2 como percentuais do RWA Total
-                    # CET1 = Capital Principal / RWA Total * 100
-                    # AT1 = Capital Complementar / RWA Total * 100
-                    # T2 = Capital Nível II / RWA Total * 100
-
-                    # Tratar RWA Total zero ou ausente
-                    df_periodo_cap['RWA_valido'] = (
-                        df_periodo_cap[col_rwa_total].notna() &
-                        (df_periodo_cap[col_rwa_total] != 0)
-                    )
-
-                    df_periodo_cap['CET1 (%)'] = np.where(
-                        df_periodo_cap['RWA_valido'],
-                        (df_periodo_cap[col_capital_principal] / df_periodo_cap[col_rwa_total]) * 100,
-                        np.nan
-                    )
-                    df_periodo_cap['AT1 (%)'] = np.where(
-                        df_periodo_cap['RWA_valido'],
-                        (df_periodo_cap[col_capital_complementar] / df_periodo_cap[col_rwa_total]) * 100,
-                        np.nan
-                    )
-                    df_periodo_cap['T2 (%)'] = np.where(
-                        df_periodo_cap['RWA_valido'],
-                        (df_periodo_cap[col_capital_nivel2] / df_periodo_cap[col_rwa_total]) * 100,
-                        np.nan
-                    )
-
-                    # Índice de Basileia Total = CET1 + AT1 + T2
-                    df_periodo_cap['Índice de Basileia Total (%)'] = (
-                        df_periodo_cap['CET1 (%)'] +
-                        df_periodo_cap['AT1 (%)'] +
-                        df_periodo_cap['T2 (%)']
-                    )
-                elif 'Índice de Basileia Capital' in colunas_encontradas:
-                    # Usar índice pré-calculado da API
-                    col_indice_basileia = colunas_encontradas['Índice de Basileia Capital']
-                    # Converter de decimal (0-1) para percentual se necessário
-                    valores_ib = df_periodo_cap[col_indice_basileia]
-                    if valores_ib.max() <= 1:  # Valores em decimal
-                        df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib * 100
-                    else:
-                        df_periodo_cap['Índice de Basileia Total (%)'] = valores_ib
-
-                    # Marcar que não temos composição
-                    df_periodo_cap['RWA_valido'] = True  # Assumir válido para exibição
-                    df_periodo_cap['CET1 (%)'] = np.nan
-                    df_periodo_cap['AT1 (%)'] = np.nan
-                    df_periodo_cap['T2 (%)'] = np.nan
-                    st.caption("ℹ️ Usando Índice de Basileia pré-calculado (composição CET1/AT1/T2 não disponível)")
-                else:
-                    st.error("Não foi possível calcular o Índice de Basileia. Verifique se o cache possui as colunas necessárias.")
+                if basileia_info.get("mensagem") and basileia_info.get("usou_precalc"):
+                    st.caption(basileia_info["mensagem"])
+                elif basileia_info.get("mensagem") and df_periodo_cap.empty:
+                    st.error(basileia_info["mensagem"])
                     st.stop()
 
                 # Merge com dados principais para obter variáveis de ponderação
@@ -4311,7 +4453,7 @@ elif menu == "Peers (Tabela)":
                             "Exporta a tabela no layout atual. "
                             "A versão PowerPoint usa maior resolução para slides."
                         )
-                        col_png, col_ppt = st.columns(2)
+                        col_png, col_ppt, col_excel = st.columns(3)
                         with col_png:
                             img_buffer = _gerar_imagem_peers_tabela(
                                 bancos_selecionados,
@@ -4343,6 +4485,21 @@ elif menu == "Peers (Tabela)":
                                 file_name="peers_tabela_ppt.png",
                                 mime="image/png",
                                 key="peers_tabela_png_ppt",
+                            )
+                        with col_excel:
+                            excel_buffer = _gerar_excel_peers_tabela(
+                                bancos_selecionados,
+                                periodos_selecionados,
+                                valores,
+                                colunas_usadas,
+                                delta_flags,
+                            )
+                            st.download_button(
+                                label="baixar Excel",
+                                data=excel_buffer,
+                                file_name="peers_tabela.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="peers_tabela_excel",
                             )
                 else:
                     st.info("selecione instituições e períodos para visualizar a tabela.")
@@ -4899,147 +5056,316 @@ elif menu == "Rankings":
                 df_selecionado = pd.DataFrame()
 
             if grafico_base == "Ranking":
-                if df_selecionado.empty:
-                    st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
+                if indicador_label == "Índice de Basileia":
+                    df_capital_base = _preparar_df_capital_base()
+                    if df_capital_base.empty:
+                        st.info("dados de capital não disponíveis para o ranking.")
+                    else:
+                        colunas_encontradas_cap, _, _, _ = _mapear_colunas_capital(df_capital_base)
+                        df_periodo_cap, basileia_info = _calcular_basileia_periodo(
+                            df_capital_base,
+                            periodo_resumo,
+                            colunas_encontradas_cap,
+                        )
+                        if basileia_info.get("mensagem") and basileia_info.get("usou_precalc"):
+                            st.caption(basileia_info["mensagem"])
+                        elif basileia_info.get("mensagem") and df_periodo_cap.empty:
+                            st.error(basileia_info["mensagem"])
+                            df_periodo_cap = pd.DataFrame()
+
+                        if not df_periodo_cap.empty:
+                            colunas_peso_possiveis = [v for v in VARIAVEIS_PONDERACAO.values() if v is not None]
+                            colunas_peso = ['Instituição'] + colunas_peso_possiveis
+                            colunas_disponiveis = [c for c in colunas_peso if c in df_periodo.columns]
+                            if len(colunas_disponiveis) > 1:
+                                df_peso = df_periodo[colunas_disponiveis].drop_duplicates(subset=['Instituição'])
+                                df_periodo_cap = df_periodo_cap.merge(df_peso, on='Instituição', how='left')
+
+                        if bancos_selecionados:
+                            df_selecionado_cap = df_periodo_cap[
+                                df_periodo_cap['Instituição'].isin(bancos_selecionados)
+                            ].copy()
+                        else:
+                            df_selecionado_cap = pd.DataFrame()
+
+                        df_selecionado_cap = df_selecionado_cap.dropna(subset=['Índice de Basileia Total (%)'])
+
+                        if df_selecionado_cap.empty:
+                            st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
+                        else:
+                            if modo_ordenacao == "Ordenar por valor":
+                                ordenar_asc = direcao_top == "Menor → Maior"
+                                df_selecionado_cap = df_selecionado_cap.sort_values(
+                                    'Índice de Basileia Total (%)', ascending=ordenar_asc
+                                )
+                            elif bancos_selecionados:
+                                ordem = bancos_selecionados
+                                df_selecionado_cap['ordem'] = pd.Categorical(
+                                    df_selecionado_cap['Instituição'], categories=ordem, ordered=True
+                                )
+                                df_selecionado_cap = df_selecionado_cap.sort_values('ordem')
+
+                            media_basileia = calcular_media_ponderada(
+                                df_selecionado_cap, 'Índice de Basileia Total (%)', coluna_peso_resumo
+                            )
+                            media_cet1 = calcular_media_ponderada(
+                                df_selecionado_cap, 'CET1 (%)', coluna_peso_resumo
+                            )
+                            media_at1 = calcular_media_ponderada(
+                                df_selecionado_cap, 'AT1 (%)', coluna_peso_resumo
+                            )
+                            media_t2 = calcular_media_ponderada(
+                                df_selecionado_cap, 'T2 (%)', coluna_peso_resumo
+                            )
+                            label_media = get_label_media(coluna_peso_resumo)
+
+                            df_selecionado_cap['Ranking'] = df_selecionado_cap['Índice de Basileia Total (%)'].rank(
+                                method='first', ascending=False
+                            ).astype(int)
+                            df_selecionado_cap['Diferença vs Média (%)'] = (
+                                df_selecionado_cap['Índice de Basileia Total (%)'] - media_basileia
+                            )
+
+                            n_bancos = len(df_selecionado_cap)
+                            cores_componentes = {
+                                'CET1 (%)': '#1f77b4',
+                                'AT1 (%)': '#ff7f0e',
+                                'T2 (%)': '#2ca02c'
+                            }
+
+                            fig_basileia = go.Figure()
+                            for componente, cor in cores_componentes.items():
+                                nome_display = componente.replace(' (%)', '')
+                                fig_basileia.add_trace(go.Bar(
+                                    x=df_selecionado_cap['Instituição'],
+                                    y=df_selecionado_cap[componente],
+                                    name=nome_display,
+                                    marker_color=cor,
+                                    hovertemplate=(
+                                        "<b>%{x}</b><br>"
+                                        f"{nome_display}: %{{y:.2f}}%<extra></extra>"
+                                    )
+                                ))
+
+                            fig_basileia.add_trace(go.Scatter(
+                                x=df_selecionado_cap['Instituição'],
+                                y=df_selecionado_cap['Índice de Basileia Total (%)'],
+                                mode='text',
+                                text=df_selecionado_cap['Índice de Basileia Total (%)'].apply(lambda x: f"{x:.2f}%"),
+                                textposition='top center',
+                                textfont=dict(size=10, color='#333'),
+                                showlegend=False,
+                                hoverinfo='skip'
+                            ))
+
+                            fig_basileia.add_trace(go.Scatter(
+                                x=df_selecionado_cap['Instituição'],
+                                y=[media_basileia] * n_bancos,
+                                mode='lines',
+                                name=f'{label_media} ({media_basileia:.2f}%)',
+                                line=dict(color='#3498db', dash='dash', width=2),
+                                hovertemplate=f"{label_media}: {media_basileia:.2f}%<extra></extra>"
+                            ))
+
+                            MINIMO_REGULATORIO = 10.5
+                            fig_basileia.add_trace(go.Scatter(
+                                x=df_selecionado_cap['Instituição'],
+                                y=[MINIMO_REGULATORIO] * n_bancos,
+                                mode='lines',
+                                name=f'Mínimo Regulatório ({MINIMO_REGULATORIO:.1f}%)',
+                                line=dict(color='#e74c3c', dash='solid', width=2),
+                                hovertemplate=f"Mínimo Regulatório: {MINIMO_REGULATORIO:.1f}%<extra></extra>"
+                            ))
+
+                            fig_basileia.update_layout(
+                                title=f"Índice de Basileia Total - {periodo_resumo} ({n_bancos} instituições)",
+                                xaxis_title="instituições",
+                                yaxis_title="índice (%)",
+                                plot_bgcolor='#f8f9fa',
+                                paper_bgcolor='white',
+                                height=max(650, n_bancos * 24),
+                                barmode='stack',
+                                showlegend=True,
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                                xaxis=dict(tickangle=-45),
+                                yaxis=dict(tickformat='.2f', ticksuffix='%'),
+                                font=dict(family='IBM Plex Sans')
+                            )
+
+                            st.plotly_chart(fig_basileia, width='stretch', config={'displayModeBar': False})
+
+                            df_export_capital = df_selecionado_cap[[
+                                'Instituição', 'CET1 (%)', 'AT1 (%)', 'T2 (%)',
+                                'Índice de Basileia Total (%)', 'Ranking', 'Diferença vs Média (%)'
+                            ]].copy()
+                            df_export_capital.insert(0, 'Período', periodo_resumo)
+                            df_export_capital['Tipo de Média'] = tipo_media_label
+                            df_export_capital['Média CET1 (%)'] = round(media_cet1, 2)
+                            df_export_capital['Média AT1 (%)'] = round(media_at1, 2)
+                            df_export_capital['Média T2 (%)'] = round(media_t2, 2)
+                            df_export_capital['Média Basileia (%)'] = round(media_basileia, 2)
+                            df_export_capital['Mínimo Regulatório (%)'] = MINIMO_REGULATORIO
+
+                            for col in ['CET1 (%)', 'AT1 (%)', 'T2 (%)', 'Índice de Basileia Total (%)', 'Diferença vs Média (%)']:
+                                df_export_capital[col] = df_export_capital[col].apply(
+                                    lambda x: round(x, 2) if pd.notna(x) else None
+                                )
+
+                            with st.expander("exportar dados (excel)"):
+                                buffer_excel = BytesIO()
+                                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                    df_export_capital.to_excel(writer, index=False, sheet_name='indice_basileia')
+                                buffer_excel.seek(0)
+
+                                st.download_button(
+                                    label="exportar excel",
+                                    data=buffer_excel,
+                                    file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="exportar_resumo_excel_basileia"
+                                )
                 else:
-                    df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
-                    media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
-                    label_media = get_label_media(coluna_peso_resumo)
-
-                    if modo_ordenacao == "Ordenar por valor":
-                        ordenar_asc = direcao_top == "Menor → Maior"
-                        df_selecionado = df_selecionado.sort_values('valor_display', ascending=ordenar_asc)
-                    elif bancos_selecionados:
-                        ordem = bancos_selecionados
-                        df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
-                        df_selecionado = df_selecionado.sort_values('ordem')
-
-                    df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
-                    df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
-
-                    if media_display and media_display != 0:
-                        df_selecionado['diff_pct'] = (df_selecionado['valor_display'] / media_display - 1) * 100
-                        df_selecionado['diff_pct_text'] = df_selecionado['diff_pct'].map(lambda v: f"{v:.1f}%")
+                    if df_selecionado.empty:
+                        st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
                     else:
-                        df_selecionado['diff_pct_text'] = "N/A"
+                        df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
+                        media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
+                        label_media = get_label_media(coluna_peso_resumo)
 
-                    df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
-                        lambda v: formatar_numero(v, format_info)
-                    )
-                    df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
-                        lambda v: formatar_numero(v, format_info, incluir_sinal=True)
-                    )
+                        if modo_ordenacao == "Ordenar por valor":
+                            ordenar_asc = direcao_top == "Menor → Maior"
+                            df_selecionado = df_selecionado.sort_values('valor_display', ascending=ordenar_asc)
+                        elif bancos_selecionados:
+                            ordem = bancos_selecionados
+                            df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
+                            df_selecionado = df_selecionado.sort_values('ordem')
 
-                    n_bancos = len(df_selecionado)
-                    orientacao_horizontal = n_bancos > 15
-                    altura_grafico = max(650, n_bancos * 24) if orientacao_horizontal else 650
+                        df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
+                        df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
 
-                    cores_plotly = px.colors.qualitative.Plotly
-                    cores_barras = []
-                    idx_cor = 0
-                    for banco in df_selecionado['Instituição']:
-                        cor = obter_cor_banco(banco)
-                        if not cor:
-                            cor = cores_plotly[idx_cor % len(cores_plotly)]
-                            idx_cor += 1
-                        cores_barras.append(cor)
+                        if media_display and media_display != 0:
+                            df_selecionado['diff_pct'] = (df_selecionado['valor_display'] / media_display - 1) * 100
+                            df_selecionado['diff_pct_text'] = df_selecionado['diff_pct'].map(lambda v: f"{v:.1f}%")
+                        else:
+                            df_selecionado['diff_pct_text'] = "N/A"
 
-                    fig_resumo = go.Figure()
-                    banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
-                    fig_resumo.add_trace(go.Bar(
-                        x=df_selecionado['valor_display'] if orientacao_horizontal else df_selecionado['Instituição'],
-                        y=df_selecionado['Instituição'] if orientacao_horizontal else df_selecionado['valor_display'],
-                        marker=dict(color=cores_barras, opacity=0.85),
-                        name=indicador_label,
-                        orientation='h' if orientacao_horizontal else 'v',
-                        customdata=np.stack([
-                            df_selecionado['ranking'],
-                            df_selecionado['diff_text'],
-                            df_selecionado['diff_pct_text'],
-                            df_selecionado['valor_text'],
-                        ], axis=-1),
-                        hovertemplate=(
-                            f"<b>{banco_hover}</b><br>"
-                            f"{indicador_label}: %{{customdata[3]}}<br>"
-                            "Ranking: %{customdata[0]}<br>"
-                            "Diferença vs média: %{customdata[1]}<br>"
-                            "Diferença vs média (%): %{customdata[2]}"
-                            "<extra></extra>"
+                        df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
+                            lambda v: formatar_numero(v, format_info)
                         )
-                    ))
+                        df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
+                            lambda v: formatar_numero(v, format_info, incluir_sinal=True)
+                        )
 
-                    if orientacao_horizontal:
-                        fig_resumo.add_trace(go.Scatter(
-                            x=[media_display] * len(df_selecionado),
-                            y=df_selecionado['Instituição'],
-                            mode='lines',
-                            name=label_media,
-                            line=dict(color='#1f77b4', dash='dash')
-                        ))
-                    else:
-                        fig_resumo.add_trace(go.Scatter(
-                            x=df_selecionado['Instituição'],
-                            y=[media_display] * len(df_selecionado),
-                            mode='lines',
-                            name=label_media,
-                            line=dict(color='#1f77b4', dash='dash')
+                        n_bancos = len(df_selecionado)
+                        orientacao_horizontal = n_bancos > 15
+                        altura_grafico = max(650, n_bancos * 24) if orientacao_horizontal else 650
+
+                        cores_plotly = px.colors.qualitative.Plotly
+                        cores_barras = []
+                        idx_cor = 0
+                        for banco in df_selecionado['Instituição']:
+                            cor = obter_cor_banco(banco)
+                            if not cor:
+                                cor = cores_plotly[idx_cor % len(cores_plotly)]
+                                idx_cor += 1
+                            cores_barras.append(cor)
+
+                        fig_resumo = go.Figure()
+                        banco_hover = "%{y}" if orientacao_horizontal else "%{x}"
+                        fig_resumo.add_trace(go.Bar(
+                            x=df_selecionado['valor_display'] if orientacao_horizontal else df_selecionado['Instituição'],
+                            y=df_selecionado['Instituição'] if orientacao_horizontal else df_selecionado['valor_display'],
+                            marker=dict(color=cores_barras, opacity=0.85),
+                            name=indicador_label,
+                            orientation='h' if orientacao_horizontal else 'v',
+                            customdata=np.stack([
+                                df_selecionado['ranking'],
+                                df_selecionado['diff_text'],
+                                df_selecionado['diff_pct_text'],
+                                df_selecionado['valor_text'],
+                            ], axis=-1),
+                            hovertemplate=(
+                                f"<b>{banco_hover}</b><br>"
+                                f"{indicador_label}: %{{customdata[3]}}<br>"
+                                "Ranking: %{customdata[0]}<br>"
+                                "Diferença vs média: %{customdata[1]}<br>"
+                                "Diferença vs média (%): %{customdata[2]}"
+                                "<extra></extra>"
+                            )
                         ))
 
-                    fig_resumo.update_layout(
-                        title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
-                        xaxis_title=indicador_label if orientacao_horizontal else "instituições",
-                        yaxis_title="instituições" if orientacao_horizontal else indicador_label,
-                        plot_bgcolor='#f8f9fa',
-                        paper_bgcolor='white',
-                        height=altura_grafico,
-                        showlegend=True,
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-                        xaxis=dict(
-                            tickangle=-45 if not orientacao_horizontal else 0,
-                            tickformat=format_info['tickformat'] if orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
-                        ),
-                        yaxis=dict(
-                            tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
-                            ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
-                        ),
-                        font=dict(family='IBM Plex Sans')
-                    )
+                        if orientacao_horizontal:
+                            fig_resumo.add_trace(go.Scatter(
+                                x=[media_display] * len(df_selecionado),
+                                y=df_selecionado['Instituição'],
+                                mode='lines',
+                                name=label_media,
+                                line=dict(color='#1f77b4', dash='dash')
+                            ))
+                        else:
+                            fig_resumo.add_trace(go.Scatter(
+                                x=df_selecionado['Instituição'],
+                                y=[media_display] * len(df_selecionado),
+                                mode='lines',
+                                name=label_media,
+                                line=dict(color='#1f77b4', dash='dash')
+                            ))
 
-                    st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
-
-                    media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
-                    df_export = df_selecionado.copy()
-                    df_export['Período'] = periodo_resumo
-                    df_export['Indicador'] = indicador_label
-                    df_export['Valor'] = df_export[indicador_col]
-                    df_export['Média do Grupo'] = media_grupo_raw
-                    df_export['Tipo de Média'] = tipo_media_label
-                    df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
-                    df_export = df_export[[
-                        'Período',
-                        'Instituição',
-                        'Indicador',
-                        'Valor',
-                        'ranking',
-                        'Média do Grupo',
-                        'Tipo de Média',
-                        'Diferença vs Média'
-                    ]].rename(columns={'ranking': 'Ranking'})
-
-                    with st.expander("exportar dados (excel)"):
-                        buffer_excel = BytesIO()
-                        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                            df_export.to_excel(writer, index=False, sheet_name='ranking')
-                        buffer_excel.seek(0)
-
-                        st.download_button(
-                            label="exportar excel",
-                            data=buffer_excel,
-                            file_name=f"ranking_{periodo_resumo.replace('/', '-')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="exportar_resumo_excel"
+                        fig_resumo.update_layout(
+                            title=f"{indicador_label} - {periodo_resumo} ({len(df_selecionado)} instituições)",
+                            xaxis_title=indicador_label if orientacao_horizontal else "instituições",
+                            yaxis_title="instituições" if orientacao_horizontal else indicador_label,
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            height=altura_grafico,
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                            xaxis=dict(
+                                tickangle=-45 if not orientacao_horizontal else 0,
+                                tickformat=format_info['tickformat'] if orientacao_horizontal else None,
+                                ticksuffix=format_info['ticksuffix'] if orientacao_horizontal else None
+                            ),
+                            yaxis=dict(
+                                tickformat=format_info['tickformat'] if not orientacao_horizontal else None,
+                                ticksuffix=format_info['ticksuffix'] if not orientacao_horizontal else None
+                            ),
+                            font=dict(family='IBM Plex Sans')
                         )
+
+                        st.plotly_chart(fig_resumo, width='stretch', config={'displayModeBar': False})
+
+                        media_grupo_raw = calcular_media_ponderada(df_selecionado, indicador_col, coluna_peso_resumo)
+                        df_export = df_selecionado.copy()
+                        df_export['Período'] = periodo_resumo
+                        df_export['Indicador'] = indicador_label
+                        df_export['Valor'] = df_export[indicador_col]
+                        df_export['Média do Grupo'] = media_grupo_raw
+                        df_export['Tipo de Média'] = tipo_media_label
+                        df_export['Diferença vs Média'] = df_export['Valor'] - media_grupo_raw
+                        df_export = df_export[[
+                            'Período',
+                            'Instituição',
+                            'Indicador',
+                            'Valor',
+                            'ranking',
+                            'Média do Grupo',
+                            'Tipo de Média',
+                            'Diferença vs Média'
+                        ]].rename(columns={'ranking': 'Ranking'})
+
+                        with st.expander("exportar dados (excel)"):
+                            buffer_excel = BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                df_export.to_excel(writer, index=False, sheet_name='ranking')
+                            buffer_excel.seek(0)
+
+                            st.download_button(
+                                label="exportar excel",
+                                data=buffer_excel,
+                                file_name=f"ranking_{periodo_resumo.replace('/', '-')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="exportar_resumo_excel"
+                            )
 
             if grafico_base == "Deltas (antes e depois)":
                 st.markdown("---")
@@ -5377,6 +5703,105 @@ elif menu == "Rankings":
 
                             st.markdown(f"### {variavel}")
                             st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
+
+                        if bancos_selecionados_delta:
+                            idx_ini_hist = periodos_disponiveis.index(periodo_inicial_delta)
+                            idx_fin_hist = periodos_disponiveis.index(periodo_subsequente_delta)
+                            if idx_ini_hist > idx_fin_hist:
+                                idx_ini_hist, idx_fin_hist = idx_fin_hist, idx_ini_hist
+                            periodos_hist = periodos_disponiveis[idx_ini_hist:idx_fin_hist + 1]
+
+                            df_hist = df[
+                                df['Período'].isin(periodos_hist)
+                                & df['Instituição'].isin(bancos_selecionados_delta)
+                            ].copy()
+
+                            if not df_hist.empty and variavel in df_hist.columns:
+                                format_hist = get_axis_format(variavel)
+                                fig_hist = go.Figure()
+                                for instituicao in bancos_selecionados_delta:
+                                    df_banco = df_hist[df_hist['Instituição'] == instituicao].copy()
+                                    if df_banco.empty:
+                                        continue
+                                    df_banco['ano'] = df_banco['Período'].str.split('/').str[1].astype(int)
+                                    df_banco['trimestre'] = df_banco['Período'].str.split('/').str[0].astype(int)
+                                    df_banco = df_banco.sort_values(['ano', 'trimestre'])
+                                    y_values = df_banco[variavel] * format_hist['multiplicador']
+                                    cor_banco = obter_cor_banco(instituicao) or None
+
+                                    if variavel == 'Lucro Líquido Acumulado YTD':
+                                        fig_hist.add_trace(go.Bar(
+                                            x=df_banco['Período'],
+                                            y=y_values,
+                                            name=instituicao,
+                                            marker=dict(color=cor_banco),
+                                            hovertemplate=(
+                                                f'<b>{instituicao}</b><br>%{{x}}<br>'
+                                                f'%{{y:{format_hist["tickformat"]}}}{format_hist["ticksuffix"]}<extra></extra>'
+                                            )
+                                        ))
+                                    else:
+                                        fig_hist.add_trace(go.Scatter(
+                                            x=df_banco['Período'],
+                                            y=y_values,
+                                            mode='lines',
+                                            name=instituicao,
+                                            line=dict(width=2, color=cor_banco),
+                                            hovertemplate=(
+                                                f'<b>{instituicao}</b><br>%{{x}}<br>'
+                                                f'%{{y:{format_hist["tickformat"]}}}{format_hist["ticksuffix"]}<extra></extra>'
+                                            )
+                                        ))
+
+                                st.markdown("### evolução histórica (dados brutos)")
+                                fig_hist.update_layout(
+                                    height=320,
+                                    margin=dict(l=10, r=10, t=40, b=30),
+                                    plot_bgcolor='#f8f9fa',
+                                    paper_bgcolor='white',
+                                    showlegend=True,
+                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                                    xaxis=dict(
+                                        showgrid=False,
+                                        tickmode='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                        tickvals=periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                        ticktext=periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                        categoryorder='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
+                                        categoryarray=periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None
+                                    ),
+                                    yaxis=dict(
+                                        showgrid=True,
+                                        gridcolor='#e0e0e0',
+                                        tickformat=format_hist['tickformat'],
+                                        ticksuffix=format_hist['ticksuffix']
+                                    ),
+                                    font=dict(family='IBM Plex Sans'),
+                                    barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else None
+                                )
+
+                                st.plotly_chart(fig_hist, width='stretch', config={'displayModeBar': False})
+
+                                df_export_hist = df_hist.pivot_table(
+                                    index='Instituição',
+                                    columns='Período',
+                                    values=variavel,
+                                    aggfunc='first'
+                                ).reset_index()
+                                colunas_ordenadas = ['Instituição'] + periodos_hist
+                                df_export_hist = df_export_hist.reindex(columns=colunas_ordenadas)
+
+                                buffer_excel_hist = BytesIO()
+                                with pd.ExcelWriter(buffer_excel_hist, engine='xlsxwriter') as writer:
+                                    df_export_hist.to_excel(writer, index=False, sheet_name='historico')
+                                buffer_excel_hist.seek(0)
+
+                                st.download_button(
+                                    label="exportar histórico excel",
+                                    data=buffer_excel_hist,
+                                    file_name=f"Historico_{variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"exportar_historico_delta_{variavel}"
+                                )
 
                         with st.expander("exportar dados (excel)"):
                             df_resumo = pd.DataFrame(dados_grafico)
