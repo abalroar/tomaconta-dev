@@ -1401,7 +1401,7 @@ def ordenar_periodos(periodos, reverso=False):
 
 
 def periodo_para_exibicao(periodo_trimestre: str) -> str:
-    """Converte período trimestral (1/2025) para formato mês abreviado (Mar/25).
+    """Converte período trimestral para formato mês abreviado (Mar/25).
 
     Args:
         periodo_trimestre: Período no formato "trimestre/ano" (ex: "1/2025")
@@ -1413,8 +1413,12 @@ def periodo_para_exibicao(periodo_trimestre: str) -> str:
         return str(periodo_trimestre)
     try:
         trimestre, ano = str(periodo_trimestre).split('/')
-        meses_map = {'1': 'Mar', '2': 'Jun', '3': 'Set', '4': 'Dez'}
-        mes = meses_map.get(trimestre.strip(), trimestre)
+        trimestre_norm = trimestre.strip().lstrip("0") or "0"
+        meses_map = {
+            '1': 'Mar', '2': 'Jun', '3': 'Set', '4': 'Dez',
+            '03': 'Mar', '06': 'Jun', '09': 'Set', '12': 'Dez',
+        }
+        mes = meses_map.get(trimestre_norm, trimestre.strip())
         ano_curto = ano[-2:] if len(ano) == 4 else ano
         return f"{mes}/{ano_curto}"
     except Exception:
@@ -1559,12 +1563,26 @@ def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = N
     if serie_num.empty:
         return serie_num
 
-    # Regra de display: percentuais internos ficam em base decimal (0-1)
-    # e são sempre exibidos em base percentual (0-100).
-    return serie_num * 100
+    # Regra de display robusta: valores em base decimal (0-1) viram 0-100.
+    # Valores já em 0-100 permanecem sem nova multiplicação.
+    mask_decimal = serie_num.abs() <= 1
+    serie_display = serie_num.copy()
+    serie_display.loc[mask_decimal] = serie_display.loc[mask_decimal] * 100
+    return serie_display
+
+
+def _normalizar_basileia_display(serie: pd.Series) -> pd.Series:
+    """Tratamento específico de exceção para Basileia no display.
+
+    Evita duplo tratamento ao exibir valores em % quando a base já vem 0-100,
+    mantendo compatibilidade com bases em 0-1.
+    """
+    return _normalizar_percentual_display(serie, "Índice de Basileia")
 
 
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
+    if variavel and "Basileia" in variavel:
+        return _normalizar_basileia_display(serie)
     if _is_variavel_percentual(variavel):
         return _normalizar_percentual_display(serie, variavel)
     return serie * format_info['multiplicador']
@@ -5052,24 +5070,33 @@ elif menu == "Rankings":
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = _normalizar_lucro_liquido(df)
         df = adicionar_indice_cet1(df)
-        df_cet1 = construir_cet1_capital(
-            st.session_state.get("dados_capital", {}),
-            st.session_state.get("dict_aliases", {}),
-            st.session_state.get("df_aliases"),
-            st.session_state.get("dados_periodos"),
+
+        # Evita merge custoso de CET1 quando a coluna já está preenchida no dataset base.
+        precisa_enriquecer_cet1 = (
+            "Índice de CET1" not in df.columns
+            or df["Índice de CET1"].isna().any()
         )
-        if not df_cet1.empty:
-            df = df.merge(
-                df_cet1,
-                on=["Período", "Instituição"],
-                how="left",
-                suffixes=("", "_cet1"),
+        if precisa_enriquecer_cet1:
+            _perf_start("rankings_merge_cet1")
+            df_cet1 = construir_cet1_capital(
+                st.session_state.get("dados_capital", {}),
+                st.session_state.get("dict_aliases", {}),
+                st.session_state.get("df_aliases"),
+                st.session_state.get("dados_periodos"),
             )
-            if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
-                df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
-            elif "Índice de CET1_cet1" in df.columns:
-                df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
-                df = df.drop(columns=["Índice de CET1_cet1"])
+            if not df_cet1.empty:
+                df = df.merge(
+                    df_cet1,
+                    on=["Período", "Instituição"],
+                    how="left",
+                    suffixes=("", "_cet1"),
+                )
+                if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
+                    df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
+                elif "Índice de CET1_cet1" in df.columns:
+                    df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
+                    df = df.drop(columns=["Índice de CET1_cet1"])
+            print(_perf_log("rankings_merge_cet1"))
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
@@ -6403,7 +6430,7 @@ elif menu == "DRE":
         if pd.isna(valor) or valor is None:
             return "—"
         try:
-            return f"{valor * 100:.{decimais}f}%"
+            return f"{valor * 100:.{decimais}f}%".replace(".", ",")
         except Exception:
             return "—"
 
@@ -7012,17 +7039,8 @@ elif menu == "Carteira 4.966":
         return None
 
     def periodo_para_exibicao_mes(periodo_trimestre: str) -> str:
-        """Converte período trimestral (1/2025) para formato mês abreviado (mar/25)."""
-        if not periodo_trimestre or '/' not in periodo_trimestre:
-            return periodo_trimestre
-        try:
-            trimestre, ano = periodo_trimestre.split('/')
-            meses_map = {'1': 'mar', '2': 'jun', '3': 'set', '4': 'dez'}
-            mes = meses_map.get(trimestre, trimestre)
-            ano_curto = ano[-2:] if len(ano) == 4 else ano
-            return f"{mes}/{ano_curto}"
-        except:
-            return periodo_trimestre
+        """Wrapper local para manter padrão global de período (Mar/XX, Jun/XX, Set/XX, Dez/XX)."""
+        return periodo_para_exibicao(periodo_trimestre)
 
     def formatar_valor_br(valor, decimais=0):
         """Formata valor numérico no padrão brasileiro (pontos como separador de milhar)."""
@@ -7041,7 +7059,7 @@ elif menu == "Carteira 4.966":
         if pd.isna(valor) or valor is None:
             return "-"
         try:
-            return f"{valor * 100:.{decimais}f}%"
+            return f"{valor * 100:.{decimais}f}%".replace(".", ",")
         except:
             return "-"
 
