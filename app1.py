@@ -2628,39 +2628,68 @@ def _gerar_excel_peers_dados_puros(
     periodos: list,
     valores: dict,
 ) -> BytesIO:
-    """Exporta tabela Peers com valores numéricos puros (sem formatação cosmética)."""
+    """Exporta tabela Peers no mesmo layout matricial, mas com valores numéricos puros."""
     output = BytesIO()
     workbook = xlsxwriter.Workbook(output, {"in_memory": True})
     worksheet = workbook.add_worksheet("dados_puros")
-    num_fmt = workbook.add_format({"num_format": "0.000000"})
-    header_fmt = workbook.add_format({"bold": True})
 
-    # Cabeçalho: Indicador | Banco | Período | Valor
-    headers = ["Indicador", "Banco", "Período", "Valor"]
-    for c, h in enumerate(headers):
-        worksheet.write(0, c, h, header_fmt)
+    n_cols = 1 + len(bancos) * len(periodos)
+    border = {"border": 1, "border_color": "#dddddd"}
+    header_fmt = workbook.add_format(
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#4a4a4a", "font_color": "white", **border}
+    )
+    subheader_fmt = workbook.add_format(
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6a6a6a", "font_color": "white", **border}
+    )
+    section_fmt = workbook.add_format(
+        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#4a90e2", "font_color": "white", **border}
+    )
+    label_fmt = workbook.add_format({"align": "left", "valign": "vcenter", **border})
+    num_fmt = workbook.add_format({"align": "right", "valign": "vcenter", "num_format": "0.000000", **border})
+    empty_fmt = workbook.add_format({"align": "right", "valign": "vcenter", **border})
 
-    row_idx = 1
+    worksheet.set_column(0, 0, 34)
+    worksheet.set_column(1, max(1, n_cols - 1), 18)
+
+    # Cabeçalho: bancos
+    row_idx = 0
+    worksheet.write(row_idx, 0, "Dados Puros", header_fmt)
+    col_idx = 1
+    for banco in bancos:
+        start_col = col_idx
+        end_col = col_idx + len(periodos) - 1
+        if start_col <= end_col:
+            worksheet.merge_range(row_idx, start_col, row_idx, end_col, banco, header_fmt)
+        col_idx = end_col + 1
+    row_idx += 1
+
+    # Sub-cabeçalho: períodos
+    worksheet.write(row_idx, 0, "", subheader_fmt)
+    col_idx = 1
+    for _ in bancos:
+        for periodo in periodos:
+            worksheet.write(row_idx, col_idx, periodo_para_exibicao(periodo), subheader_fmt)
+            col_idx += 1
+    row_idx += 1
+
+    # Dados por seção/indicador
     for section in PEERS_TABELA_LAYOUT:
+        worksheet.merge_range(row_idx, 0, row_idx, n_cols - 1, section["section"], section_fmt)
+        row_idx += 1
         for row in section["rows"]:
-            label = row["label"]
+            worksheet.write(row_idx, 0, row["label"], label_fmt)
+            col_idx = 1
             for banco in bancos:
                 for periodo in periodos:
-                    chave = (label, banco, periodo)
+                    chave = (row["label"], banco, periodo)
                     valor = valores.get(chave)
-                    worksheet.write(row_idx, 0, label)
-                    worksheet.write(row_idx, 1, banco)
-                    worksheet.write(row_idx, 2, periodo)
                     if valor is not None and not pd.isna(valor):
-                        worksheet.write_number(row_idx, 3, float(valor), num_fmt)
+                        worksheet.write_number(row_idx, col_idx, float(valor), num_fmt)
                     else:
-                        worksheet.write(row_idx, 3, "")
-                    row_idx += 1
+                        worksheet.write(row_idx, col_idx, "", empty_fmt)
+                    col_idx += 1
+            row_idx += 1
 
-    worksheet.set_column(0, 0, 40)
-    worksheet.set_column(1, 1, 30)
-    worksheet.set_column(2, 2, 12)
-    worksheet.set_column(3, 3, 18)
     workbook.close()
     output.seek(0)
     return output
