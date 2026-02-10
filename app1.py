@@ -3246,6 +3246,55 @@ def get_dados_concatenados() -> pd.DataFrame:
     return _get_dados_concatenados(periodos_hash, periodos_keys)
 
 
+@st.cache_data(show_spinner=False)
+def _get_crie_metrica_context(periodos_hash: str, periodos_keys: tuple):
+    """Pré-processa metadados leves da aba Crie sua métrica sem concatenar tudo."""
+    dados_periodos = st.session_state.get('dados_periodos', {})
+    if not dados_periodos:
+        return {
+            'colunas_numericas': [],
+            'periodos_disponiveis': [],
+            'periodos_dropdown': [],
+            'bancos_todos': [],
+        }
+
+    colunas_numericas = set()
+    bancos_todos = set()
+
+    for periodo in periodos_keys:
+        df_periodo = dados_periodos.get(periodo)
+        if df_periodo is None or df_periodo.empty:
+            continue
+
+        if 'Instituição' in df_periodo.columns:
+            bancos_todos.update(df_periodo['Instituição'].dropna().unique().tolist())
+
+        for col in df_periodo.columns:
+            if col in ['Instituição', 'Período']:
+                continue
+            if pd.api.types.is_numeric_dtype(df_periodo[col]):
+                colunas_numericas.add(col)
+
+    periodos_disponiveis = ordenar_periodos(list(periodos_keys))
+    periodos_dropdown = ordenar_periodos(list(periodos_keys), reverso=True)
+
+    return {
+        'colunas_numericas': sorted(colunas_numericas),
+        'periodos_disponiveis': periodos_disponiveis,
+        'periodos_dropdown': periodos_dropdown,
+        'bancos_todos': sorted(bancos_todos),
+    }
+
+
+def get_df_periodo_brincar(periodo: str) -> pd.DataFrame:
+    """Obtém DataFrame de um período específico sem concatenar todos os períodos."""
+    dados_periodos = st.session_state.get('dados_periodos', {})
+    df_periodo = dados_periodos.get(periodo)
+    if df_periodo is None:
+        return pd.DataFrame()
+    return df_periodo
+
+
 def _get_cache_data_mtime(cache_obj) -> Optional[float]:
     if cache_obj is None:
         return None
@@ -7771,14 +7820,22 @@ elif menu == "Taxas de Juros por Produto":
 
 elif menu == "Crie sua métrica!":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
+        dados_periodos_keys = tuple(sorted(st.session_state['dados_periodos'].keys()))
+        primeiro_periodo = next(iter(st.session_state['dados_periodos'].values()))
+        colunas_hash = tuple(sorted(primeiro_periodo.columns.tolist()))
+        capital_mesclado = st.session_state.get('_dados_capital_mesclados', False)
+        periodos_hash = str(hash((dados_periodos_keys, colunas_hash, capital_mesclado)))
 
-        colunas_numericas = [col for col in df.columns if col not in ['Instituição', 'Período'] and df[col].dtype in ['float64', 'int64']]
-        periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
-        periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
+        _perf_start("brincar_context")
+        brincar_ctx = _get_crie_metrica_context(periodos_hash, dados_periodos_keys)
+        print(_perf_log("brincar_context"))
+
+        colunas_numericas = brincar_ctx['colunas_numericas']
+        periodos_disponiveis = brincar_ctx['periodos_disponiveis']
+        periodos_dropdown = brincar_ctx['periodos_dropdown']
 
         # Lista de todos os bancos disponíveis com ordenação por alias
-        bancos_todos = df['Instituição'].dropna().unique().tolist()
+        bancos_todos = brincar_ctx['bancos_todos']
         dict_aliases = st.session_state.get('dict_aliases', {})
         todos_bancos = ordenar_bancos_com_alias(bancos_todos, dict_aliases)
 
@@ -7916,7 +7973,7 @@ elif menu == "Crie sua métrica!":
                     )
                 # Obtém top N bancos do período mais recente
                 periodo_mais_recente = periodos_disponiveis[-1]
-                df_recente = df[df['Período'] == periodo_mais_recente].copy()
+                df_recente = get_df_periodo_brincar(periodo_mais_recente).copy()
                 df_recente_valid = df_recente.dropna(subset=[var_ordenacao_brincar])
                 bancos_top_n = df_recente_valid.nlargest(top_n_brincar, var_ordenacao_brincar)['Instituição'].tolist()
                 bancos_selecionados_brincar = bancos_top_n
@@ -7992,7 +8049,7 @@ elif menu == "Crie sua métrica!":
                         )
 
                     # Filtrar dados para o período
-                    df_periodo = df[df['Período'] == periodo_scatter_brincar].copy()
+                    df_periodo = get_df_periodo_brincar(periodo_scatter_brincar).copy()
                     df_scatter_brincar = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados_brincar)].copy()
 
                     # Calcular métrica derivada
@@ -8180,8 +8237,8 @@ elif menu == "Crie sua métrica!":
                         st.warning("o período subsequente deve ser posterior ao período inicial")
                     else:
                         # Filtra dados para os dois períodos
-                        df_inicial = df[df['Período'] == periodo_inicial_brincar].copy()
-                        df_subsequente = df[df['Período'] == periodo_subsequente_brincar].copy()
+                        df_inicial = get_df_periodo_brincar(periodo_inicial_brincar).copy()
+                        df_subsequente = get_df_periodo_brincar(periodo_subsequente_brincar).copy()
 
                         # Calcular métrica derivada para ambos os períodos
                         df_inicial_calc = df_inicial[df_inicial['Instituição'].isin(bancos_selecionados_brincar)].copy()
@@ -8205,53 +8262,55 @@ elif menu == "Crie sua métrica!":
                         else:
                             format_info = {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
-                        # Prepara dados para o gráfico
+                        # Prepara dados para o gráfico (join vetorizado por instituição)
                         dados_grafico_brincar = []
+                        serie_ini = df_inicial_calc.set_index('Instituição')['Métrica Derivada']
+                        serie_sub = df_subsequente_calc.set_index('Instituição')['Métrica Derivada']
+
                         for instituicao in bancos_selecionados_brincar:
-                            valor_ini = df_inicial_calc[df_inicial_calc['Instituição'] == instituicao]['Métrica Derivada'].values
-                            valor_sub = df_subsequente_calc[df_subsequente_calc['Instituição'] == instituicao]['Métrica Derivada'].values
+                            if instituicao not in serie_ini.index or instituicao not in serie_sub.index:
+                                continue
 
-                            if len(valor_ini) > 0 and len(valor_sub) > 0:
-                                v_ini = valor_ini[0]
-                                v_sub = valor_sub[0]
+                            v_ini = serie_ini.loc[instituicao]
+                            v_sub = serie_sub.loc[instituicao]
 
-                                if pd.isna(v_ini) or pd.isna(v_sub):
-                                    continue
+                            if pd.isna(v_ini) or pd.isna(v_sub):
+                                continue
 
-                                delta_absoluto = v_sub - v_ini
+                            delta_absoluto = v_sub - v_ini
 
-                                # Formata delta texto
-                                if formato_resultado == "Percentual (%)" or (formato_resultado == "Auto" and formula_eh_divisao(steps)):
-                                    delta_texto = f"{delta_absoluto * format_info['multiplicador']:+.2f}{format_info['ticksuffix']}"
-                                elif formato_resultado == "Valor bruto (R$)" or (formato_resultado == "Auto" and not formula_eh_divisao(steps)):
-                                    delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                            # Formata delta texto
+                            if formato_resultado == "Percentual (%)" or (formato_resultado == "Auto" and formula_eh_divisao(steps)):
+                                delta_texto = f"{delta_absoluto * format_info['multiplicador']:+.2f}{format_info['ticksuffix']}"
+                            elif formato_resultado == "Valor bruto (R$)" or (formato_resultado == "Auto" and not formula_eh_divisao(steps)):
+                                delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                            else:
+                                delta_texto = f"{delta_absoluto:+.2f}"
+
+                            # Variação percentual
+                            if v_ini == 0:
+                                if delta_absoluto > 0:
+                                    variacao_pct = float('inf')
+                                    variacao_texto = "+∞"
+                                elif delta_absoluto < 0:
+                                    variacao_pct = float('-inf')
+                                    variacao_texto = "-∞"
                                 else:
-                                    delta_texto = f"{delta_absoluto:+.2f}"
+                                    variacao_pct = 0
+                                    variacao_texto = "0.0%"
+                            else:
+                                variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                variacao_texto = f"{variacao_pct:+.1f}%"
 
-                                # Variação percentual
-                                if v_ini == 0:
-                                    if delta_absoluto > 0:
-                                        variacao_pct = float('inf')
-                                        variacao_texto = "+∞"
-                                    elif delta_absoluto < 0:
-                                        variacao_pct = float('-inf')
-                                        variacao_texto = "-∞"
-                                    else:
-                                        variacao_pct = 0
-                                        variacao_texto = "0.0%"
-                                else:
-                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                                    variacao_texto = f"{variacao_pct:+.1f}%"
-
-                                dados_grafico_brincar.append({
-                                    'instituicao': instituicao,
-                                    'valor_ini': v_ini,
-                                    'valor_sub': v_sub,
-                                    'delta': delta_absoluto,
-                                    'delta_texto': delta_texto,
-                                    'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
-                                    'variacao_texto': variacao_texto
-                                })
+                            dados_grafico_brincar.append({
+                                'instituicao': instituicao,
+                                'valor_ini': v_ini,
+                                'valor_sub': v_sub,
+                                'delta': delta_absoluto,
+                                'delta_texto': delta_texto,
+                                'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
+                                'variacao_texto': variacao_texto
+                            })
 
                         if dados_grafico_brincar:
                             # Ordena pela variação
@@ -8410,7 +8469,7 @@ elif menu == "Crie sua métrica!":
                         mostrar_media = st.checkbox("mostrar média do grupo", value=True, key="mostrar_media_brincar")
 
                     # Filtrar dados para o período
-                    df_periodo_rank = df[df['Período'] == periodo_ranking].copy()
+                    df_periodo_rank = get_df_periodo_brincar(periodo_ranking).copy()
                     df_ranking = df_periodo_rank[df_periodo_rank['Instituição'].isin(bancos_selecionados_brincar)].copy()
 
                     # Calcular métrica derivada
