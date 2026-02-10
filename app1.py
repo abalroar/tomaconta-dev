@@ -1554,14 +1554,12 @@ def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = N
     if serie_num.empty:
         return serie_num
 
-    # Regra geral do app: percentuais ficam em base decimal (0-1) e no display viram 0-100.
-    # Exceção: Índice de Basileia pode chegar (legado/fonte) já em 0-100.
-    # Nesse caso, evitamos multiplicação dupla apenas para essa variável.
-    if variavel and "Basileia" in variavel:
-        mask_decimal = serie_num.abs() <= 1
-        return serie_num.where(~mask_decimal, serie_num / 100) * 100
-
-    return serie_num * 100
+    # Display robusto para escala mista (0-1 e 0-100):
+    # - fração (|v| <= 1) -> converte para percentual (v * 100)
+    # - já percentual (|v| > 1) -> mantém como está
+    # Isso evita 0.1554% quando o correto é 15.54% e evita dupla multiplicação.
+    mask_decimal = serie_num.abs() <= 1
+    return serie_num.where(~mask_decimal, serie_num * 100)
 
 
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
