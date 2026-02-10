@@ -79,6 +79,20 @@ from .taxas_juros import (
     MODALIDADES_CONHECIDAS,
 )
 
+from .metric_registry import (
+    MetricDefinition,
+    DatasetContract,
+    AnnualizationRule,
+    METRIC_REGISTRY,
+    DATASET_CONTRACTS,
+    get_metric_registry,
+    get_metric_definition,
+    list_metrics_by_domain,
+    get_dataset_contracts,
+    validate_dataset_contract,
+    validate_dataframe_by_contract_name,
+)
+
 from .derived_metrics import (
     DerivedMetricsCache,
     DERIVED_METRICS,
@@ -191,6 +205,18 @@ __all__ = [
     "formatar_nome_modalidade",
     "MODALIDADES_CONHECIDAS",
     # Derived metrics
+    # Metric registry / contracts
+    "MetricDefinition",
+    "DatasetContract",
+    "AnnualizationRule",
+    "METRIC_REGISTRY",
+    "DATASET_CONTRACTS",
+    "get_metric_registry",
+    "get_metric_definition",
+    "list_metrics_by_domain",
+    "get_dataset_contracts",
+    "validate_dataset_contract",
+    "validate_dataframe_by_contract_name",
     "DerivedMetricsCache",
     "DERIVED_METRICS",
     "DERIVED_METRICS_FORMAT",
