@@ -1549,17 +1549,53 @@ def get_axis_format(variavel, serie: Optional[pd.Series] = None):
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
 
-def _normalizar_percentual_display(serie: pd.Series) -> pd.Series:
+def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = None) -> pd.Series:
     serie_num = pd.to_numeric(serie, errors="coerce")
     if serie_num.empty:
         return serie_num
-    return serie_num * 100
+
+    # Display robusto para escala mista (0-1 e 0-100):
+    # - fração (|v| <= 1) -> converte para percentual (v * 100)
+    # - já percentual (|v| > 1) -> mantém como está
+    # Isso evita 0.1554% quando o correto é 15.54% e evita dupla multiplicação.
+    mask_decimal = serie_num.abs() <= 1
+    return serie_num.where(~mask_decimal, serie_num * 100)
 
 
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
     if _is_variavel_percentual(variavel):
-        return _normalizar_percentual_display(serie)
+        return _normalizar_percentual_display(serie, variavel)
     return serie * format_info['multiplicador']
+
+def _garantir_indice_basileia_coluna(df: pd.DataFrame) -> pd.DataFrame:
+    """Garante coluna canônica 'Índice de Basileia' para uso no Scatter Plot.
+
+    Usa fallback de colunas equivalentes quando a coluna padrão estiver ausente
+    ou com lacunas (ex.: caches legados de capital).
+    """
+    if df is None or df.empty:
+        return df
+
+    alternativas = [
+        'Índice de Basileia Capital',
+        'Índice de Basileia (n) = (e) / (j)',
+    ]
+
+    df_out = df.copy()
+
+    if 'Índice de Basileia' not in df_out.columns:
+        alt_col = next((c for c in alternativas if c in df_out.columns), None)
+        if alt_col:
+            df_out['Índice de Basileia'] = pd.to_numeric(df_out[alt_col], errors='coerce')
+        return df_out
+
+    # Preencher lacunas da coluna canônica com alternativas, quando houver
+    for alt_col in alternativas:
+        if alt_col in df_out.columns:
+            alt_vals = pd.to_numeric(df_out[alt_col], errors='coerce')
+            df_out['Índice de Basileia'] = pd.to_numeric(df_out['Índice de Basileia'], errors='coerce').fillna(alt_vals)
+
+    return df_out
 
 
 def _normalizar_label_peers(texto: str) -> str:
@@ -4464,6 +4500,7 @@ elif menu == "Peers (Tabela)":
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
+        df = _garantir_indice_basileia_coluna(df)
 
         colunas_base = [
             col for col in df.columns
