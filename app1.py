@@ -1549,22 +1549,24 @@ def get_axis_format(variavel, serie: Optional[pd.Series] = None):
         return {'tickformat': '.2f', 'ticksuffix': '', 'multiplicador': 1}
 
 
-def _normalizar_percentual_display(serie: pd.Series) -> pd.Series:
+def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = None) -> pd.Series:
     serie_num = pd.to_numeric(serie, errors="coerce")
     if serie_num.empty:
         return serie_num
 
-    # Normalização por valor (não pela série inteira) para suportar fontes mistas.
-    # Regras de display no Scatter Plot:
-    # - valores em [-1, 1] são tratados como fração e convertidos para percentual;
-    # - valores fora desse intervalo são assumidos como já percentuais (0-100).
-    mask_fracao = serie_num.abs() <= 1
-    return serie_num.where(~mask_fracao, serie_num * 100)
+    # Regra geral do app: percentuais ficam em base decimal (0-1) e no display viram 0-100.
+    # Exceção: Índice de Basileia pode chegar (legado/fonte) já em 0-100.
+    # Nesse caso, evitamos multiplicação dupla apenas para essa variável.
+    if variavel and "Basileia" in variavel:
+        mask_decimal = serie_num.abs() <= 1
+        return serie_num.where(~mask_decimal, serie_num / 100) * 100
+
+    return serie_num * 100
 
 
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
     if _is_variavel_percentual(variavel):
-        return _normalizar_percentual_display(serie)
+        return _normalizar_percentual_display(serie, variavel)
     return serie * format_info['multiplicador']
 
 
