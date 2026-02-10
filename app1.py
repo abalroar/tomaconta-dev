@@ -3451,36 +3451,127 @@ if 'df_aliases' not in st.session_state:
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
     print(_perf_log("init_aliases"))
 
+def _cache_version_token(tipo_cache: str) -> str:
+    """Token estável para invalidar caches processados quando arquivo base muda."""
+    cache_manager = get_cache_manager()
+    cache_obj = cache_manager.get_cache(tipo_cache) if cache_manager else None
+    if cache_obj is None:
+        return f"{tipo_cache}:missing"
+
+    arquivo = None
+    if cache_obj.arquivo_dados.exists():
+        arquivo = cache_obj.arquivo_dados
+    elif cache_obj.arquivo_dados_pickle.exists():
+        arquivo = cache_obj.arquivo_dados_pickle
+
+    if arquivo is None:
+        return f"{tipo_cache}:empty"
+
+    stat = arquivo.stat()
+    return f"{tipo_cache}:{int(stat.st_mtime)}:{stat.st_size}"
+
+
+def _alias_signature() -> tuple:
+    dict_aliases = st.session_state.get('dict_aliases', {}) or {}
+    return tuple(sorted((str(k), str(v)) for k, v in dict_aliases.items()))
+
+
+def _precisa_recalcular_metricas_rapido(dados_periodos: dict) -> bool:
+    """Heurística conservadora para evitar recálculo global desnecessário."""
+    if not dados_periodos:
+        return False
+
+    colunas_obsoletas = {'Risco/Retorno', 'Funding Gap (%)', 'Lucro Líquido', 'ROE An. (%)', 'Crédito/PL'}
+    for _, df in dados_periodos.items():
+        if df is None or df.empty:
+            continue
+        cols = set(df.columns)
+
+        if cols & colunas_obsoletas:
+            return True
+
+        if {"Lucro Líquido Acumulado YTD", "Patrimônio Líquido"}.issubset(cols) and "ROE Ac. YTD an. (%)" not in cols:
+            return True
+        if {"Carteira de Crédito", "Patrimônio Líquido"}.issubset(cols) and "Crédito/PL (%)" not in cols:
+            return True
+        if {"Carteira de Crédito", "Captações"}.issubset(cols) and "Crédito/Captações (%)" not in cols:
+            return True
+        if {"Carteira de Crédito", "Ativo Total"}.issubset(cols) and "Crédito/Ativo (%)" not in cols:
+            return True
+
+        for col_pct in ("Índice de Basileia", "Índice de Imobilização"):
+            if col_pct in cols:
+                serie = pd.to_numeric(df[col_pct], errors='coerce')
+                if (serie.abs() > 1).any():
+                    return True
+
+    return False
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_dados_periodos_preparados(cache_token: str, alias_sig: tuple):
+    """Carrega e prepara cache principal com memoização entre sessões.
+
+    Evita recomputar métricas derivadas e aplicação de aliases em todo reload.
+    """
+    cache_manager = get_cache_manager()
+    cache_principal = cache_manager.get_cache("principal") if cache_manager else None
+    dados_cache = cache_principal.carregar_formato_antigo() if cache_principal else None
+    if not dados_cache:
+        return None
+
+    if _precisa_recalcular_metricas_rapido(dados_cache):
+        dados_cache = recalcular_metricas_derivadas(dados_cache)
+
+    if alias_sig:
+        dict_aliases = dict(alias_sig)
+        dados_cache = aplicar_aliases_em_periodos(
+            dados_cache,
+            dict_aliases,
+            mapa_codigos=None,
+        )
+    return dados_cache
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_dados_capital_preparados(cache_token: str, alias_sig: tuple):
+    """Carrega e prepara cache de capital com memoização entre sessões."""
+    cache_manager = get_cache_manager()
+    cache_capital = cache_manager.get_cache("capital") if cache_manager else None
+    dados_capital = cache_capital.carregar_formato_antigo() if cache_capital else None
+    if not dados_capital:
+        return None
+
+    if alias_sig:
+        dict_aliases = dict(alias_sig)
+        dados_capital = aplicar_aliases_em_periodos(
+            dados_capital,
+            dict_aliases,
+            mapa_codigos=None,
+        )
+    return dados_capital
+
 
 def carregar_dados_periodos():
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         return
     _perf_start("init_dados_periodos")
-    cache_manager = get_cache_manager()
-    resultado_principal = cache_manager.carregar("principal")
-    cache_principal = cache_manager.get_cache("principal")
-    dados_cache = cache_principal.carregar_formato_antigo() if cache_principal else None
+
+    cache_token = _cache_version_token("principal")
+    alias_sig = _alias_signature()
+
+    _perf_start("principal_preparado_cache")
+    dados_cache = _carregar_dados_periodos_preparados(cache_token, alias_sig)
+    print(_perf_log("principal_preparado_cache"))
+
     if dados_cache:
-        _perf_start("recalc_metricas")
-        dados_cache = recalcular_metricas_derivadas(dados_cache)
-        print(_perf_log("recalc_metricas"))
-        if 'dict_aliases' in st.session_state:
-            _perf_start("aplicar_aliases")
-            dados_cache = aplicar_aliases_em_periodos(
-                dados_cache,
-                st.session_state['dict_aliases'],
-                mapa_codigos=None,  # Evita chamada HTTP à API Olinda
-            )
-            print(_perf_log("aplicar_aliases"))
         st.session_state['dados_periodos'] = dados_cache
         if 'cache_fonte' not in st.session_state:
-            st.session_state['cache_fonte'] = resultado_principal.fonte if resultado_principal else 'desconhecida'
+            st.session_state['cache_fonte'] = 'local (cache preparado)'
         if 'dados_periodos_erro' in st.session_state:
             del st.session_state['dados_periodos_erro']
     else:
-        if resultado_principal and not resultado_principal.sucesso:
-            st.session_state['dados_periodos_erro'] = resultado_principal.mensagem
-            st.session_state['dados_periodos_fonte'] = resultado_principal.fonte
+        st.session_state['dados_periodos_erro'] = "cache principal não disponível ou vazio"
+        st.session_state['dados_periodos_fonte'] = 'desconhecida'
     print(_perf_log("init_dados_periodos"))
 
 
@@ -3488,19 +3579,17 @@ def carregar_dados_capital():
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
         return
     _perf_start("init_dados_capital")
-    cache_manager = get_cache_manager()
-    resultado_capital = cache_manager.carregar("capital")
-    cache_capital = cache_manager.get_cache("capital")
-    dados_capital = cache_capital.carregar_formato_antigo() if cache_capital else None
+
+    cache_token = _cache_version_token("capital")
+    alias_sig = _alias_signature()
+
+    _perf_start("capital_preparado_cache")
+    dados_capital = _carregar_dados_capital_preparados(cache_token, alias_sig)
+    print(_perf_log("capital_preparado_cache"))
+
     if dados_capital:
-        if 'dict_aliases' in st.session_state:
-            dados_capital = aplicar_aliases_em_periodos(
-                dados_capital,
-                st.session_state['dict_aliases'],
-                mapa_codigos=None,  # Evita chamada HTTP à API Olinda
-            )
         st.session_state['dados_capital'] = dados_capital
-        st.session_state['capital_cache_fonte'] = resultado_capital.fonte if resultado_capital else 'desconhecida'
+        st.session_state['capital_cache_fonte'] = 'local (cache preparado)'
     print(_perf_log("init_dados_capital"))
 
 
