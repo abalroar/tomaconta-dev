@@ -647,10 +647,10 @@ def recalcular_metricas_derivadas(dados_periodos):
         # Fórmula: (LL_YTD × fator) / ((PL_t + PL_Dez_ano_anterior) / 2)
         # Se PL médio <= 0 ou dados faltantes → N/A.
         #
-        # IMPORTANTE — Acumulação do LL para Set (período 3 / mês 9):
-        # O BCB (Relatório 1) publica o LL de Set como Jul-Set (Q3, 3 meses),
-        # NÃO como YTD Jan-Set. Para obter o YTD, somamos o valor de Jun
-        # (que é Jan-Jun acumulado, 6 meses): YTD = Q3 + Jun = Jan-Set (9 meses).
+        # IMPORTANTE — Acumulação do LL para Set/Dez (períodos 3 e 4 / meses 9 e 12):
+        # O BCB (Relatório 1) pode publicar o LL como resultado do semestre
+        # (Jul-Set ou Jul-Dez), não necessariamente como YTD desde janeiro.
+        # Para obter o YTD, somamos o valor de Jun (Jan-Jun acumulado).
         # Essa acumulação é feita UMA ÚNICA VEZ aqui; downstream
         # (_ajustar_lucro_acumulado_peers, etc.) lê o valor já acumulado.
         if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
@@ -658,8 +658,8 @@ def recalcular_metricas_derivadas(dados_periodos):
             pl_col = "Patrimônio Líquido"
             ll_ytd = df_atualizado[ll_col].copy()
 
-            # Para Set (mes=9): LL do BCB é só Q3 (Jul-Set); somar Jun (YTD Jan-Jun)
-            if mes == 9:
+            # Para Set/Dez: somar Jun (YTD Jan-Jun) para obter LL YTD anual.
+            if mes in (9, 12):
                 parsed = _parse_periodo(periodo_str) if periodo_str else None
                 if parsed:
                     parte_p, ano_p, _ = parsed
@@ -687,7 +687,7 @@ def recalcular_metricas_derivadas(dados_periodos):
             df_atualizado["ROE Ac. YTD an. (%)"] = _calcular_roe_anualizado(
                 ll_ytd, pl_t, pl_dez_anterior, mes
             )
-            # Armazenar LL YTD acumulado (Set: Q3 + Jun) na coluna para uso downstream
+            # Armazenar LL YTD acumulado (Set/Dez: período + Jun) na coluna para uso downstream
             df_atualizado[ll_col] = ll_ytd
 
         # Crédito/PL - SEMPRE recalcular
@@ -1554,13 +1554,8 @@ def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = N
     if serie_num.empty:
         return serie_num
 
-    # Regra geral do app: percentuais ficam em base decimal (0-1) e no display viram 0-100.
-    # Exceção: Índice de Basileia pode chegar (legado/fonte) já em 0-100.
-    # Nesse caso, convertemos apenas valores em base decimal e preservamos os já percentuais.
-    if variavel and "Basileia" in variavel:
-        mask_decimal = serie_num.abs() <= 1
-        return serie_num.where(~mask_decimal, serie_num * 100)
-
+    # Regra de display: percentuais internos ficam em base decimal (0-1)
+    # e são sempre exibidos em base percentual (0-100).
     return serie_num * 100
 
 
