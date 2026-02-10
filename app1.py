@@ -1401,7 +1401,7 @@ def ordenar_periodos(periodos, reverso=False):
 
 
 def periodo_para_exibicao(periodo_trimestre: str) -> str:
-    """Converte período trimestral (1/2025) para formato mês abreviado (Mar/25).
+    """Converte período trimestral para formato mês abreviado (Mar/25).
 
     Args:
         periodo_trimestre: Período no formato "trimestre/ano" (ex: "1/2025")
@@ -1413,8 +1413,12 @@ def periodo_para_exibicao(periodo_trimestre: str) -> str:
         return str(periodo_trimestre)
     try:
         trimestre, ano = str(periodo_trimestre).split('/')
-        meses_map = {'1': 'Mar', '2': 'Jun', '3': 'Set', '4': 'Dez'}
-        mes = meses_map.get(trimestre.strip(), trimestre)
+        trimestre_norm = trimestre.strip().lstrip("0") or "0"
+        meses_map = {
+            '1': 'Mar', '2': 'Jun', '3': 'Set', '4': 'Dez',
+            '03': 'Mar', '06': 'Jun', '09': 'Set', '12': 'Dez',
+        }
+        mes = meses_map.get(trimestre_norm, trimestre.strip())
         ano_curto = ano[-2:] if len(ano) == 4 else ano
         return f"{mes}/{ano_curto}"
     except Exception:
@@ -1559,12 +1563,26 @@ def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = N
     if serie_num.empty:
         return serie_num
 
-    # Regra de display: percentuais internos ficam em base decimal (0-1)
-    # e são sempre exibidos em base percentual (0-100).
-    return serie_num * 100
+    # Regra de display robusta: valores em base decimal (0-1) viram 0-100.
+    # Valores já em 0-100 permanecem sem nova multiplicação.
+    mask_decimal = serie_num.abs() <= 1
+    serie_display = serie_num.copy()
+    serie_display.loc[mask_decimal] = serie_display.loc[mask_decimal] * 100
+    return serie_display
+
+
+def _normalizar_basileia_display(serie: pd.Series) -> pd.Series:
+    """Tratamento específico de exceção para Basileia no display.
+
+    Evita duplo tratamento ao exibir valores em % quando a base já vem 0-100,
+    mantendo compatibilidade com bases em 0-1.
+    """
+    return _normalizar_percentual_display(serie, "Índice de Basileia")
 
 
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
+    if variavel and "Basileia" in variavel:
+        return _normalizar_basileia_display(serie)
     if _is_variavel_percentual(variavel):
         return _normalizar_percentual_display(serie, variavel)
     return serie * format_info['multiplicador']
@@ -3433,36 +3451,127 @@ if 'df_aliases' not in st.session_state:
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
     print(_perf_log("init_aliases"))
 
+def _cache_version_token(tipo_cache: str) -> str:
+    """Token estável para invalidar caches processados quando arquivo base muda."""
+    cache_manager = get_cache_manager()
+    cache_obj = cache_manager.get_cache(tipo_cache) if cache_manager else None
+    if cache_obj is None:
+        return f"{tipo_cache}:missing"
+
+    arquivo = None
+    if cache_obj.arquivo_dados.exists():
+        arquivo = cache_obj.arquivo_dados
+    elif cache_obj.arquivo_dados_pickle.exists():
+        arquivo = cache_obj.arquivo_dados_pickle
+
+    if arquivo is None:
+        return f"{tipo_cache}:empty"
+
+    stat = arquivo.stat()
+    return f"{tipo_cache}:{int(stat.st_mtime)}:{stat.st_size}"
+
+
+def _alias_signature() -> tuple:
+    dict_aliases = st.session_state.get('dict_aliases', {}) or {}
+    return tuple(sorted((str(k), str(v)) for k, v in dict_aliases.items()))
+
+
+def _precisa_recalcular_metricas_rapido(dados_periodos: dict) -> bool:
+    """Heurística conservadora para evitar recálculo global desnecessário."""
+    if not dados_periodos:
+        return False
+
+    colunas_obsoletas = {'Risco/Retorno', 'Funding Gap (%)', 'Lucro Líquido', 'ROE An. (%)', 'Crédito/PL'}
+    for _, df in dados_periodos.items():
+        if df is None or df.empty:
+            continue
+        cols = set(df.columns)
+
+        if cols & colunas_obsoletas:
+            return True
+
+        if {"Lucro Líquido Acumulado YTD", "Patrimônio Líquido"}.issubset(cols) and "ROE Ac. YTD an. (%)" not in cols:
+            return True
+        if {"Carteira de Crédito", "Patrimônio Líquido"}.issubset(cols) and "Crédito/PL (%)" not in cols:
+            return True
+        if {"Carteira de Crédito", "Captações"}.issubset(cols) and "Crédito/Captações (%)" not in cols:
+            return True
+        if {"Carteira de Crédito", "Ativo Total"}.issubset(cols) and "Crédito/Ativo (%)" not in cols:
+            return True
+
+        for col_pct in ("Índice de Basileia", "Índice de Imobilização"):
+            if col_pct in cols:
+                serie = pd.to_numeric(df[col_pct], errors='coerce')
+                if (serie.abs() > 1).any():
+                    return True
+
+    return False
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_dados_periodos_preparados(cache_token: str, alias_sig: tuple):
+    """Carrega e prepara cache principal com memoização entre sessões.
+
+    Evita recomputar métricas derivadas e aplicação de aliases em todo reload.
+    """
+    cache_manager = get_cache_manager()
+    cache_principal = cache_manager.get_cache("principal") if cache_manager else None
+    dados_cache = cache_principal.carregar_formato_antigo() if cache_principal else None
+    if not dados_cache:
+        return None
+
+    if _precisa_recalcular_metricas_rapido(dados_cache):
+        dados_cache = recalcular_metricas_derivadas(dados_cache)
+
+    if alias_sig:
+        dict_aliases = dict(alias_sig)
+        dados_cache = aplicar_aliases_em_periodos(
+            dados_cache,
+            dict_aliases,
+            mapa_codigos=None,
+        )
+    return dados_cache
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_dados_capital_preparados(cache_token: str, alias_sig: tuple):
+    """Carrega e prepara cache de capital com memoização entre sessões."""
+    cache_manager = get_cache_manager()
+    cache_capital = cache_manager.get_cache("capital") if cache_manager else None
+    dados_capital = cache_capital.carregar_formato_antigo() if cache_capital else None
+    if not dados_capital:
+        return None
+
+    if alias_sig:
+        dict_aliases = dict(alias_sig)
+        dados_capital = aplicar_aliases_em_periodos(
+            dados_capital,
+            dict_aliases,
+            mapa_codigos=None,
+        )
+    return dados_capital
+
 
 def carregar_dados_periodos():
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         return
     _perf_start("init_dados_periodos")
-    cache_manager = get_cache_manager()
-    resultado_principal = cache_manager.carregar("principal")
-    cache_principal = cache_manager.get_cache("principal")
-    dados_cache = cache_principal.carregar_formato_antigo() if cache_principal else None
+
+    cache_token = _cache_version_token("principal")
+    alias_sig = _alias_signature()
+
+    _perf_start("principal_preparado_cache")
+    dados_cache = _carregar_dados_periodos_preparados(cache_token, alias_sig)
+    print(_perf_log("principal_preparado_cache"))
+
     if dados_cache:
-        _perf_start("recalc_metricas")
-        dados_cache = recalcular_metricas_derivadas(dados_cache)
-        print(_perf_log("recalc_metricas"))
-        if 'dict_aliases' in st.session_state:
-            _perf_start("aplicar_aliases")
-            dados_cache = aplicar_aliases_em_periodos(
-                dados_cache,
-                st.session_state['dict_aliases'],
-                mapa_codigos=None,  # Evita chamada HTTP à API Olinda
-            )
-            print(_perf_log("aplicar_aliases"))
         st.session_state['dados_periodos'] = dados_cache
         if 'cache_fonte' not in st.session_state:
-            st.session_state['cache_fonte'] = resultado_principal.fonte if resultado_principal else 'desconhecida'
+            st.session_state['cache_fonte'] = 'local (cache preparado)'
         if 'dados_periodos_erro' in st.session_state:
             del st.session_state['dados_periodos_erro']
     else:
-        if resultado_principal and not resultado_principal.sucesso:
-            st.session_state['dados_periodos_erro'] = resultado_principal.mensagem
-            st.session_state['dados_periodos_fonte'] = resultado_principal.fonte
+        st.session_state['dados_periodos_erro'] = "cache principal não disponível ou vazio"
+        st.session_state['dados_periodos_fonte'] = 'desconhecida'
     print(_perf_log("init_dados_periodos"))
 
 
@@ -3470,19 +3579,17 @@ def carregar_dados_capital():
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
         return
     _perf_start("init_dados_capital")
-    cache_manager = get_cache_manager()
-    resultado_capital = cache_manager.carregar("capital")
-    cache_capital = cache_manager.get_cache("capital")
-    dados_capital = cache_capital.carregar_formato_antigo() if cache_capital else None
+
+    cache_token = _cache_version_token("capital")
+    alias_sig = _alias_signature()
+
+    _perf_start("capital_preparado_cache")
+    dados_capital = _carregar_dados_capital_preparados(cache_token, alias_sig)
+    print(_perf_log("capital_preparado_cache"))
+
     if dados_capital:
-        if 'dict_aliases' in st.session_state:
-            dados_capital = aplicar_aliases_em_periodos(
-                dados_capital,
-                st.session_state['dict_aliases'],
-                mapa_codigos=None,  # Evita chamada HTTP à API Olinda
-            )
         st.session_state['dados_capital'] = dados_capital
-        st.session_state['capital_cache_fonte'] = resultado_capital.fonte if resultado_capital else 'desconhecida'
+        st.session_state['capital_cache_fonte'] = 'local (cache preparado)'
     print(_perf_log("init_dados_capital"))
 
 
@@ -5052,24 +5159,33 @@ elif menu == "Rankings":
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = _normalizar_lucro_liquido(df)
         df = adicionar_indice_cet1(df)
-        df_cet1 = construir_cet1_capital(
-            st.session_state.get("dados_capital", {}),
-            st.session_state.get("dict_aliases", {}),
-            st.session_state.get("df_aliases"),
-            st.session_state.get("dados_periodos"),
+
+        # Evita merge custoso de CET1 quando a coluna já está preenchida no dataset base.
+        precisa_enriquecer_cet1 = (
+            "Índice de CET1" not in df.columns
+            or df["Índice de CET1"].isna().any()
         )
-        if not df_cet1.empty:
-            df = df.merge(
-                df_cet1,
-                on=["Período", "Instituição"],
-                how="left",
-                suffixes=("", "_cet1"),
+        if precisa_enriquecer_cet1:
+            _perf_start("rankings_merge_cet1")
+            df_cet1 = construir_cet1_capital(
+                st.session_state.get("dados_capital", {}),
+                st.session_state.get("dict_aliases", {}),
+                st.session_state.get("df_aliases"),
+                st.session_state.get("dados_periodos"),
             )
-            if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
-                df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
-            elif "Índice de CET1_cet1" in df.columns:
-                df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
-                df = df.drop(columns=["Índice de CET1_cet1"])
+            if not df_cet1.empty:
+                df = df.merge(
+                    df_cet1,
+                    on=["Período", "Instituição"],
+                    how="left",
+                    suffixes=("", "_cet1"),
+                )
+                if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
+                    df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
+                elif "Índice de CET1_cet1" in df.columns:
+                    df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
+                    df = df.drop(columns=["Índice de CET1_cet1"])
+            print(_perf_log("rankings_merge_cet1"))
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
@@ -6403,7 +6519,7 @@ elif menu == "DRE":
         if pd.isna(valor) or valor is None:
             return "—"
         try:
-            return f"{valor * 100:.{decimais}f}%"
+            return f"{valor * 100:.{decimais}f}%".replace(".", ",")
         except Exception:
             return "—"
 
@@ -7012,17 +7128,8 @@ elif menu == "Carteira 4.966":
         return None
 
     def periodo_para_exibicao_mes(periodo_trimestre: str) -> str:
-        """Converte período trimestral (1/2025) para formato mês abreviado (mar/25)."""
-        if not periodo_trimestre or '/' not in periodo_trimestre:
-            return periodo_trimestre
-        try:
-            trimestre, ano = periodo_trimestre.split('/')
-            meses_map = {'1': 'mar', '2': 'jun', '3': 'set', '4': 'dez'}
-            mes = meses_map.get(trimestre, trimestre)
-            ano_curto = ano[-2:] if len(ano) == 4 else ano
-            return f"{mes}/{ano_curto}"
-        except:
-            return periodo_trimestre
+        """Wrapper local para manter padrão global de período (Mar/XX, Jun/XX, Set/XX, Dez/XX)."""
+        return periodo_para_exibicao(periodo_trimestre)
 
     def formatar_valor_br(valor, decimais=0):
         """Formata valor numérico no padrão brasileiro (pontos como separador de milhar)."""
@@ -7041,7 +7148,7 @@ elif menu == "Carteira 4.966":
         if pd.isna(valor) or valor is None:
             return "-"
         try:
-            return f"{valor * 100:.{decimais}f}%"
+            return f"{valor * 100:.{decimais}f}%".replace(".", ",")
         except:
             return "-"
 
