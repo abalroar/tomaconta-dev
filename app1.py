@@ -1637,90 +1637,6 @@ def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
     return None
 
 
-@st.cache_data(ttl=3600, show_spinner="extraindo dados do passivo...")
-def _extrair_passivo_api_fallback(periodos_exib: tuple) -> Optional[pd.DataFrame]:
-    """Fallback: extrai dados do Passivo (Rel. 3) da API BCB quando cache indisponível.
-
-    Usa o cache principal para mapear CodInst -> nome de instituição.
-    """
-    try:
-        from utils.ifdata_cache.extractor import (
-            extrair_valores, periodo_exibicao_para_api, periodo_api_para_exibicao,
-            _normalizar_nome_coluna,
-        )
-    except ImportError:
-        return None
-
-    # Carregar cache principal para mapeamento de nomes
-    df_principal = _carregar_cache_relatorio("principal")
-
-    all_dfs = []
-    for per_exib in periodos_exib:
-        try:
-            per_api = periodo_exibicao_para_api(per_exib)
-        except Exception:
-            continue
-        try:
-            df_val = extrair_valores(per_api, 3)
-        except Exception:
-            continue
-        if df_val is None or df_val.empty:
-            continue
-
-        if "NomeColuna" in df_val.columns:
-            df_val["NomeColuna"] = df_val["NomeColuna"].apply(_normalizar_nome_coluna)
-
-        df_pivot = df_val.pivot_table(
-            index="CodInst",
-            columns="NomeColuna",
-            values="Saldo" if "Saldo" in df_val.columns else "Valor",
-            aggfunc="sum",
-        ).reset_index()
-        df_pivot.columns.name = None
-
-        # Mapear nomes via API Rel. 1 e cache principal
-        if df_principal is not None and "Ativo Total" in df_principal.columns:
-            df_p = df_principal[df_principal["Período"] == per_exib]
-            if not df_p.empty:
-                try:
-                    df_val1 = extrair_valores(per_api, 1)
-                    if df_val1 is not None and not df_val1.empty:
-                        df_val1["NomeColuna"] = df_val1["NomeColuna"].apply(_normalizar_nome_coluna)
-                        df_at = df_val1[df_val1["NomeColuna"] == "Ativo Total"][["CodInst", "Saldo"]]
-                        cod_map = {}
-                        for _, row in df_at.iterrows():
-                            matches = df_p[(df_p["Ativo Total"] - row["Saldo"]).abs() < 1.0]
-                            if len(matches) >= 1:
-                                cod_map[row["CodInst"]] = matches.iloc[0]["Instituição"]
-                        df_pivot["Instituição"] = df_pivot["CodInst"].map(cod_map)
-                except Exception:
-                    pass
-
-        if "Instituição" not in df_pivot.columns or df_pivot["Instituição"].isna().all():
-            df_pivot["Instituição"] = df_pivot["CodInst"].apply(lambda x: f"[IF {x}]")
-        else:
-            mask = df_pivot["Instituição"].isna()
-            df_pivot.loc[mask, "Instituição"] = df_pivot.loc[mask, "CodInst"].apply(
-                lambda x: f"[IF {x}]"
-            )
-
-        # Mesclar colunas "Depósito Total (a)" e "Depósitos (a)"
-        if "Depósito Total (a)" in df_pivot.columns and "Depósitos (a)" in df_pivot.columns:
-            m = df_pivot["Depósitos (a)"].isna() & df_pivot["Depósito Total (a)"].notna()
-            df_pivot.loc[m, "Depósitos (a)"] = df_pivot.loc[m, "Depósito Total (a)"]
-        elif "Depósito Total (a)" in df_pivot.columns and "Depósitos (a)" not in df_pivot.columns:
-            df_pivot = df_pivot.rename(columns={"Depósito Total (a)": "Depósitos (a)"})
-
-        df_pivot["Período"] = per_exib
-        if "CodInst" in df_pivot.columns:
-            df_pivot = df_pivot.drop(columns=["CodInst"])
-        all_dfs.append(df_pivot)
-
-    if not all_dfs:
-        return None
-    return pd.concat(all_dfs, ignore_index=True)
-
-
 def _preparar_metricas_extra_peers(
     bancos: list,
     periodos: list,
@@ -4991,13 +4907,6 @@ elif menu == "Peers (Tabela)":
                     periodos_selecionados = ordenar_periodos(periodos_selecionados)
                     cache_ativo = _carregar_cache_relatorio("ativo")
                     cache_passivo = _carregar_cache_relatorio("passivo")
-                    # Fallback: se cache passivo indisponível, extrair da API
-                    if cache_passivo is None:
-                        _periodos_base = {_periodo_ano_anterior(p) for p in periodos_selecionados}
-                        _periodos_ext = tuple(sorted(set(
-                            p for p in list(periodos_selecionados) + list(_periodos_base) if p
-                        )))
-                        cache_passivo = _extrair_passivo_api_fallback(_periodos_ext)
                     cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
                     cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
                     cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
