@@ -91,6 +91,10 @@ from .metric_registry import (
     get_dataset_contracts,
     validate_dataset_contract,
     validate_dataframe_by_contract_name,
+    DERIVED_METRIC_KEYS,
+    get_derived_metric_labels,
+    get_derived_metric_format_map,
+    get_derived_metric_formula_map,
 )
 
 from .derived_metrics import (
@@ -217,6 +221,10 @@ __all__ = [
     "get_dataset_contracts",
     "validate_dataset_contract",
     "validate_dataframe_by_contract_name",
+    "DERIVED_METRIC_KEYS",
+    "get_derived_metric_labels",
+    "get_derived_metric_format_map",
+    "get_derived_metric_formula_map",
     "DerivedMetricsCache",
     "DERIVED_METRICS",
     "DERIVED_METRICS_FORMAT",

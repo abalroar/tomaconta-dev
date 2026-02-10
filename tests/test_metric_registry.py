@@ -14,6 +14,8 @@ METRIC_REGISTRY = metric_registry.METRIC_REGISTRY
 DATASET_CONTRACTS = metric_registry.DATASET_CONTRACTS
 get_metric_definition = metric_registry.get_metric_definition
 validate_dataframe_by_contract_name = metric_registry.validate_dataframe_by_contract_name
+get_derived_metric_labels = metric_registry.get_derived_metric_labels
+get_derived_metric_formula_map = metric_registry.get_derived_metric_formula_map
 
 
 class FakeDataFrame:
@@ -54,3 +56,11 @@ def test_dataset_contract_validation_missing_column():
 def test_dataset_contract_validation_invalid_object():
     errors = validate_dataframe_by_contract_name(object(), "derived_metrics_long")
     assert any("interface de dataframe" in e for e in errors)
+
+
+def test_derived_metric_helpers_are_consistent():
+    labels = get_derived_metric_labels()
+    formulas = get_derived_metric_formula_map()
+    assert "Desp PDD / NIM bruta" in labels
+    assert "Desp Captação / Captação" in labels
+    assert set(labels).issubset(set(formulas.keys()))

@@ -25,3 +25,17 @@
 
 - Removida dependência de `pandas` em `metric_registry.py` (validação agora aceita interface estrutural `empty/columns`).
 - Testes de `tests/test_metric_registry.py` reescritos para usar `FakeDataFrame`, permitindo execução em ambiente mínimo.
+
+
+## Integração inicial do registry ao cálculo derivado
+
+- `derived_metrics.py` passou a consumir labels/formatação/fórmulas de métricas derivadas a partir de `metric_registry.py`, removendo duplicação de catálogo.
+- Mantido fallback local para preservar retrocompatibilidade se o registry estiver incompleto.
+- Testes do registry ampliados para validar consistência dos helpers de métricas derivadas.
+
+
+## Otimização urgente peers (performance)
+
+- Substituído lookup O(n) por célula (`df[(inst)&(periodo)]`) por índice em memória `(Instituição, Período) -> row` com cache em `df.attrs`.
+- Adicionado recorte prévio dos caches extras por bancos/períodos selecionados antes de montar a tabela peers.
+- Objetivo: reduzir drasticamente tempo da aba com múltiplos bancos (ex.: 15 bancos).

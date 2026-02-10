@@ -166,6 +166,43 @@ METRIC_REGISTRY: Dict[str, MetricDefinition] = {
 }
 
 
+
+DERIVED_METRIC_KEYS: List[str] = [
+    "desp_pdd_nim_bruta",
+    "desp_pdd_resultado_intermediacao_fin_bruto",
+    "desp_captacao_captacao",
+]
+
+
+def get_derived_metric_labels() -> List[str]:
+    """Retorna labels (display_name) das métricas derivadas suportadas."""
+    labels: List[str] = []
+    for key in DERIVED_METRIC_KEYS:
+        m = METRIC_REGISTRY.get(key)
+        if m is not None:
+            labels.append(m.display_name)
+    return labels
+
+
+def get_derived_metric_format_map() -> Dict[str, str]:
+    """Retorna map label -> formato para métricas derivadas."""
+    out: Dict[str, str] = {}
+    for key in DERIVED_METRIC_KEYS:
+        m = METRIC_REGISTRY.get(key)
+        if m is not None:
+            out[m.display_name] = m.display_format
+    return out
+
+
+def get_derived_metric_formula_map() -> Dict[str, str]:
+    """Retorna map label -> fórmula canônica para métricas derivadas."""
+    out: Dict[str, str] = {}
+    for key in DERIVED_METRIC_KEYS:
+        m = METRIC_REGISTRY.get(key)
+        if m is not None:
+            out[m.display_name] = m.formula
+    return out
+
 DATASET_CONTRACTS: Dict[str, DatasetContract] = {
     "principal_curated": DatasetContract(
         name="principal_curated",
