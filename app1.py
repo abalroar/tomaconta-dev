@@ -1464,6 +1464,45 @@ def ordenar_bancos_com_alias(bancos: list, dict_aliases: dict = None) -> list:
     return bancos_com_alias_sorted + bancos_sem_alias_sorted
 
 
+# --- Defaults helpers ---
+
+# Nomes-alvo para defaults (slug normalizado → possíveis matches)
+_BANCOS_DEFAULT_SLUGS = [
+    ("itau", "itaú"),
+    ("santander",),
+    ("banco do brasil", "bb"),
+    ("btg", "btg pactual"),
+    ("bradesco",),
+]
+
+
+def _encontrar_bancos_default(bancos_disponiveis: list, slugs=None) -> list:
+    """Encontra bancos nos disponíveis por matching fuzzy de substrings."""
+    if slugs is None:
+        slugs = _BANCOS_DEFAULT_SLUGS
+    resultado = []
+    for grupo in slugs:
+        encontrado = None
+        for slug in grupo:
+            for banco in bancos_disponiveis:
+                if slug == banco.lower() or slug in banco.lower():
+                    encontrado = banco
+                    break
+            if encontrado:
+                break
+        if encontrado and encontrado not in resultado:
+            resultado.append(encontrado)
+    return resultado
+
+
+def _encontrar_periodo(periodos: list, trimestre: int, ano: int) -> Optional[str]:
+    """Encontra um período na lista pelo trimestre e ano."""
+    for p in periodos:
+        if f"{trimestre}/{ano}" == p or f"{trimestre}/{str(ano)[-2:]}" == p:
+            return p
+    return None
+
+
 def _is_variavel_percentual(variavel: str) -> bool:
     if not variavel:
         return False
@@ -4261,12 +4300,26 @@ elif menu == "Peers (Tabela)":
                 st.markdown("### Peers (Tabela)")
                 st.caption("comparativo multi-bancos com períodos sincronizados.")
 
+                _default_peers_bancos = _encontrar_bancos_default(
+                    bancos_disponiveis, [("itau", "itaú")]
+                )
+                if not _default_peers_bancos:
+                    _default_peers_bancos = bancos_disponiveis[:1]
+
+                _default_peers_periodos = []
+                for _tri, _ano in [(3, 2025), (2, 2025), (1, 2025)]:
+                    _p = _encontrar_periodo(periodos_dropdown, _tri, _ano)
+                    if _p:
+                        _default_peers_periodos.append(_p)
+                if not _default_peers_periodos:
+                    _default_peers_periodos = periodos_dropdown[:3]
+
                 col_bancos, col_periodos = st.columns([2, 2])
                 with col_bancos:
                     bancos_selecionados = st.multiselect(
                         "selecionar instituições (até 5)",
                         bancos_disponiveis,
-                        default=bancos_disponiveis[:2],
+                        default=_default_peers_bancos,
                         max_selections=5,
                         key="peers_tabela_bancos",
                     )
@@ -4274,7 +4327,7 @@ elif menu == "Peers (Tabela)":
                     periodos_selecionados = st.multiselect(
                         "selecionar períodos (até 3)",
                         periodos_dropdown,
-                        default=periodos_dropdown[:3],
+                        default=_default_peers_periodos,
                         max_selections=3,
                         key="peers_tabela_periodos",
                         format_func=periodo_para_exibicao,
@@ -4433,8 +4486,7 @@ elif menu == "Scatter Plot":
             var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1)
         with col3:
             opcoes_tamanho = ['Tamanho Fixo'] + colunas_numericas
-            default_idx = opcoes_tamanho.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho else 1
-            var_size = st.selectbox("tamanho", opcoes_tamanho, index=default_idx)
+            var_size = st.selectbox("tamanho", opcoes_tamanho, index=0)
         with col4:
             periodo_scatter = st.selectbox("período", periodos, index=0, format_func=periodo_para_exibicao)
 
@@ -4442,7 +4494,7 @@ elif menu == "Scatter Plot":
         col_t1, col_t2, col_t3 = st.columns([1, 1, 2])
 
         with col_t1:
-            top_n_scatter = st.slider("top n", 5, 50, 15)
+            top_n_scatter = st.slider("top n", 5, 50, 5)
         with col_t2:
             var_top_n = st.selectbox("top n por", colunas_numericas, index=colunas_numericas.index('Carteira de Crédito') if 'Carteira de Crédito' in colunas_numericas else 0)
 
@@ -4561,21 +4613,24 @@ elif menu == "Scatter Plot":
                 key="var_y_n2"
             )
         with col_p3:
-            # Período inicial (mais antigo por padrão)
-            idx_inicial = min(1, len(periodos) - 1) if len(periodos) > 1 else 0
+            # Período inicial (Dez/2024 por padrão)
+            _p_dez24 = _encontrar_periodo(periodos, 4, 2024)
+            _idx_ini_n2 = periodos.index(_p_dez24) if _p_dez24 and _p_dez24 in periodos else (min(1, len(periodos) - 1) if len(periodos) > 1 else 0)
             periodo_inicial = st.selectbox(
                 "período inicial",
                 periodos,
-                index=idx_inicial,
+                index=_idx_ini_n2,
                 key="periodo_inicial_n2",
                 format_func=periodo_para_exibicao
             )
         with col_p4:
-            # Período subsequente (mais recente por padrão)
+            # Período subsequente (Set/2025 por padrão)
+            _p_set25_n2 = _encontrar_periodo(periodos, 3, 2025)
+            _idx_sub_n2 = periodos.index(_p_set25_n2) if _p_set25_n2 and _p_set25_n2 in periodos else 0
             periodo_subseq = st.selectbox(
                 "período subsequente",
                 periodos,
-                index=0,
+                index=_idx_sub_n2,
                 key="periodo_subseq_n2",
                 format_func=periodo_para_exibicao
             )
@@ -4584,7 +4639,7 @@ elif menu == "Scatter Plot":
         col_n2_t1, col_n2_t2, col_n2_t3 = st.columns([1, 1, 2])
 
         with col_n2_t1:
-            top_n_scatter_n2 = st.slider("top n", 5, 50, 15, key="top_n_n2")
+            top_n_scatter_n2 = st.slider("top n", 5, 50, 5, key="top_n_n2")
         with col_n2_t2:
             var_top_n_n2 = st.selectbox(
                 "top n por",
@@ -4594,8 +4649,7 @@ elif menu == "Scatter Plot":
             )
         with col_n2_t3:
             opcoes_tamanho_n2 = ['Tamanho Fixo'] + colunas_numericas
-            default_idx_n2 = opcoes_tamanho_n2.index('Carteira de Crédito') if 'Carteira de Crédito' in opcoes_tamanho_n2 else 1
-            var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=default_idx_n2, key="var_size_n2")
+            var_size_n2 = st.selectbox("tamanho", opcoes_tamanho_n2, index=0, key="var_size_n2")
 
         # Terceira linha: Seleção de bancos
         col_n2_f = st.columns(1)[0]
@@ -4875,10 +4929,14 @@ elif menu == "Rankings":
 
             col_periodo, col_indicador, col_media = st.columns([1.2, 2, 1.8])
             with col_periodo:
+                _idx_periodo_rank = 0
+                _p_set25 = _encontrar_periodo(periodos, 3, 2025)
+                if _p_set25 and _p_set25 in periodos:
+                    _idx_periodo_rank = periodos.index(_p_set25)
                 periodo_resumo = st.selectbox(
                     "período",
                     periodos,
-                    index=0,
+                    index=_idx_periodo_rank,
                     key="periodo_resumo",
                     format_func=periodo_para_exibicao
                 )
@@ -4907,11 +4965,12 @@ elif menu == "Rankings":
 
             indicador_col = indicadores_disponiveis[indicador_label]
 
+            _default_bancos_rank = _encontrar_bancos_default(bancos_todos)
             with col_bancos:
                 bancos_selecionados = st.multiselect(
                     "selecionar instituições (até 40)",
                     bancos_todos,
-                    default=[],
+                    default=_default_bancos_rank,
                     key="bancos_resumo",
                     max_selections=40
                 )
@@ -6269,18 +6328,25 @@ elif menu == "DRE":
                 ].copy()
 
                 instit_col = "Instituicao"
-                instituicoes = sorted(df_base[instit_col].dropna().unique().tolist())
+                _dict_aliases_dre = st.session_state.get('dict_aliases', {})
+                instituicoes = ordenar_bancos_com_alias(
+                    df_base[instit_col].dropna().unique().tolist(), _dict_aliases_dre
+                )
                 anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
 
                 if not instituicoes or not anos_disponiveis:
                     st.warning("Dados DRE sem instituições ou períodos válidos.")
                     st.stop()
 
+                _default_dre = _encontrar_bancos_default(instituicoes, [("itau", "itaú")])
+                _idx_dre = instituicoes.index(_default_dre[0]) if _default_dre else 0
+
                 col_inst, col_ano = st.columns([1, 1])
                 with col_inst:
                     instituicao_selecionada = st.selectbox(
                         "Instituição",
                         instituicoes,
+                        index=_idx_dre,
                         key="dre_instituicao"
                     )
                 with col_ano:
@@ -6505,7 +6571,10 @@ elif menu == "Carteira 4.966":
 
         # Obter lista de instituições e períodos
         if 'Instituição' in df_carteira.columns:
-            instituicoes = sorted(df_carteira['Instituição'].dropna().unique().tolist())
+            _dict_aliases_cart = st.session_state.get('dict_aliases', {})
+            instituicoes = ordenar_bancos_com_alias(
+                df_carteira['Instituição'].dropna().unique().tolist(), _dict_aliases_cart
+            )
         else:
             instituicoes = []
 
