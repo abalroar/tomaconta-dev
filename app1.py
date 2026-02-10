@@ -646,12 +646,29 @@ def recalcular_metricas_derivadas(dados_periodos):
         # ROE Anualizado com PL Médio - SEMPRE recalcular
         # Fórmula: (LL_YTD × fator) / ((PL_t + PL_Dez_ano_anterior) / 2)
         # Se PL médio <= 0 ou dados faltantes → N/A.
-        # Nota: LL do BCB (Relatório 1) já vem acumulado YTD — não precisa
-        # somar períodos anteriores.
+        #
+        # IMPORTANTE — Acumulação do LL para Set (período 3 / mês 9):
+        # O BCB (Relatório 1) publica o LL de Set como Jul-Set (Q3, 3 meses),
+        # NÃO como YTD Jan-Set. Para obter o YTD, somamos o valor de Jun
+        # (que é Jan-Jun acumulado, 6 meses): YTD = Q3 + Jun = Jan-Set (9 meses).
+        # Essa acumulação é feita UMA ÚNICA VEZ aqui; downstream
+        # (_ajustar_lucro_acumulado_peers, etc.) lê o valor já acumulado.
         if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
             ll_col = "Lucro Líquido Acumulado YTD"
             pl_col = "Patrimônio Líquido"
             ll_ytd = df_atualizado[ll_col].copy()
+
+            # Para Set (mes=9): LL do BCB é só Q3 (Jul-Set); somar Jun (YTD Jan-Jun)
+            if mes == 9:
+                parsed = _parse_periodo(periodo_str) if periodo_str else None
+                if parsed:
+                    parte_p, ano_p, _ = parsed
+                    per_jun = f"2/{ano_p}" if 1 <= int(parte_p) <= 4 else f"6/{ano_p}"
+                    df_jun = dados_periodos.get(per_jun)
+                    if df_jun is not None and ll_col in df_jun.columns and "Instituição" in df_jun.columns:
+                        jun_map = df_jun.set_index("Instituição")[ll_col]
+                        if "Instituição" in df_atualizado.columns:
+                            ll_ytd = ll_ytd + df_atualizado["Instituição"].map(jun_map)
 
             # PL médio: (PL_t + PL_Dez_ano_anterior) / 2
             pl_t = df_atualizado[pl_col].copy()
@@ -670,6 +687,8 @@ def recalcular_metricas_derivadas(dados_periodos):
             df_atualizado["ROE Ac. YTD an. (%)"] = _calcular_roe_anualizado(
                 ll_ytd, pl_t, pl_dez_anterior, mes
             )
+            # Armazenar LL YTD acumulado (Set: Q3 + Jun) na coluna para uso downstream
+            df_atualizado[ll_col] = ll_ytd
 
         # Crédito/PL - SEMPRE recalcular
         if "Carteira de Crédito" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
@@ -2098,7 +2117,12 @@ def _ajustar_lucro_acumulado_peers(
     periodo: str,
     coluna: Optional[str],
 ):
-    """Retorna LL YTD do período. O BCB (Relatório 1) já publica o LL acumulado YTD."""
+    """Retorna LL YTD do período.
+
+    A acumulação Set (Q3 + Jun) já foi feita em recalcular_metricas_derivadas(),
+    que sobrescreve a coluna 'Lucro Líquido Acumulado YTD' com o valor YTD.
+    Aqui apenas lemos o valor já acumulado — NÃO somar Jun novamente.
+    """
     return _obter_valor_peers(df, banco, periodo, coluna)
 
 
@@ -2113,7 +2137,7 @@ def _calcular_roe_anualizado_peers(
 
     Usa PL médio entre período atual (t) e Dez do ano anterior.
     Retorna None quando PL médio <= 0 ou qualquer componente faltar.
-    Nota: O LL do BCB (Relatório 1) já vem acumulado YTD.
+    O LL já está acumulado YTD no DataFrame (feito em recalcular_metricas_derivadas).
     """
     lucro = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna_lucro)
     lucro_num = _coerce_numeric_value(lucro)
