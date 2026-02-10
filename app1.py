@@ -307,6 +307,7 @@ VARS_MOEDAS = [
     'Perda Esperada',
     'Carteira de Créd. Class. C4+C5',
     'Lucro Líquido Acumulado YTD',
+    'Lucro Líquido Trimestral',
     'Patrimônio Líquido',
     'Captações',
     'Ativo Total',
@@ -647,41 +648,13 @@ def recalcular_metricas_derivadas(dados_periodos):
         # Fórmula: (LL_YTD × fator) / ((PL_t + PL_Dez_ano_anterior) / 2)
         # Se PL médio <= 0 ou dados faltantes → N/A.
         #
-        # IMPORTANTE — Acumulação do LL para Set/Dez (períodos 3 e 4 / meses 9 e 12):
-        # O BCB (Relatório 1) pode publicar o LL como resultado do semestre
-        # (Jul-Set ou Jul-Dez), não necessariamente como YTD desde janeiro.
-        # Para obter o YTD, somamos o valor de Jun (Jan-Jun acumulado).
-        # Essa acumulação é feita UMA ÚNICA VEZ aqui; downstream
-        # (_ajustar_lucro_acumulado_peers, etc.) lê o valor já acumulado.
+        # IMPORTANTE: o ajuste/normalização de LL (YTD consistente e trimestralização)
+        # é aplicado no DataFrame consolidado em _normalizar_lucro_liquido().
+        # Aqui usamos o valor já disponível da coluna para cálculo do ROE.
         if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
             ll_col = "Lucro Líquido Acumulado YTD"
-            ll_col_legado = "Lucro Líquido"
             pl_col = "Patrimônio Líquido"
             ll_ytd = df_atualizado[ll_col].copy()
-
-            # Para Set/Dez: somar Jun (YTD Jan-Jun) para obter LL YTD anual.
-            if mes in (9, 12):
-                parsed = _parse_periodo(periodo_str) if periodo_str else None
-                if parsed:
-                    parte_p, ano_p, _ = parsed
-                    per_jun = f"2/{ano_p}" if 1 <= int(parte_p) <= 4 else f"6/{ano_p}"
-                    # Tentar primeiro em dados_atualizados (já renomeados), depois originais
-                    df_jun = dados_atualizados.get(per_jun, dados_periodos.get(per_jun))
-                    if df_jun is not None and "Instituição" in df_jun.columns:
-                        # Aceitar tanto nome novo quanto legado da coluna de LL
-                        ll_col_jun = ll_col if ll_col in df_jun.columns else (
-                            ll_col_legado if ll_col_legado in df_jun.columns else None
-                        )
-                        if ll_col_jun and "Instituição" in df_atualizado.columns:
-                            # Remover duplicatas de instituição para evitar erro de .map()
-                            df_jun_dedup = df_jun.drop_duplicates(subset=["Instituição"], keep="first")
-                            jun_map = df_jun_dedup.set_index("Instituição")[ll_col_jun]
-                            jun_values = df_atualizado["Instituição"].map(jun_map)
-                            # Usar .add(fill_value=0) para preservar valor original
-                            # quando a instituição não existe no período Jun
-                            ll_ytd = ll_ytd.add(jun_values, fill_value=0)
-                            # Restaurar NaN onde o original era NaN
-                            ll_ytd = ll_ytd.where(df_atualizado[ll_col].notna(), other=np.nan)
 
             # PL médio: (PL_t + PL_Dez_ano_anterior) / 2
             pl_t = df_atualizado[pl_col].copy()
@@ -701,7 +674,7 @@ def recalcular_metricas_derivadas(dados_periodos):
             df_atualizado["ROE Ac. YTD an. (%)"] = _calcular_roe_anualizado(
                 ll_ytd, pl_t, pl_dez_anterior, mes
             )
-            # Armazenar LL YTD acumulado (Set/Dez: período + Jun) na coluna para uso downstream
+            # Persistir valor de LL utilizado no cálculo do ROE para uso downstream
             df_atualizado[ll_col] = ll_ytd
 
         # Crédito/PL - SEMPRE recalcular
@@ -1900,6 +1873,62 @@ def _periodo_mesma_estrutura(periodo: str, novo_parte: int) -> Optional[str]:
     if ano_len == 2:
         return f"{nova_parte}/{str(ano)[-2:]}"
     return f"{nova_parte}/{ano}"
+
+
+def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza LL para YTD consistente e calcula LL Trimestral.
+
+    Regras (a partir do dado raw por trimestre no cache):
+      - Q1 (Mar): raw já trimestral e YTD
+      - Q2 (Jun): raw é Jan-Jun (YTD); trimestral = Jun - Mar
+      - Q3 (Set): raw já trimestral; YTD = Jun + Set
+      - Q4 (Dez): raw é Jul-Dez (semestral); trimestral = Dez - Set; YTD = Jun + Dez
+    """
+    col_ll = "Lucro Líquido Acumulado YTD"
+    if df is None or df.empty or col_ll not in df.columns:
+        return df
+
+    out = df.copy()
+    out["Lucro Líquido Trimestral"] = np.nan
+    ll_ytd_ajustado = pd.Series(np.nan, index=out.index, dtype="float64")
+
+    periodo_split = out["Período"].astype(str).str.split("/", expand=True)
+    out["_tri_tmp"] = pd.to_numeric(periodo_split[0], errors="coerce")
+    out["_ano_tmp"] = pd.to_numeric(periodo_split[1], errors="coerce")
+
+    for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False).groups.items():
+        g = out.loc[idx].copy().sort_values("_tri_tmp")
+        raw_map = g.set_index("_tri_tmp")[col_ll].to_dict()
+
+        for row_idx, tri in zip(g.index, g["_tri_tmp"]):
+            raw_val = out.at[row_idx, col_ll]
+            if pd.isna(raw_val):
+                continue
+
+            tri_int = int(tri) if pd.notna(tri) else None
+            if tri_int == 1:
+                out.at[row_idx, "Lucro Líquido Trimestral"] = raw_val
+                ll_ytd_ajustado.at[row_idx] = raw_val
+            elif tri_int == 2:
+                mar = raw_map.get(1)
+                out.at[row_idx, "Lucro Líquido Trimestral"] = raw_val - mar if pd.notna(mar) else np.nan
+                ll_ytd_ajustado.at[row_idx] = raw_val
+            elif tri_int == 3:
+                jun = raw_map.get(2)
+                out.at[row_idx, "Lucro Líquido Trimestral"] = raw_val
+                ll_ytd_ajustado.at[row_idx] = (jun + raw_val) if pd.notna(jun) else raw_val
+            elif tri_int == 4:
+                set_val = raw_map.get(3)
+                jun = raw_map.get(2)
+                out.at[row_idx, "Lucro Líquido Trimestral"] = raw_val - set_val if pd.notna(set_val) else np.nan
+                ll_ytd_ajustado.at[row_idx] = (jun + raw_val) if pd.notna(jun) else raw_val
+            else:
+                out.at[row_idx, "Lucro Líquido Trimestral"] = np.nan
+                ll_ytd_ajustado.at[row_idx] = raw_val
+
+    out[col_ll] = ll_ytd_ajustado.where(ll_ytd_ajustado.notna(), out[col_ll])
+    out = out.drop(columns=["_tri_tmp", "_ano_tmp"], errors="ignore")
+    return out
 
 
 def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optional[str]):
@@ -4130,6 +4159,7 @@ elif False and menu == "Painel":
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
             'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
+            'Lucro Líquido Trimestral': ['Lucro Líquido Trimestral'],
             'Índice de CET1': ['Índice de CET1'],
             'Patrimônio de Referência': [
                 'Patrimônio de Referência para Comparação com o RWA (e)',
@@ -5020,6 +5050,7 @@ elif menu == "Rankings":
                 st.session_state['_dados_capital_mesclados'] = True
 
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
+        df = _normalizar_lucro_liquido(df)
         df = adicionar_indice_cet1(df)
         df_cet1 = construir_cet1_capital(
             st.session_state.get("dados_capital", {}),
@@ -5071,6 +5102,7 @@ elif menu == "Rankings":
             'Índice de Capital Principal (CET1)': ['Índice de Capital Principal (CET1)', 'Índice de Capital Principal'],
             'Índice de Basileia': ['Índice de Basileia'],
             'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
+            'Lucro Líquido Trimestral': ['Lucro Líquido Trimestral'],
             'ROE Ac. Anualizado (%)': ['ROE Ac. YTD an. (%)'],
         }
 
@@ -5092,6 +5124,7 @@ elif menu == "Rankings":
                 'Índice de Capital Principal (CET1)',
                 'Índice de Basileia',
                 'Lucro Líquido Acumulado YTD',
+                'Lucro Líquido Trimestral',
                 'ROE Ac. Anualizado (%)',
             ]
             indicadores_ordenados = [i for i in ordem_prioritaria if i in indicadores_disponiveis]
@@ -5502,11 +5535,15 @@ elif menu == "Rankings":
                 delta_colunas_map = {label: col for label, col in indicadores_disponiveis.items()}
 
                 periodo_inicial_delta = periodo_resumo
+                tri_ref = str(periodo_inicial_delta).split('/')[0] if '/' in str(periodo_inicial_delta) else None
                 periodos_subsequentes = [
-                    periodo for periodo in periodos_dropdown if periodo != periodo_inicial_delta
+                    periodo for periodo in periodos_dropdown
+                    if periodo != periodo_inicial_delta and (str(periodo).split('/')[0] == tri_ref)
                 ]
                 if not periodos_subsequentes:
-                    periodos_subsequentes = periodos_dropdown
+                    periodos_subsequentes = [
+                        periodo for periodo in periodos_dropdown if periodo != periodo_inicial_delta
+                    ]
 
                 # ===== LINHA 2: Seleção de período subsequente e tipo de variação =====
                 col_p2, col_tipo_var = st.columns([2, 1])
@@ -5638,6 +5675,13 @@ elif menu == "Rankings":
                                     variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
                                     variacao_texto = f"{variacao_pct:+.1f}%"
 
+                                memoria_calculo = (
+                                    f"{periodo_subsequente_delta}: R$ {v_sub/1e6:,.1f}MM\n"
+                                    f"{periodo_inicial_delta}: R$ {v_ini/1e6:,.1f}MM\n"
+                                    f"Δ abs: {delta_texto}\n"
+                                    f"Δ %: {variacao_texto}"
+                                ).replace(',', '.')
+
                                 dados_grafico.append({
                                     'instituicao': instituicao,
                                     'valor_ini': v_ini,
@@ -5645,7 +5689,8 @@ elif menu == "Rankings":
                                     'delta': delta_absoluto,
                                     'delta_texto': delta_texto,
                                     'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
-                                    'variacao_texto': variacao_texto
+                                    'variacao_texto': variacao_texto,
+                                    'memoria_calculo': memoria_calculo
                                 })
 
                         if not dados_grafico:
@@ -5700,8 +5745,8 @@ elif menu == "Rankings":
                                     name=periodo_subsequente_delta if i == 0 else None,
                                     showlegend=(i == 0),
                                     legendgroup='subsequente',
-                                    customdata=[[dado['delta_texto'], dado['variacao_texto']]],
-                                    hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<extra></extra>'
+                                    customdata=[[dado['delta_texto'], dado['variacao_texto'], dado['memoria_calculo']]],
+                                    hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<br>%{{customdata[2]}}<extra></extra>'
                                 ))
 
                             titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
@@ -5793,10 +5838,11 @@ elif menu == "Rankings":
                                 customdata=np.stack([
                                     [d['delta_texto'] for d in dados_grafico],
                                     [d['variacao_texto'] for d in dados_grafico],
+                                    [d['memoria_calculo'] for d in dados_grafico],
                                 ], axis=-1),
                                 hovertemplate=(
                                     "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
-                                ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<extra></extra>"
+                                ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<br>%{customdata[2]}<extra></extra>"
                             ))
 
                             fig_barras.update_layout(
@@ -5867,6 +5913,25 @@ elif menu == "Rankings":
                                                 f'%{{y:{format_hist["tickformat"]}}}{format_hist["ticksuffix"]}<extra></extra>'
                                             )
                                         ))
+                                    elif variavel == 'Lucro Líquido Trimestral':
+                                        df_w = df_banco.dropna(subset=[variavel]).copy()
+                                        if not df_w.empty:
+                                            y_w = df_w[variavel] * format_hist['multiplicador']
+                                            medida = ['relative'] * len(df_w) + ['total']
+                                            x_w = df_w['Período'].tolist() + ['Total Acumulado']
+                                            y_total = y_w.sum()
+                                            y_vals = y_w.tolist() + [y_total]
+                                            fig_hist.add_trace(go.Waterfall(
+                                                x=x_w,
+                                                y=y_vals,
+                                                measure=medida,
+                                                name=instituicao,
+                                                increasing={'marker': {'color': '#2E7D32'}},
+                                                decreasing={'marker': {'color': '#C62828'}},
+                                                totals={'marker': {'color': '#1f77b4'}},
+                                                customdata=[[instituicao]] * len(x_w),
+                                                hovertemplate='<b>%{customdata[0]}</b><br>%{x}<br>%{y:,.0f}MM<extra></extra>'
+                                            ))
                                     else:
                                         fig_hist.add_trace(go.Scatter(
                                             x=df_banco['Período'],
@@ -5890,11 +5955,11 @@ elif menu == "Rankings":
                                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                                     xaxis=dict(
                                         showgrid=False,
-                                        tickmode='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                        tickvals=periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                        ticktext=periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                        categoryorder='array' if variavel == 'Lucro Líquido Acumulado YTD' else None,
-                                        categoryarray=periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None
+                                        tickmode='array' if variavel in ['Lucro Líquido Acumulado YTD', 'Lucro Líquido Trimestral'] else None,
+                                        tickvals=(periodos_hist + ['Total Acumulado']) if variavel == 'Lucro Líquido Trimestral' else (periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None),
+                                        ticktext=(periodos_hist + ['Total']) if variavel == 'Lucro Líquido Trimestral' else (periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None),
+                                        categoryorder='array' if variavel in ['Lucro Líquido Acumulado YTD', 'Lucro Líquido Trimestral'] else None,
+                                        categoryarray=(periodos_hist + ['Total Acumulado']) if variavel == 'Lucro Líquido Trimestral' else (periodos_hist if variavel == 'Lucro Líquido Acumulado YTD' else None)
                                     ),
                                     yaxis=dict(
                                         showgrid=True,
@@ -5903,7 +5968,7 @@ elif menu == "Rankings":
                                         ticksuffix=format_hist['ticksuffix']
                                     ),
                                     font=dict(family='IBM Plex Sans'),
-                                    barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else None
+                                    barmode='group' if variavel == 'Lucro Líquido Acumulado YTD' else ('overlay' if variavel == 'Lucro Líquido Trimestral' else None)
                                 )
 
                                 st.plotly_chart(fig_hist, width='stretch', config={'displayModeBar': False})
