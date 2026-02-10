@@ -2536,11 +2536,17 @@ def _render_peers_table_html(
     colunas_total = 1 + len(bancos) * len(periodos)
     html = """
     <style>
-    .peers-table {
+    .peers-table-wrap {
         width: 100%;
+        overflow-x: auto;
+        margin-top: 10px;
+    }
+    .peers-table {
+        width: max-content;
+        max-width: 100%;
         border-collapse: collapse;
         font-size: 14px;
-        margin-top: 10px;
+        margin: 0 auto;
         table-layout: auto;
     }
     .peers-table th, .peers-table td {
@@ -2614,7 +2620,7 @@ def _render_peers_table_html(
         display: block;
     }
     </style>
-    <table class="peers-table">
+    <div class="peers-table-wrap"><table class="peers-table">
     <thead>
     <tr>
         <th rowspan="2">R$ MM e %</th>
@@ -2659,7 +2665,7 @@ def _render_peers_table_html(
 
             html += "</tr>"
 
-    html += "</tbody></table>"
+    html += "</tbody></table></div>"
     return html
 
 
@@ -2894,7 +2900,7 @@ def _gerar_excel_peers_dados_puros(
         {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#4a90e2", "font_color": "white", **border}
     )
     label_fmt = workbook.add_format({"align": "left", "valign": "vcenter", **border})
-    num_fmt = workbook.add_format({"align": "right", "valign": "vcenter", "num_format": "0.000000", **border})
+    num_fmt = workbook.add_format({"align": "right", "valign": "vcenter", "num_format": "#.##0", **border})
     empty_fmt = workbook.add_format({"align": "right", "valign": "vcenter", **border})
 
     worksheet.set_column(0, 0, 34)
@@ -4558,12 +4564,6 @@ elif menu == "Peers (Tabela)":
                         },
                     )
 
-                    if faltas:
-                        st.info(
-                            "⚠️ Algumas métricas ainda aguardam integração (ver TODOs no código): "
-                            + ", ".join(sorted(faltas))
-                        )
-
                     html_tabela = _render_peers_table_html(
                         bancos_selecionados,
                         periodos_selecionados,
@@ -4588,7 +4588,7 @@ elif menu == "Peers (Tabela)":
                             st.download_button(
                                 label="baixar Excel",
                                 data=excel_buffer,
-                                file_name="peers_tabela.xlsx",
+                                file_name=f"peers_tabela_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key="peers_tabela_excel",
                             )
@@ -4602,7 +4602,7 @@ elif menu == "Peers (Tabela)":
                             st.download_button(
                                 label="baixar Dados Puros",
                                 data=excel_raw,
-                                file_name="peers_dados_puros.xlsx",
+                                file_name=f"peers_dados_puros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key="peers_dados_puros_excel",
                             )
@@ -6033,7 +6033,7 @@ elif menu == "Rankings":
 
 elif menu == "DRE":
     st.markdown("### Demonstração de Resultado (DRE)")
-    st.caption("Tabela DRE a partir de Mar/25 com YTD irregular e YoY.")
+    st.caption("Tabela DRE a partir de Mar/25, com marcadores de crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior")
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_dre_data():
@@ -6411,7 +6411,8 @@ elif menu == "DRE":
         html_tabela = """
         <style>
         .carteira-table {
-            width: 88%;
+            width: max-content;
+            max-width: 100%;
             margin: 10px auto 0 auto;
             border-collapse: collapse;
             font-size: 14px;
@@ -6460,17 +6461,17 @@ elif menu == "DRE":
             font-weight: 600;
         }
         </style>
-        <table class="carteira-table">
+        <div style="width:100%;overflow-x:auto;"><table class="carteira-table">
         <thead>
         <tr>
         <th rowspan="2">Item</th>
         """
 
         for periodo in periodos:
-            html_tabela += f'<th colspan="2">{periodo}</th>'
+            html_tabela += f'<th>{periodo}</th>'
         html_tabela += "</tr><tr>"
         for _ in periodos:
-            html_tabela += "<th>YTD</th><th>Δ% YoY</th>"
+            html_tabela += "<th>YTD</th>"
         html_tabela += "</tr></thead><tbody>"
 
         for entry in entradas:
@@ -6485,10 +6486,8 @@ elif menu == "DRE":
                 cell = linha[linha["PeriodoExib"] == periodo]
                 if not cell.empty:
                     ytd_val = cell["ytd"].iloc[0]
-                    yoy_val = cell["yoy"].iloc[0]
                 else:
                     ytd_val = pd.NA
-                    yoy_val = pd.NA
                 formato = formato_por_label.get(label, "num")
                 if formato == "pct":
                     ytd_fmt = formatar_percentual(ytd_val, decimais=2)
@@ -6496,14 +6495,11 @@ elif menu == "DRE":
                 else:
                     ytd_fmt = formatar_valor_br(ytd_val)
                     ytd_neg = pd.notna(ytd_val) and ytd_val < 0
-                yoy_fmt = formatar_percentual(yoy_val, decimais=1)
-                yoy_neg = pd.notna(yoy_val) and yoy_val < 0
                 ytd_span = f"<span class=\"dre-negative\">{ytd_fmt}</span>" if ytd_neg else ytd_fmt
-                yoy_span = f"<span class=\"dre-negative\">{yoy_fmt}</span>" if yoy_neg else yoy_fmt
-                html_tabela += f"<td>{ytd_span}</td><td>{yoy_span}</td>"
+                html_tabela += f"<td>{ytd_span}</td>"
             html_tabela += "</tr>"
 
-        html_tabela += "</tbody></table>"
+        html_tabela += "</tbody></table></div>"
         st.markdown(html_tabela, unsafe_allow_html=True)
 
     df_dre, dre_msg = load_dre_data()
@@ -6625,7 +6621,7 @@ elif menu == "DRE":
                         if fontes_fmt:
                             tooltip_parts.append(f"Fontes: {fontes_fmt}")
                         if entry.get("ytd_note"):
-                            tooltip_parts.append("Nota YTD: set/dez = jun + período.")
+                            tooltip_parts.append("Nota YTD: no BC o DRE é semestral acumulado; aqui exibimos acumulado do ano (YTD).")
                         tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
 
                         label_exib = entry["label"]
@@ -6687,6 +6683,19 @@ elif menu == "DRE":
                         tooltip_por_label
                     )
 
+                    st.markdown(
+                        """
+                        <div style="font-size: 12px; color: #666; margin-top: 12px;">
+                            <strong>mini-glossário DRE:</strong><br>
+                            <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
+                            <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
+                            <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
+                            <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
                     if st.session_state.get("modo_diagnostico"):
                         with st.expander("diagnóstico DRE"):
                             st.caption(f"Memória df_base: {diag_info.get('df_base_mb', 0):.2f} MB")
@@ -6708,12 +6717,9 @@ elif menu == "DRE":
                             ]
                             if not cell.empty:
                                 ytd_val = cell["ytd"].iloc[0]
-                                yoy_val = cell["yoy"].iloc[0]
                             else:
                                 ytd_val = pd.NA
-                                yoy_val = pd.NA
                             linha[f"{periodo} YTD"] = ytd_val
-                            linha[f"{periodo} Δ% YoY"] = yoy_val
                         df_export.append(linha)
 
                     df_export = pd.DataFrame(df_export)
@@ -6732,14 +6738,14 @@ elif menu == "DRE":
                     st.download_button(
                         label="Baixar Excel (DRE)",
                         data=buffer_excel,
-                        file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}.xlsx",
+                        file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="dre_download_excel"
                     )
 
 
 elif menu == "DRE (Balancetes)":
-    st.markdown("### DRE (Balancetes BC — Cadoc 4060/4066)")
+    st.markdown("### DRE (Balancetes BC — Cadoc 4060)")
     st.caption("Consulta direta ao endpoint de Balancetes do Banco Central, com períodos automáticos e exportação didática.")
 
     @st.cache_data(ttl=3600, show_spinner=False)
@@ -6885,7 +6891,7 @@ elif menu == "DRE (Balancetes)":
             if not instituicoes_com_cnpj:
                 st.warning("Nenhuma instituição com CNPJ mapeado para consultar balancetes.")
             else:
-                st.markdown("### Balancetes Conglomerado Prudencial — Analítico (4060/4066)")
+                st.markdown("### Balancetes Conglomerado Prudencial — Analítico (4060)")
                 st.caption("A aba usa a lista de instituições do app e consulta automaticamente os períodos disponíveis no endpoint do BC.")
 
                 col_inst_bal, col_doc_bal = st.columns([2, 1])
@@ -6898,7 +6904,7 @@ elif menu == "DRE (Balancetes)":
                 with col_doc_bal:
                     documento_bal = st.selectbox(
                         "Documento (Cadoc)",
-                        options=["4060", "4066"],
+                        options=["4060"],
                         index=0,
                         key="dre_balancetes_documento"
                     )
@@ -6984,7 +6990,7 @@ elif menu == "DRE (Balancetes)":
                         st.download_button(
                             label="Baixar Excel (DRE Balancetes)",
                             data=buffer_excel_bal,
-                            file_name=f"DRE_Balancetes_{documento_bal}_{instituicao_bal.replace(' ', '_')}.xlsx",
+                            file_name=f"DRE_Balancetes_{documento_bal}_{instituicao_bal.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key="dre_balancetes_download_excel"
                         )
@@ -7163,7 +7169,8 @@ elif menu == "Carteira 4.966":
                 html_tabela = """
                 <style>
                 .carteira-table {
-                    width: 100%;
+                    width: max-content;
+                    max-width: 100%;
                     border-collapse: collapse;
                     font-size: 14px;
                     margin-top: 10px;
@@ -7200,7 +7207,7 @@ elif menu == "Carteira 4.966":
                 .delta-pos { color: #28a745; }
                 .delta-neg { color: #dc3545; }
                 </style>
-                <table class="carteira-table">
+                <div style="width:100%;overflow-x:auto;"><table class="carteira-table">
                 <thead>
                 <tr>
                 <th rowspan="2">Tipo de Carteira</th>
@@ -7253,7 +7260,7 @@ elif menu == "Carteira 4.966":
                         html_tabela += f"<td>{valor_fmt}{delta_html}</td><td>{pct_fmt}</td>"
                     html_tabela += "</tr>"
 
-                html_tabela += "</tbody></table>"
+                html_tabela += "</tbody></table></div>"
 
                 st.markdown(html_tabela, unsafe_allow_html=True)
 
@@ -7344,7 +7351,7 @@ elif menu == "Carteira 4.966":
                     st.download_button(
                         label="Baixar Excel (Tabela Atual)",
                         data=excel_data,
-                        file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_{periodos_str}.xlsx",
+                        file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_{periodos_str}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="download_excel_carteira_4966"
                     )
@@ -7360,7 +7367,7 @@ elif menu == "Carteira 4.966":
                     st.download_button(
                         label="Baixar Excel (Dados Brutos)",
                         data=buffer_raw.getvalue(),
-                        file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_dados_brutos.xlsx",
+                        file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_dados_brutos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="download_excel_carteira_4966_raw"
                     )
