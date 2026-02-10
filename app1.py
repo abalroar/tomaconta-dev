@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Tuple, Optional
 import time
+import html as _html_mod
 
 # === PERFORMANCE TIMER ===
 _perf_timers = {}
@@ -1590,6 +1591,95 @@ def _formatar_valor_peers(valor, format_key: str, coluna_origem: Optional[str] =
     return formatar_valor(valor, format_key)
 
 
+def _fmt_tooltip_mm(valor) -> str:
+    """Formata valor numérico como R$ MM para tooltip."""
+    if valor is None:
+        return "N/A"
+    try:
+        v = float(valor)
+        if pd.isna(v):
+            return "N/A"
+        return f"R$ {v / 1e6:,.0f} MM".replace(",", ".")
+    except Exception:
+        return "N/A"
+
+
+def _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor_roe):
+    """Tooltip com memória de cálculo do ROE Ac. Anualizado."""
+    lucro = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna_lucro)
+    lucro_num = _coerce_numeric_value(lucro)
+    pl_t = _coerce_numeric_value(_obter_valor_peers(df, banco, periodo, coluna_pl))
+    parsed = _parse_periodo(periodo)
+    if not parsed:
+        return ""
+    _, ano, ano_len = parsed
+    ano_ant = ano - 1
+    per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len == 2 else f"4/{ano_ant}"
+    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl))
+    mes = _extrair_mes_periodo(periodo, periodo)
+    fator = _fator_anualizacao(mes) if mes else 1
+    per_exib = periodo_para_exibicao(periodo)
+    dez_exib = periodo_para_exibicao(per_dez)
+    fmt = _fmt_tooltip_mm
+    lines = [
+        f"LL YTD: {fmt(lucro_num)}",
+        f"Fator: x{fator:.4g} (12/{mes})",
+        f"PL ({per_exib}): {fmt(pl_t)}",
+        f"PL ({dez_exib}): {fmt(pl_dez)}",
+    ]
+    if pl_t is not None and pl_dez is not None and not pd.isna(pl_t) and not pd.isna(pl_dez):
+        pl_medio = (float(pl_t) + float(pl_dez)) / 2
+        lines.append(f"PL Medio: {fmt(pl_medio)}")
+    if valor_roe is not None and not pd.isna(valor_roe):
+        v = float(valor_roe)
+        if abs(v) <= 1:
+            v *= 100
+        lines.append(f"ROE = {v:.2f}%")
+    else:
+        lines.append("ROE = N/A")
+    return "\n".join(lines)
+
+
+def _tooltip_ll_peers(df, banco, periodo, coluna, valor_ajustado):
+    """Tooltip para Lucro Líquido (mostra ajuste Sep se aplicável)."""
+    parsed = _parse_periodo(periodo)
+    fmt = _fmt_tooltip_mm
+    if not parsed:
+        return f"LL YTD: {fmt(valor_ajustado)}"
+    parte, _, _ = parsed
+    try:
+        parte_int = int(parte)
+    except (ValueError, TypeError):
+        return f"LL YTD: {fmt(valor_ajustado)}"
+    if parte_int == 3:
+        valor_raw = _obter_valor_peers(df, banco, periodo, coluna)
+        per_jun = _periodo_mesma_estrutura(periodo, 2)
+        valor_jun = _obter_valor_peers(df, banco, per_jun, coluna) if per_jun else None
+        lines = [f"LL Set (Q3 Jul-Set): {fmt(valor_raw)}"]
+        if valor_jun is not None and not pd.isna(valor_jun):
+            lines.append(f"LL Jun (YTD Jan-Jun): {fmt(valor_jun)}")
+        lines.append(f"LL YTD (Jan-Set): {fmt(valor_ajustado)}")
+        return "\n".join(lines)
+    return f"LL YTD: {fmt(valor_ajustado)}"
+
+
+def _tooltip_ratio_peers(label, valor_num, valor_den, valor_ratio):
+    """Tooltip para métricas do tipo razão (Ativo/PL, Crédito/PL)."""
+    fmt = _fmt_tooltip_mm
+    lines = []
+    if "Ativo" in label and "PL" in label:
+        lines.append(f"Ativo Total: {fmt(valor_num)}")
+        lines.append(f"PL: {fmt(valor_den)}")
+    else:
+        lines.append(f"Numerador: {fmt(valor_num)}")
+        lines.append(f"Denominador: {fmt(valor_den)}")
+    if valor_ratio is not None and not pd.isna(valor_ratio):
+        lines.append(f"= {float(valor_ratio):.2f}x")
+    else:
+        lines.append("= N/A")
+    return "\n".join(lines)
+
+
 def _parse_periodo(periodo: str) -> Optional[Tuple[str, int, int]]:
     if not periodo or "/" not in str(periodo):
         return None
@@ -2057,6 +2147,7 @@ def _montar_tabela_peers(
     colunas_usadas = {}
     faltas = set()
     delta_flags = {}
+    tooltips = {}
     coluna_ativo = _resolver_coluna_peers(df, ["Ativo Total"])
     coluna_pl = _resolver_coluna_peers(df, ["Patrimônio Líquido"])
     coluna_lucro = _resolver_coluna_peers(df, ["Lucro Líquido Acumulado YTD", "Lucro Líquido"])
@@ -2087,8 +2178,10 @@ def _montar_tabela_peers(
                 for periodo in periodos:
                     chave = (label, banco, periodo)
                     valor = None
+                    tip = ""
                     if label in extra_values:
                         valor = extra_values[label].get((banco, periodo))
+                        tip = f"{label}: {_fmt_tooltip_mm(valor)}"
                     elif label == "ROE AC. Anualizado (%)":
                         valor = _calcular_roe_anualizado_peers(
                             df,
@@ -2097,16 +2190,21 @@ def _montar_tabela_peers(
                             coluna_lucro,
                             coluna_pl,
                         )
+                        tip = _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor)
                     elif label == "Ativo / PL":
                         valor_ativo = _obter_valor_peers(df, banco, periodo, coluna_ativo)
                         valor_pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
                         valor = _calcular_ratio_peers(valor_ativo, valor_pl)
+                        tip = _tooltip_ratio_peers(label, valor_ativo, valor_pl, valor)
                     elif coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna)
+                            tip = _tooltip_ll_peers(df, banco, periodo, coluna, valor)
                         else:
                             valor = _obter_valor_peers(df, banco, periodo, coluna)
+                            tip = f"{coluna}: {_fmt_tooltip_mm(valor)}" if valor is not None else ""
                     valores[chave] = valor
+                    tooltips[chave] = tip
 
                     delta_flag = None
                     periodo_base = _periodo_ano_anterior(periodo)
@@ -2139,7 +2237,7 @@ def _montar_tabela_peers(
                             delta_flag = "down"
                     delta_flags[chave] = delta_flag
 
-    return valores, colunas_usadas, faltas, delta_flags
+    return valores, colunas_usadas, faltas, delta_flags, tooltips
 
 
 def _render_peers_table_html(
@@ -2148,6 +2246,7 @@ def _render_peers_table_html(
     valores: dict,
     colunas_usadas: dict,
     delta_flags: dict,
+    tooltips: Optional[dict] = None,
 ):
     colunas_total = 1 + len(bancos) * len(periodos)
     html = """
@@ -2202,6 +2301,7 @@ def _render_peers_table_html(
     }
     .delta-pos { color: #28a745; margin-left: 4px; }
     .delta-neg { color: #dc3545; margin-left: 4px; }
+    .peers-table td[title] { cursor: help; }
     </style>
     <table class="peers-table">
     <thead>
@@ -2239,7 +2339,9 @@ def _render_peers_table_html(
                         delta_html = ' <span class="delta-pos">▲</span>'
                     elif delta_flag == "down":
                         delta_html = ' <span class="delta-neg">▼</span>'
-                    html += f"<td>{valor_fmt}{delta_html}</td>"
+                    tip = (tooltips or {}).get(chave, "") if tooltips else ""
+                    title_attr = f' title="{_html_mod.escape(tip)}"' if tip else ""
+                    html += f"<td{title_attr}>{valor_fmt}{delta_html}</td>"
 
             html += "</tr>"
 
@@ -4940,7 +5042,7 @@ elif menu == "Peers (Tabela)":
                     )
 
                 if bancos_selecionados and periodos_selecionados:
-                    periodos_selecionados = ordenar_periodos(periodos_selecionados)
+                    periodos_selecionados = ordenar_periodos(periodos_selecionados, reverso=True)
                     cache_ativo = _carregar_cache_relatorio("ativo")
                     cache_passivo = _carregar_cache_relatorio("passivo")
                     cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
@@ -4957,7 +5059,7 @@ elif menu == "Peers (Tabela)":
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
 
-                    valores, colunas_usadas, faltas, delta_flags = _montar_tabela_peers(
+                    valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
                         bancos_selecionados,
                         periodos_selecionados,
@@ -4984,6 +5086,7 @@ elif menu == "Peers (Tabela)":
                         valores,
                         colunas_usadas,
                         delta_flags,
+                        tooltips,
                     )
                     st.markdown(html_tabela, unsafe_allow_html=True)
 
