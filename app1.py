@@ -1556,7 +1556,7 @@ def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = N
 
     # Regra geral do app: percentuais ficam em base decimal (0-1) e no display viram 0-100.
     # Exceção: Índice de Basileia pode chegar (legado/fonte) já em 0-100.
-    # Nesse caso, evitamos multiplicação dupla apenas para essa variável.
+    # Nesse caso, convertemos apenas valores em base decimal e preservamos os já percentuais.
     if variavel and "Basileia" in variavel:
         mask_decimal = serie_num.abs() <= 1
         return serie_num.where(~mask_decimal, serie_num * 100)
@@ -7542,14 +7542,21 @@ elif menu == "Crie sua métrica!":
                         format_x = get_format_for_var(eixo_x_brincar)
                         format_y = get_format_for_var(eixo_y_brincar)
 
-                        df_scatter_brincar['x_display'] = df_scatter_brincar[eixo_x_brincar] * format_x['multiplicador']
-                        df_scatter_brincar['y_display'] = df_scatter_brincar[eixo_y_brincar] * format_y['multiplicador']
+                        df_scatter_brincar['x_display'] = _calcular_valores_display(
+                            df_scatter_brincar[eixo_x_brincar], eixo_x_brincar, format_x
+                        )
+                        df_scatter_brincar['y_display'] = _calcular_valores_display(
+                            df_scatter_brincar[eixo_y_brincar], eixo_y_brincar, format_y
+                        )
 
                         if var_tamanho_brincar == 'Tamanho Fixo':
                             tamanho_constante = 25
                         else:
                             format_size = get_format_for_var(var_tamanho_brincar)
-                            df_scatter_brincar['size_display'] = df_scatter_brincar[var_tamanho_brincar].abs() * format_size['multiplicador']
+                            size_display = _calcular_valores_display(
+                                df_scatter_brincar[var_tamanho_brincar], var_tamanho_brincar, format_size
+                            )
+                            df_scatter_brincar['size_display'] = size_display.abs()
 
                         fig_scatter_brincar = go.Figure()
                         cores_plotly = px.colors.qualitative.Plotly
