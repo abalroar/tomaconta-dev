@@ -564,6 +564,47 @@ def get_cache_info_detalhado():
                 info['fonte'] = 'desconhecida'
     return info
 
+
+def _fator_anualizacao(mes: int) -> float:
+    """Retorna fator de anualização por mês: Mar=4, Jun=2, Set=12/9, Dez=1."""
+    if mes == 3:
+        return 4.0
+    elif mes == 6:
+        return 2.0
+    elif mes == 9:
+        return 12 / 9
+    elif mes == 12:
+        return 1.0
+    return 12 / mes if mes and mes > 0 else 1.0
+
+
+def _calcular_roe_anualizado(ll_ytd, pl_t, pl_dez_anterior, mes):
+    """ROE Ac. Anualizado = (LL_YTD × fator) / ((PL_t + PL_Dez_anterior) / 2).
+
+    Aceita escalares ou pandas Series.
+    Retorna None (escalar) ou NaN (Series) quando PL médio <= 0 ou dados faltantes.
+    """
+    fator = _fator_anualizacao(mes)
+    pl_medio = (pl_t + pl_dez_anterior) / 2
+
+    if isinstance(pl_medio, pd.Series):
+        return (fator * ll_ytd) / pl_medio.where(pl_medio > 0, np.nan)
+
+    # Escalar
+    for v in [ll_ytd, pl_t, pl_dez_anterior]:
+        if v is None:
+            return None
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+    pl_medio_f = float(pl_medio)
+    if pl_medio_f <= 0:
+        return None
+    return float(ll_ytd) * fator / pl_medio_f
+
+
 def recalcular_metricas_derivadas(dados_periodos):
     """Recalcula métricas derivadas para dados carregados do cache.
 
@@ -608,46 +649,46 @@ def recalcular_metricas_derivadas(dados_periodos):
         if mes is None:
             mes = 12
 
-        # ROE Anualizado - SEMPRE recalcular
-        # IMPORTANTE: O BCB retorna LL de Set (período 3) apenas com valor
-        # do trimestre Jul-Sep, não acumulado YTD. Precisa somar Jun (Jan-Jun)
-        # para obter o YTD completo antes de anualizar.
+        # ROE Anualizado com PL Médio - SEMPRE recalcular
+        # Fórmula: (LL_YTD × fator) / ((PL_t + PL_Dez_ano_anterior) / 2)
+        # Se PL médio <= 0 ou dados faltantes → N/A.
+        # IMPORTANTE: LL de Set (período 3) do BCB é só Q3 (Jul-Sep);
+        # precisa somar Jun (Jan-Jun) para obter YTD completo.
         if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
-            if mes == 3:
-                fator = 4
-            elif mes == 6:
-                fator = 2
-            elif mes == 9:
-                fator = 12 / 9
-            elif mes == 12:
-                fator = 1
-            else:
-                fator = 12 / mes
-
             ll_col = "Lucro Líquido Acumulado YTD"
-            ll_ytd = df_atualizado[ll_col].fillna(0).copy()
+            pl_col = "Patrimônio Líquido"
+            ll_ytd = df_atualizado[ll_col].copy()
 
             # Para Set (mes=9): LL do BCB é só Q3; somar Jun (YTD Jan-Jun)
             if mes == 9:
                 parsed = _parse_periodo(periodo_str) if periodo_str else None
                 if parsed:
-                    parte_p, ano_p, ano_len_p = parsed
-                    if 1 <= int(parte_p) <= 4:
-                        per_jun = f"2/{ano_p}"
-                    else:
-                        per_jun = f"6/{ano_p}"
+                    parte_p, ano_p, _ = parsed
+                    per_jun = f"2/{ano_p}" if 1 <= int(parte_p) <= 4 else f"6/{ano_p}"
                     df_jun = dados_periodos.get(per_jun)
                     if df_jun is not None and ll_col in df_jun.columns and "Instituição" in df_jun.columns:
                         jun_map = df_jun.set_index("Instituição")[ll_col]
                         if "Instituição" in df_atualizado.columns:
-                            ll_jun = df_atualizado["Instituição"].map(jun_map).fillna(0)
-                            ll_ytd = ll_ytd + ll_jun
+                            ll_ytd = ll_ytd + df_atualizado["Instituição"].map(jun_map)
 
-            df_atualizado["ROE Ac. YTD an. (%)"] = (
-                (fator * ll_ytd) /
-                df_atualizado["Patrimônio Líquido"].replace(0, np.nan)
+            # PL médio: (PL_t + PL_Dez_ano_anterior) / 2
+            pl_t = df_atualizado[pl_col].copy()
+            pl_dez_anterior = pd.Series(np.nan, index=df_atualizado.index)
+            parsed_per = _parse_periodo(periodo_str) if periodo_str else _parse_periodo(periodo)
+            if parsed_per and "Instituição" in df_atualizado.columns:
+                _, ano_p, ano_len_p = parsed_per
+                ano_ant = ano_p - 1
+                per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len_p == 2 else f"4/{ano_ant}"
+                df_dez = dados_periodos.get(per_dez)
+                if df_dez is not None and pl_col in df_dez.columns and "Instituição" in df_dez.columns:
+                    pl_dez_anterior = df_atualizado["Instituição"].map(
+                        df_dez.set_index("Instituição")[pl_col]
+                    )
+
+            df_atualizado["ROE Ac. YTD an. (%)"] = _calcular_roe_anualizado(
+                ll_ytd, pl_t, pl_dez_anterior, mes
             )
-            # Also store the adjusted LL as the YTD column
+            # Armazenar LL YTD ajustado (Set: Q3 + Jun)
             df_atualizado[ll_col] = ll_ytd
 
         # Crédito/PL - SEMPRE recalcular
@@ -1637,90 +1678,6 @@ def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
     return None
 
 
-@st.cache_data(ttl=3600, show_spinner="extraindo dados do passivo...")
-def _extrair_passivo_api_fallback(periodos_exib: tuple) -> Optional[pd.DataFrame]:
-    """Fallback: extrai dados do Passivo (Rel. 3) da API BCB quando cache indisponível.
-
-    Usa o cache principal para mapear CodInst -> nome de instituição.
-    """
-    try:
-        from utils.ifdata_cache.extractor import (
-            extrair_valores, periodo_exibicao_para_api, periodo_api_para_exibicao,
-            _normalizar_nome_coluna,
-        )
-    except ImportError:
-        return None
-
-    # Carregar cache principal para mapeamento de nomes
-    df_principal = _carregar_cache_relatorio("principal")
-
-    all_dfs = []
-    for per_exib in periodos_exib:
-        try:
-            per_api = periodo_exibicao_para_api(per_exib)
-        except Exception:
-            continue
-        try:
-            df_val = extrair_valores(per_api, 3)
-        except Exception:
-            continue
-        if df_val is None or df_val.empty:
-            continue
-
-        if "NomeColuna" in df_val.columns:
-            df_val["NomeColuna"] = df_val["NomeColuna"].apply(_normalizar_nome_coluna)
-
-        df_pivot = df_val.pivot_table(
-            index="CodInst",
-            columns="NomeColuna",
-            values="Saldo" if "Saldo" in df_val.columns else "Valor",
-            aggfunc="sum",
-        ).reset_index()
-        df_pivot.columns.name = None
-
-        # Mapear nomes via API Rel. 1 e cache principal
-        if df_principal is not None and "Ativo Total" in df_principal.columns:
-            df_p = df_principal[df_principal["Período"] == per_exib]
-            if not df_p.empty:
-                try:
-                    df_val1 = extrair_valores(per_api, 1)
-                    if df_val1 is not None and not df_val1.empty:
-                        df_val1["NomeColuna"] = df_val1["NomeColuna"].apply(_normalizar_nome_coluna)
-                        df_at = df_val1[df_val1["NomeColuna"] == "Ativo Total"][["CodInst", "Saldo"]]
-                        cod_map = {}
-                        for _, row in df_at.iterrows():
-                            matches = df_p[(df_p["Ativo Total"] - row["Saldo"]).abs() < 1.0]
-                            if len(matches) >= 1:
-                                cod_map[row["CodInst"]] = matches.iloc[0]["Instituição"]
-                        df_pivot["Instituição"] = df_pivot["CodInst"].map(cod_map)
-                except Exception:
-                    pass
-
-        if "Instituição" not in df_pivot.columns or df_pivot["Instituição"].isna().all():
-            df_pivot["Instituição"] = df_pivot["CodInst"].apply(lambda x: f"[IF {x}]")
-        else:
-            mask = df_pivot["Instituição"].isna()
-            df_pivot.loc[mask, "Instituição"] = df_pivot.loc[mask, "CodInst"].apply(
-                lambda x: f"[IF {x}]"
-            )
-
-        # Mesclar colunas "Depósito Total (a)" e "Depósitos (a)"
-        if "Depósito Total (a)" in df_pivot.columns and "Depósitos (a)" in df_pivot.columns:
-            m = df_pivot["Depósitos (a)"].isna() & df_pivot["Depósito Total (a)"].notna()
-            df_pivot.loc[m, "Depósitos (a)"] = df_pivot.loc[m, "Depósito Total (a)"]
-        elif "Depósito Total (a)" in df_pivot.columns and "Depósitos (a)" not in df_pivot.columns:
-            df_pivot = df_pivot.rename(columns={"Depósito Total (a)": "Depósitos (a)"})
-
-        df_pivot["Período"] = per_exib
-        if "CodInst" in df_pivot.columns:
-            df_pivot = df_pivot.drop(columns=["CodInst"])
-        all_dfs.append(df_pivot)
-
-    if not all_dfs:
-        return None
-    return pd.concat(all_dfs, ignore_index=True)
-
-
 def _preparar_metricas_extra_peers(
     bancos: list,
     periodos: list,
@@ -2055,43 +2012,38 @@ def _calcular_roe_anualizado_peers(
     coluna_lucro: Optional[str],
     coluna_pl: Optional[str],
 ) -> Optional[float]:
-    """Calcula ROE anualizado: (LL_acumulado_YTD * 12/meses) / PL.
+    """ROE Ac. Anualizado = (LL_YTD × fator) / ((PL_t + PL_Dez_anterior) / 2).
+
+    Usa PL médio entre período atual (t) e Dez do ano anterior.
+    Retorna None quando PL médio <= 0 ou qualquer componente faltar.
 
     IMPORTANTE: O LL do BCB para Set (período 3) traz apenas o trimestre
     Jul-Sep, não o acumulado YTD. Por isso, usa _ajustar_lucro_acumulado_peers
     para somar o valor de Jun (Jan-Jun) e obter o YTD completo (Jan-Sep).
-
-    Anualização explícita por mês do período:
-      Mar (3 meses): fator = 4      (12/3)
-      Jun (6 meses): fator = 2      (12/6)
-      Set (9 meses): fator = 12/9 ≈ 1,333
-      Dez (12 meses): fator = 1     (ano cheio, sem anualização)
     """
-    # Obter LL ajustado para YTD (soma Jun para Set)
     lucro = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna_lucro)
-    pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
     lucro_num = _coerce_numeric_value(lucro)
-    pl_num = _coerce_numeric_value(pl)
-    if lucro_num is None or pl_num is None or pd.isna(lucro_num) or pd.isna(pl_num):
+    if lucro_num is None or pd.isna(lucro_num):
         return None
-    try:
-        pl_float = float(pl_num)
-    except Exception:
+
+    # PL_t
+    pl_t = _coerce_numeric_value(_obter_valor_peers(df, banco, periodo, coluna_pl))
+    if pl_t is None or pd.isna(pl_t):
         return None
-    if pl_float == 0:
+
+    # PL_Dez_ano_anterior
+    parsed = _parse_periodo(periodo)
+    if not parsed:
         return None
+    _, ano, ano_len = parsed
+    ano_ant = ano - 1
+    per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len == 2 else f"4/{ano_ant}"
+    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl))
+    if pl_dez is None or pd.isna(pl_dez):
+        return None
+
     mes = _extrair_mes_periodo(periodo, periodo)
-    if mes == 3:
-        fator = 4          # Mar: 12/3
-    elif mes == 6:
-        fator = 2          # Jun: 12/6
-    elif mes == 9:
-        fator = 12 / 9     # Set: 12/9
-    elif mes == 12:
-        fator = 1           # Dez: ano cheio
-    else:
-        fator = 12 / mes if mes and mes > 0 else 1
-    return float(lucro_num) * fator / pl_float
+    return _calcular_roe_anualizado(float(lucro_num), float(pl_t), float(pl_dez), mes)
 
 
 def _montar_tabela_peers(
@@ -4991,13 +4943,6 @@ elif menu == "Peers (Tabela)":
                     periodos_selecionados = ordenar_periodos(periodos_selecionados)
                     cache_ativo = _carregar_cache_relatorio("ativo")
                     cache_passivo = _carregar_cache_relatorio("passivo")
-                    # Fallback: se cache passivo indisponível, extrair da API
-                    if cache_passivo is None:
-                        _periodos_base = {_periodo_ano_anterior(p) for p in periodos_selecionados}
-                        _periodos_ext = tuple(sorted(set(
-                            p for p in list(periodos_selecionados) + list(_periodos_base) if p
-                        )))
-                        cache_passivo = _extrair_passivo_api_fallback(_periodos_ext)
                     cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
                     cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
                     cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
@@ -5088,7 +5033,7 @@ elif menu == "Peers (Tabela)":
                             <br>
                             <em>Desempenho</em><br>
                             <strong>Lucro Líquido Acumulado</strong> = Lucro Líquido acumulado no ano (YTD) até o fim do período (Rel. 1).<br>
-                            <strong>ROE AC. Anualizado (%)</strong> = (Lucro Líquido acumulado YTD × 12 / meses do período) ÷ Patrimônio Líquido. O LL YTD de Set é obtido somando o valor de Jun (Jan-Jun) ao de Set (Jul-Sep). Fator de anualização: Mar=4, Jun=2, Set=12/9, Dez=1.<br>
+                            <strong>ROE AC. Anualizado (%)</strong> = (LL YTD × fator de anualização) ÷ PL Médio, onde PL Médio = (PL no período + PL em Dez do ano anterior) / 2. O LL YTD de Set é obtido somando Jun (Jan-Jun) ao Set (Jul-Sep). Fator: Mar=4, Jun=2, Set=12/9, Dez=1. Se PL médio ≤ 0 ou dado faltante: N/A.<br>
                             <br>
                             <strong>Δ (▲/▼)</strong> = Variação vs. mesmo período do ano anterior.
                         </div>
@@ -9253,7 +9198,7 @@ elif menu == "Glossário":
 
     ## **Métricas Calculadas**
 
-    **ROE Ac. YTD an. (%):** Lucro Líquido acumulado entre janeiro e o fim do período, anualizado pelo fator (12 / meses do período), dividido pelo Patrimônio Líquido.
+    **ROE Ac. YTD an. (%):** (LL YTD × fator de anualização) ÷ PL Médio. PL Médio = (PL no período + PL em Dez do ano anterior) / 2. Fator: Mar=4, Jun=2, Set≈1.33, Dez=1. N/A se PL médio ≤ 0 ou dado faltante.
 
     **Crédito/PL (%):** Carteira de Crédito Líquida dividida pelo Patrimônio Líquido.
 
