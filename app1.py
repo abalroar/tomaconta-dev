@@ -2301,7 +2301,33 @@ def _render_peers_table_html(
     }
     .delta-pos { color: #28a745; margin-left: 4px; }
     .delta-neg { color: #dc3545; margin-left: 4px; }
-    .peers-table td[title] { cursor: help; }
+    .peers-table td.has-tip {
+        position: relative;
+        cursor: help;
+    }
+    .peers-table .tip-text {
+        display: none;
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: #fff;
+        padding: 8px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        white-space: normal;
+        z-index: 9999;
+        min-width: 220px;
+        max-width: 340px;
+        text-align: left;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        pointer-events: none;
+        line-height: 1.5;
+    }
+    .peers-table td.has-tip:hover .tip-text {
+        display: block;
+    }
     </style>
     <table class="peers-table">
     <thead>
@@ -2340,11 +2366,11 @@ def _render_peers_table_html(
                     elif delta_flag == "down":
                         delta_html = ' <span class="delta-neg">▼</span>'
                     tip = (tooltips or {}).get(chave, "") if tooltips else ""
-                    title_attr = ""
                     if tip:
-                        tip_safe = _html_mod.escape(tip, quote=True).replace("\n", "&#10;")
-                        title_attr = f' title="{tip_safe}"'
-                    html += f"<td{title_attr}>{valor_fmt}{delta_html}</td>"
+                        tip_html = _html_mod.escape(tip).replace("\n", "<br>")
+                        html += f'<td class="has-tip">{valor_fmt}{delta_html}<span class="tip-text">{tip_html}</span></td>'
+                    else:
+                        html += f"<td>{valor_fmt}{delta_html}</td>"
 
             html += "</tr>"
 
