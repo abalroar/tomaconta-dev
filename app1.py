@@ -1553,7 +1553,16 @@ def _normalizar_percentual_display(serie: pd.Series) -> pd.Series:
     serie_num = pd.to_numeric(serie, errors="coerce")
     if serie_num.empty:
         return serie_num
-    return serie_num * 100
+    serie_valid = serie_num.dropna()
+    if serie_valid.empty:
+        return serie_num
+
+    # Dados percentuais no app são preferencialmente armazenados como decimal (0-1),
+    # mas alguns datasets/fontes podem chegar já na escala 0-100.
+    # Para exibição no Scatter Plot, convertemos apenas quando necessário.
+    max_abs = serie_valid.abs().max()
+    fator = 100 if max_abs <= 1 else 1
+    return serie_num * fator
 
 
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
