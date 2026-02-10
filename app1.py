@@ -292,6 +292,7 @@ VARS_PERCENTUAL = [
     'Carteira de Créd. Class. C4+C5 / Carteira Bruta',
     # Variáveis de Capital (Relatório 5)
     'Índice de Capital Principal',
+    'Índice de Capital Principal (CET1)',
     'Índice de Capital Nível I',
     'Razão de Alavancagem',
     # Métricas derivadas
@@ -413,7 +414,7 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Crédito/PL (%)",
             },
             {
-                "label": "Índice de Capital Principal",
+                "label": "Índice de Capital Principal (CET1)",
                 "data_keys": [],
                 "format_key": "Índice de Capital Principal",
             },
@@ -827,6 +828,11 @@ def mesclar_dados_capital(dados_periodos, dados_capital):
                         df_merged = df_merged.drop(columns=[f'{col}_capital'])
 
         dados_mesclados[periodo] = df_merged
+
+    # Renomear coluna para display (CET1) sem afetar chaves internas do cache
+    for periodo, df_m in dados_mesclados.items():
+        if 'Índice de Capital Principal' in df_m.columns:
+            df_m.rename(columns={'Índice de Capital Principal': 'Índice de Capital Principal (CET1)'}, inplace=True)
 
     return dados_mesclados
 
@@ -1649,17 +1655,30 @@ def _tooltip_ll_peers(df, banco, periodo, coluna, valor_ajustado):
 
 
 def _tooltip_ratio_peers(label, valor_num, valor_den, valor_ratio):
-    """Tooltip para métricas do tipo razão (Ativo/PL, Crédito/PL)."""
+    """Tooltip para métricas do tipo razão (Ativo/PL, Crédito/PL, ratios %)."""
     fmt = _fmt_tooltip_mm
+    _NOMES_COMPONENTES = {
+        "Ativo / PL": ("Ativo Total", "PL"),
+        "Crédito / PL": ("Carteira de Crédito", "PL"),
+        "Perda Esperada / Carteira Bruta": ("Perda Esperada", "Carteira Bruta"),
+        "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("C4+C5", "Carteira Bruta"),
+        "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "C4+C5"),
+        "Desp PDD Anualizada / Carteira Bruta": ("Desp PDD Anual.", "Carteira Bruta"),
+    }
     lines = []
-    if "Ativo" in label and "PL" in label:
-        lines.append(f"Ativo Total: {fmt(valor_num)}")
-        lines.append(f"PL: {fmt(valor_den)}")
+    if label in _NOMES_COMPONENTES:
+        n_name, d_name = _NOMES_COMPONENTES[label]
+        lines.append(f"{n_name}: {fmt(valor_num)}")
+        lines.append(f"{d_name}: {fmt(valor_den)}")
     else:
         lines.append(f"Numerador: {fmt(valor_num)}")
         lines.append(f"Denominador: {fmt(valor_den)}")
     if valor_ratio is not None and not pd.isna(valor_ratio):
-        lines.append(f"= {float(valor_ratio):.2f}x")
+        # Leverage ratios (x/PL) show as Nx; other ratios as %
+        if "/ PL" in label or "/PL" in label:
+            lines.append(f"= {float(valor_ratio):.2f}x")
+        else:
+            lines.append(f"= {float(valor_ratio) * 100:.2f}%")
     else:
         lines.append("= N/A")
     return "\n".join(lines)
@@ -1773,8 +1792,9 @@ def _preparar_metricas_extra_peers(
         "Carteira de Créd. Class. C4+C5": {},
         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": {},
         "Perda Esperada / (Carteira C4 + C5)": {},
+        "Desp PDD Anualizada": {},
         "Desp PDD Anualizada / Carteira Bruta": {},
-        "Índice de Capital Principal": {},
+        "Índice de Capital Principal (CET1)": {},
         "Índice de Basileia Total": {},
     }
     periodos_base = {_periodo_ano_anterior(periodo) for periodo in periodos}
@@ -1949,6 +1969,7 @@ def _preparar_metricas_extra_peers(
 
             desp_pdd = _obter_valor_peers(cache_dre, banco, periodo, col_desp_pdd)
             desp_pdd_anual = _anualizar_valor_dre(desp_pdd, periodo)
+            extra["Desp PDD Anualizada"][chave] = desp_pdd_anual
             extra["Desp PDD Anualizada / Carteira Bruta"][chave] = _calcular_ratio_peers(
                 desp_pdd_anual,
                 carteira_bruta,
@@ -1973,7 +1994,7 @@ def _preparar_metricas_extra_peers(
                 )
                 if val_precalc is not None and not pd.isna(val_precalc):
                     indice_cap_principal = float(val_precalc)
-            extra["Índice de Capital Principal"][chave] = indice_cap_principal
+            extra["Índice de Capital Principal (CET1)"][chave] = indice_cap_principal
 
             indice_basileia = None
             if col_cap_principal and col_cap_complementar and col_cap_nivel2 and col_rwa_total:
@@ -2164,9 +2185,28 @@ def _montar_tabela_peers(
                     chave = (label, banco, periodo)
                     valor = None
                     tip = ""
-                    if label in extra_values:
+                    # Mapeamento de ratios → (chave numerador, chave denominador)
+                    _RATIO_COMPONENTS = {
+                        "Perda Esperada / Carteira Bruta": ("Perda Esperada", "Carteira de Crédito Bruta"),
+                        "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Bruta"),
+                        "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "Carteira de Créd. Class. C4+C5"),
+                        "Desp PDD Anualizada / Carteira Bruta": ("Desp PDD Anualizada", "Carteira de Crédito Bruta"),
+                    }
+                    if label in extra_values and label in _RATIO_COMPONENTS:
                         valor = extra_values[label].get((banco, periodo))
-                        tip = f"{label}: {_fmt_tooltip_mm(valor)}"
+                        num_key, den_key = _RATIO_COMPONENTS[label]
+                        valor_num = extra_values.get(num_key, {}).get((banco, periodo))
+                        valor_den = extra_values.get(den_key, {}).get((banco, periodo))
+                        tip = _tooltip_ratio_peers(label, valor_num, valor_den, valor)
+                    elif label in extra_values:
+                        valor = extra_values[label].get((banco, periodo))
+                        if label in ("Índice de Capital Principal (CET1)", "Índice de Basileia Total"):
+                            if valor is not None and not pd.isna(valor):
+                                tip = f"{label}: {float(valor) * 100:.2f}%"
+                            else:
+                                tip = f"{label}: N/A"
+                        else:
+                            tip = f"{label}: {_fmt_tooltip_mm(valor)}" if valor is not None else ""
                     elif label == "ROE AC. Anualizado (%)":
                         valor = _calcular_roe_anualizado_peers(
                             df,
@@ -2181,6 +2221,12 @@ def _montar_tabela_peers(
                         valor_pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
                         valor = _calcular_ratio_peers(valor_ativo, valor_pl)
                         tip = _tooltip_ratio_peers(label, valor_ativo, valor_pl, valor)
+                    elif label == "Crédito / PL":
+                        coluna_credito = _resolver_coluna_peers(df, ["Carteira de Crédito"])
+                        valor_credito = _obter_valor_peers(df, banco, periodo, coluna_credito)
+                        valor_pl_v = _obter_valor_peers(df, banco, periodo, coluna_pl)
+                        valor = _calcular_ratio_peers(valor_credito, valor_pl_v)
+                        tip = _tooltip_ratio_peers(label, valor_credito, valor_pl_v, valor)
                     elif coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna)
@@ -2212,6 +2258,11 @@ def _montar_tabela_peers(
                         valor_ativo_base = _obter_valor_peers(df, banco, periodo_base, coluna_ativo)
                         valor_pl_base = _obter_valor_peers(df, banco, periodo_base, coluna_pl)
                         valor_base = _calcular_ratio_peers(valor_ativo_base, valor_pl_base)
+                    elif periodo_base and label == "Crédito / PL":
+                        coluna_credito_b = _resolver_coluna_peers(df, ["Carteira de Crédito"])
+                        valor_credito_b = _obter_valor_peers(df, banco, periodo_base, coluna_credito_b)
+                        valor_pl_b = _obter_valor_peers(df, banco, periodo_base, coluna_pl)
+                        valor_base = _calcular_ratio_peers(valor_credito_b, valor_pl_b)
                     else:
                         valor_base = None
                     if valor_base is not None and valor is not None and not pd.isna(valor) and not pd.isna(valor_base):
@@ -2567,6 +2618,49 @@ def _gerar_excel_peers_tabela(
             row_idx += 1
             zebra_idx += 1
 
+    workbook.close()
+    output.seek(0)
+    return output
+
+
+def _gerar_excel_peers_dados_puros(
+    bancos: list,
+    periodos: list,
+    valores: dict,
+) -> BytesIO:
+    """Exporta tabela Peers com valores numéricos puros (sem formatação cosmética)."""
+    output = BytesIO()
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    worksheet = workbook.add_worksheet("dados_puros")
+    num_fmt = workbook.add_format({"num_format": "0.000000"})
+    header_fmt = workbook.add_format({"bold": True})
+
+    # Cabeçalho: Indicador | Banco | Período | Valor
+    headers = ["Indicador", "Banco", "Período", "Valor"]
+    for c, h in enumerate(headers):
+        worksheet.write(0, c, h, header_fmt)
+
+    row_idx = 1
+    for section in PEERS_TABELA_LAYOUT:
+        for row in section["rows"]:
+            label = row["label"]
+            for banco in bancos:
+                for periodo in periodos:
+                    chave = (label, banco, periodo)
+                    valor = valores.get(chave)
+                    worksheet.write(row_idx, 0, label)
+                    worksheet.write(row_idx, 1, banco)
+                    worksheet.write(row_idx, 2, periodo)
+                    if valor is not None and not pd.isna(valor):
+                        worksheet.write_number(row_idx, 3, float(valor), num_fmt)
+                    else:
+                        worksheet.write(row_idx, 3, "")
+                    row_idx += 1
+
+    worksheet.set_column(0, 0, 40)
+    worksheet.set_column(1, 1, 30)
+    worksheet.set_column(2, 2, 12)
+    worksheet.set_column(3, 3, 18)
     workbook.close()
     output.seek(0)
     return output
@@ -3796,7 +3890,7 @@ elif False and menu == "Painel":
             # Variáveis de Capital (Relatório 5)
             'RWA Total': ['RWA Total'],
             'Capital Principal': ['Capital Principal'],
-            'Índice de Capital Principal': ['Índice de Capital Principal'],
+            'Índice de Capital Principal (CET1)': ['Índice de Capital Principal (CET1)', 'Índice de Capital Principal'],
             'Índice de Capital Nível I': ['Índice de Capital Nível I'],
             'Razão de Alavancagem': ['Razão de Alavancagem'],
         }
@@ -4184,22 +4278,38 @@ elif menu == "Peers (Tabela)":
                     )
                     st.markdown(html_tabela, unsafe_allow_html=True)
 
-                    with st.expander("📥 exportar visualização"):
-                        st.caption("Exporta a tabela no layout atual.")
-                        excel_buffer = _gerar_excel_peers_tabela(
-                            bancos_selecionados,
-                            periodos_selecionados,
-                            valores,
-                            colunas_usadas,
-                            delta_flags,
-                        )
-                        st.download_button(
-                            label="baixar Excel",
-                            data=excel_buffer,
-                            file_name="peers_tabela.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="peers_tabela_excel",
-                        )
+                    with st.expander("📥 exportar"):
+                        col_exp1, col_exp2 = st.columns(2)
+                        with col_exp1:
+                            st.caption("Tabela formatada (layout visual)")
+                            excel_buffer = _gerar_excel_peers_tabela(
+                                bancos_selecionados,
+                                periodos_selecionados,
+                                valores,
+                                colunas_usadas,
+                                delta_flags,
+                            )
+                            st.download_button(
+                                label="baixar Excel",
+                                data=excel_buffer,
+                                file_name="peers_tabela.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="peers_tabela_excel",
+                            )
+                        with col_exp2:
+                            st.caption("Dados puros (sem formatação)")
+                            excel_raw = _gerar_excel_peers_dados_puros(
+                                bancos_selecionados,
+                                periodos_selecionados,
+                                valores,
+                            )
+                            st.download_button(
+                                label="baixar Dados Puros",
+                                data=excel_raw,
+                                file_name="peers_dados_puros.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="peers_dados_puros_excel",
+                            )
 
                     st.markdown(
                         """
@@ -4225,7 +4335,7 @@ elif menu == "Peers (Tabela)":
                             <em>Alavancagem</em><br>
                             <strong>Ativo / PL</strong> = Ativo Total ÷ Patrimônio Líquido.<br>
                             <strong>Crédito / PL</strong> = Carteira de Crédito (Rel. 1) ÷ Patrimônio Líquido.<br>
-                            <strong>Índice de Capital Principal</strong> = Capital Principal ÷ RWA Total, extraído do relatório de Informações de Capital (Rel. 5). Equivale ao CET1.<br>
+                            <strong>Índice de Capital Principal (CET1)</strong> = Capital Principal ÷ RWA Total, extraído do relatório de Informações de Capital (Rel. 5).<br>
                             <strong>Índice de Basileia Total</strong> = (Capital Principal + Capital Complementar + Capital Nível II) ÷ RWA Total (Rel. 5). Equivale à soma CET1 + AT1 + T2.<br>
                             <br>
                             <em>Desempenho</em><br>
@@ -4682,7 +4792,7 @@ elif menu == "Rankings":
             'Carteira de Crédito': ['Carteira de Crédito'],
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
-            'Índice de Capital Principal': ['Índice de Capital Principal'],
+            'Índice de Capital Principal (CET1)': ['Índice de Capital Principal (CET1)', 'Índice de Capital Principal'],
             'Índice de Basileia': ['Índice de Basileia'],
             'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
             'ROE Ac. Anualizado (%)': ['ROE Ac. YTD an. (%)'],
@@ -4703,7 +4813,7 @@ elif menu == "Rankings":
                 'Carteira de Crédito',
                 'Captações',
                 'Patrimônio Líquido',
-                'Índice de Capital Principal',
+                'Índice de Capital Principal (CET1)',
                 'Índice de Basileia',
                 'Lucro Líquido Acumulado YTD',
                 'ROE Ac. Anualizado (%)',
@@ -8359,7 +8469,7 @@ elif menu == "Glossário":
 
     **Exposição Total:** Exposição total sem ponderação de risco (definição regulatória usada no cálculo da razão de alavancagem, conforme Circular 3.748/2015).
 
-    **Índice de Capital Principal:** Relação entre Capital Principal e RWA Total (Capital Principal / RWA Total).
+    **Índice de Capital Principal (CET1):** Relação entre Capital Principal e RWA Total (Capital Principal / RWA Total).
 
     **Índice de Capital Nível I:** Relação entre Patrimônio de Referência Nível I e RWA Total (Nível I / RWA Total).
 
