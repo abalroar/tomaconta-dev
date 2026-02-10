@@ -646,14 +646,19 @@ def recalcular_metricas_derivadas(dados_periodos):
         # ROE Anualizado com PL Médio - SEMPRE recalcular
         # Fórmula: (LL_YTD × fator) / ((PL_t + PL_Dez_ano_anterior) / 2)
         # Se PL médio <= 0 ou dados faltantes → N/A.
-        # IMPORTANTE: LL de Set (período 3) do BCB é só Q3 (Jul-Sep);
-        # precisa somar Jun (Jan-Jun) para obter YTD completo.
+        #
+        # IMPORTANTE — Acumulação do LL para Set (período 3 / mês 9):
+        # O BCB (Relatório 1) publica o LL de Set como Jul-Set (Q3, 3 meses),
+        # NÃO como YTD Jan-Set. Para obter o YTD, somamos o valor de Jun
+        # (que é Jan-Jun acumulado, 6 meses): YTD = Q3 + Jun = Jan-Set (9 meses).
+        # Essa acumulação é feita UMA ÚNICA VEZ aqui; downstream
+        # (_ajustar_lucro_acumulado_peers, etc.) lê o valor já acumulado.
         if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
             ll_col = "Lucro Líquido Acumulado YTD"
             pl_col = "Patrimônio Líquido"
             ll_ytd = df_atualizado[ll_col].copy()
 
-            # Para Set (mes=9): LL do BCB é só Q3; somar Jun (YTD Jan-Jun)
+            # Para Set (mes=9): LL do BCB é só Q3 (Jul-Set); somar Jun (YTD Jan-Jun)
             if mes == 9:
                 parsed = _parse_periodo(periodo_str) if periodo_str else None
                 if parsed:
@@ -682,7 +687,7 @@ def recalcular_metricas_derivadas(dados_periodos):
             df_atualizado["ROE Ac. YTD an. (%)"] = _calcular_roe_anualizado(
                 ll_ytd, pl_t, pl_dez_anterior, mes
             )
-            # Armazenar LL YTD ajustado (Set: Q3 + Jun)
+            # Armazenar LL YTD acumulado (Set: Q3 + Jun) na coluna para uso downstream
             df_atualizado[ll_col] = ll_ytd
 
         # Crédito/PL - SEMPRE recalcular
@@ -1636,7 +1641,7 @@ def _fmt_tooltip_mm(valor) -> str:
 
 def _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor_roe):
     """Tooltip com memória de cálculo do ROE Ac. Anualizado."""
-    lucro = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna_lucro)
+    lucro = _obter_valor_peers(df, banco, periodo, coluna_lucro)
     lucro_num = _coerce_numeric_value(lucro)
     pl_t = _coerce_numeric_value(_obter_valor_peers(df, banco, periodo, coluna_pl))
     parsed = _parse_periodo(periodo)
@@ -1670,27 +1675,10 @@ def _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor_roe):
     return "\n".join(lines)
 
 
-def _tooltip_ll_peers(df, banco, periodo, coluna, valor_ajustado):
-    """Tooltip para Lucro Líquido (mostra ajuste Sep se aplicável)."""
-    parsed = _parse_periodo(periodo)
+def _tooltip_ll_peers(df, banco, periodo, coluna, valor):
+    """Tooltip para Lucro Líquido (BCB Rel. 1 já publica YTD acumulado)."""
     fmt = _fmt_tooltip_mm
-    if not parsed:
-        return f"LL YTD: {fmt(valor_ajustado)}"
-    parte, _, _ = parsed
-    try:
-        parte_int = int(parte)
-    except (ValueError, TypeError):
-        return f"LL YTD: {fmt(valor_ajustado)}"
-    if parte_int == 3:
-        valor_raw = _obter_valor_peers(df, banco, periodo, coluna)
-        per_jun = _periodo_mesma_estrutura(periodo, 2)
-        valor_jun = _obter_valor_peers(df, banco, per_jun, coluna) if per_jun else None
-        lines = [f"LL Set (Q3 Jul-Set): {fmt(valor_raw)}"]
-        if valor_jun is not None and not pd.isna(valor_jun):
-            lines.append(f"LL Jun (YTD Jan-Jun): {fmt(valor_jun)}")
-        lines.append(f"LL YTD (Jan-Set): {fmt(valor_ajustado)}")
-        return "\n".join(lines)
-    return f"LL YTD: {fmt(valor_ajustado)}"
+    return f"LL YTD: {fmt(valor)}"
 
 
 def _tooltip_ratio_peers(label, valor_num, valor_den, valor_ratio):
@@ -2006,8 +1994,9 @@ def _preparar_metricas_extra_peers(
                 carteira_c4_c5,
             )
 
-            desp_pdd = _obter_valor_peers(cache_dre, banco, periodo, col_desp_pdd)
-            desp_pdd_anual = _anualizar_valor_dre(desp_pdd, periodo)
+            # DRE (Rel. 4): Set/Dez são semestrais; acumular YTD antes de anualizar
+            desp_pdd_ytd = _acumular_dre_ytd_peers(cache_dre, banco, periodo, col_desp_pdd)
+            desp_pdd_anual = _anualizar_valor_dre(desp_pdd_ytd, periodo)
             extra["Desp PDD Anualizada"][chave] = desp_pdd_anual
             extra["Desp PDD Anualizada / Carteira Bruta"][chave] = _calcular_ratio_peers(
                 desp_pdd_anual,
@@ -2080,7 +2069,61 @@ def _calcular_ratio_peers(valor_num, valor_den) -> Optional[float]:
         return None
 
 
+def _acumular_dre_ytd_peers(
+    cache_dre: Optional[pd.DataFrame],
+    banco: str,
+    periodo: str,
+    coluna: Optional[str],
+) -> Optional[float]:
+    """Converte valor DRE bruto para YTD acumulado.
+
+    O BCB (Relatório 4) publica dados DRE de forma semestral:
+      - Mar (parte=1): Jan-Mar → já é YTD (3 meses)
+      - Jun (parte=2): Jan-Jun → já é YTD (6 meses)
+      - Set (parte=3): Jul-Set → precisa somar Jun (Jan-Jun) para YTD (9 meses)
+      - Dez (parte=4): Jul-Dez → precisa somar Jun (Jan-Jun) para YTD (12 meses)
+
+    Retorna valor numérico YTD ou None se dados insuficientes.
+    """
+    valor_raw = _obter_valor_peers(cache_dre, banco, periodo, coluna)
+    if valor_raw is None or pd.isna(valor_raw):
+        return None
+    valor_num = _coerce_numeric_value(valor_raw)
+    if valor_num is None or pd.isna(valor_num):
+        return None
+    parsed = _parse_periodo(periodo)
+    if not parsed:
+        return float(valor_num)
+    parte, _, _ = parsed
+    try:
+        parte_int = int(parte)
+    except ValueError:
+        return float(valor_num)
+    # Determinar se precisa acumular (Set e Dez precisam de Jun)
+    if 1 <= parte_int <= 4:
+        precisa_jun = parte_int in (3, 4)
+        parte_jun = 2
+    elif 1 <= parte_int <= 12:
+        precisa_jun = parte_int in (9, 12)
+        parte_jun = 6
+    else:
+        return float(valor_num)
+    if not precisa_jun:
+        return float(valor_num)
+    periodo_jun = _periodo_mesma_estrutura(periodo, parte_jun)
+    if not periodo_jun:
+        return None
+    valor_jun = _obter_valor_peers(cache_dre, banco, periodo_jun, coluna)
+    if valor_jun is None or pd.isna(valor_jun):
+        return None
+    valor_jun_num = _coerce_numeric_value(valor_jun)
+    if valor_jun_num is None or pd.isna(valor_jun_num):
+        return None
+    return float(valor_num) + float(valor_jun_num)
+
+
 def _anualizar_valor_dre(valor, periodo: str) -> Optional[float]:
+    """Anualiza valor DRE já acumulado YTD: valor_ytd / meses * 12."""
     if valor is None or pd.isna(valor):
         return None
     valor_num = _coerce_numeric_value(valor)
@@ -2113,31 +2156,13 @@ def _ajustar_lucro_acumulado_peers(
     periodo: str,
     coluna: Optional[str],
 ):
-    valor_atual = _obter_valor_peers(df, banco, periodo, coluna)
-    if valor_atual is None or pd.isna(valor_atual):
-        return valor_atual
-    parsed = _parse_periodo(periodo)
-    if not parsed:
-        return valor_atual
-    parte, _, _ = parsed
-    try:
-        parte_int = int(parte)
-    except ValueError:
-        return valor_atual
-    if 1 <= parte_int <= 4:
-        if parte_int != 3:
-            return valor_atual
-        periodo_junho = _periodo_mesma_estrutura(periodo, 2)
-    else:
-        if parte_int != 9:
-            return valor_atual
-        periodo_junho = _periodo_mesma_estrutura(periodo, 6)
-    if not periodo_junho:
-        return valor_atual
-    valor_junho = _obter_valor_peers(df, banco, periodo_junho, coluna)
-    if valor_junho is None or pd.isna(valor_junho):
-        return valor_atual
-    return valor_atual + valor_junho
+    """Retorna LL YTD do período.
+
+    A acumulação Set (Q3 + Jun) já foi feita em recalcular_metricas_derivadas(),
+    que sobrescreve a coluna 'Lucro Líquido Acumulado YTD' com o valor YTD.
+    Aqui apenas lemos o valor já acumulado — NÃO somar Jun novamente.
+    """
+    return _obter_valor_peers(df, banco, periodo, coluna)
 
 
 def _calcular_roe_anualizado_peers(
@@ -2151,10 +2176,7 @@ def _calcular_roe_anualizado_peers(
 
     Usa PL médio entre período atual (t) e Dez do ano anterior.
     Retorna None quando PL médio <= 0 ou qualquer componente faltar.
-
-    IMPORTANTE: O LL do BCB para Set (período 3) traz apenas o trimestre
-    Jul-Sep, não o acumulado YTD. Por isso, usa _ajustar_lucro_acumulado_peers
-    para somar o valor de Jun (Jan-Jun) e obter o YTD completo (Jan-Sep).
+    O LL já está acumulado YTD no DataFrame (feito em recalcular_metricas_derivadas).
     """
     lucro = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna_lucro)
     lucro_num = _coerce_numeric_value(lucro)
