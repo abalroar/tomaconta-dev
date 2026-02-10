@@ -599,6 +599,12 @@ def _calcular_roe_anualizado(ll_ytd, pl_t, pl_dez_anterior, mes):
     return float(ll_ytd) * fator / pl_medio_f
 
 
+# Versão da lógica de métricas derivadas. Incrementar quando a lógica de
+# recalcular_metricas_derivadas mudar (ex.: ajuste de acumulação LL YTD)
+# para forçar reprocessamento de dados já carregados em session_state.
+_METRICAS_DERIVADAS_VERSION = 3
+
+
 def recalcular_metricas_derivadas(dados_periodos):
     """Recalcula métricas derivadas para dados carregados do cache.
 
@@ -916,6 +922,9 @@ def forcar_recarregar_cache():
                 mapa_codigos=mapa_codigos,
             )
         st.session_state['dados_periodos'] = dados
+        st.session_state['_metricas_derivadas_v'] = _METRICAS_DERIVADAS_VERSION
+        st.session_state['_dados_capital_mesclados'] = False
+        _bump_dados_version()
         st.session_state['cache_fonte'] = 'local (recarregado)'
         return True
     return False
@@ -1610,15 +1619,29 @@ def _inferir_escala_percentual(valor) -> str:
 def _normalizar_indice_para_decimal(serie: pd.Series) -> pd.Series:
     """Normaliza índices percentuais (Basileia, CET1, etc.) para base decimal (0-1).
 
-    Detecta valores na escala 0-100 (ex.: 15.55 para 15.55%) e converte para 0-1
-    (ex.: 0.1555). Valores já em 0-1 são mantidos. Usa limiar > 1 para detecção
-    (índices de capital regulatório típicos ficam entre 5% e 30%, ou 0.05–0.30).
+    Detecta a escala dos valores usando a mediana dos não-nulos e converte:
+    - Escala 0-100 (ex.: 15.55)  → divide por 100  → 0.1555
+    - Escala 0-0.01 (dupla divisão, ex.: 0.001555) → multiplica por 100 → 0.1555
+    - Escala 0-1 (já correta, ex.: 0.1555) → mantém
+
+    Usa a mediana para decidir a escala, evitando que outliers individuais
+    distorçam a detecção. Índices de capital regulatório típicos: 5-30%.
     """
     serie_num = pd.to_numeric(serie, errors="coerce")
-    mask_percentual = serie_num.abs() > 1
-    if mask_percentual.any():
-        serie_num = serie_num.copy()
-        serie_num.loc[mask_percentual] = serie_num.loc[mask_percentual] / 100
+    validos = serie_num.dropna()
+    if validos.empty:
+        return serie_num
+    mediana = validos.abs().median()
+    serie_num = serie_num.copy()
+    if mediana > 1:
+        # Escala 0-100 (percentual bruto da API): dividir por 100
+        mask = serie_num.abs() > 1
+        serie_num.loc[mask] = serie_num.loc[mask] / 100
+    elif mediana < 0.01:
+        # Escala 0-0.01 (dupla normalização): multiplicar por 100
+        mask = (serie_num.abs() < 0.01) & serie_num.notna() & (serie_num != 0)
+        serie_num.loc[mask] = serie_num.loc[mask] * 100
+    # else: escala 0-1, já correta
     return serie_num
 
 
@@ -2177,8 +2200,13 @@ def _preparar_metricas_extra_peers(
                 )
                 if val_precalc is not None and not pd.isna(val_precalc):
                     v = float(val_precalc)
-                    # Normalizar para decimal (0-1): cache pode ter 0-100
-                    indice_cap_principal = v / 100 if abs(v) > 1 else v
+                    # Normalizar para decimal (0-1): cache pode ter 0-100 ou 0-0.01
+                    if abs(v) > 1:
+                        indice_cap_principal = v / 100
+                    elif abs(v) < 0.01 and v != 0:
+                        indice_cap_principal = v * 100
+                    else:
+                        indice_cap_principal = v
             extra["Índice de Capital Principal (CET1)"][chave] = indice_cap_principal
 
             indice_basileia = None
@@ -2207,8 +2235,13 @@ def _preparar_metricas_extra_peers(
                 )
                 if val_precalc is not None and not pd.isna(val_precalc):
                     v = float(val_precalc)
-                    # Normalizar para decimal (0-1): cache pode ter 0-100
-                    indice_basileia = v / 100 if abs(v) > 1 else v
+                    # Normalizar para decimal (0-1): cache pode ter 0-100 ou 0-0.01
+                    if abs(v) > 1:
+                        indice_basileia = v / 100
+                    elif abs(v) < 0.01 and v != 0:
+                        indice_basileia = v * 100
+                    else:
+                        indice_basileia = v
             extra["Índice de Basileia Total"][chave] = indice_basileia
 
     return extra
@@ -3188,7 +3221,14 @@ def get_dados_concatenados() -> pd.DataFrame:
     # Flag de mesclagem de capital também invalida o cache
     capital_mesclado = st.session_state.get('_dados_capital_mesclados', False)
 
-    periodos_hash = str(hash((periodos_keys, colunas_hash, capital_mesclado)))
+    # Versão dos dados — incrementada sempre que os DataFrames em
+    # session_state['dados_periodos'] são substituídos (carregamento,
+    # recálculo de métricas, merge de capital, nova extração).
+    # Isso garante que o cache do concat seja invalidado quando os
+    # *valores* mudam (e não apenas chaves/colunas).
+    dados_version = st.session_state.get('_dados_periodos_version', 0)
+
+    periodos_hash = str(hash((periodos_keys, colunas_hash, capital_mesclado, dados_version)))
 
     return _get_dados_concatenados(periodos_hash, periodos_keys)
 
@@ -3399,8 +3439,17 @@ if 'df_aliases' not in st.session_state:
     print(_perf_log("init_aliases"))
 
 
+def _bump_dados_version():
+    """Incrementa versão dos dados para invalidar cache do concat."""
+    st.session_state['_dados_periodos_version'] = st.session_state.get('_dados_periodos_version', 0) + 1
+
+
 def carregar_dados_periodos():
-    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+    # Reprocessar se a versão da lógica de métricas derivadas mudou
+    # (ex.: correção na acumulação LL YTD) mas os dados já estavam em
+    # session_state de uma execução anterior com lógica diferente.
+    version_ok = st.session_state.get('_metricas_derivadas_v') == _METRICAS_DERIVADAS_VERSION
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos'] and version_ok:
         return
     _perf_start("init_dados_periodos")
     cache_manager = get_cache_manager()
@@ -3420,6 +3469,9 @@ def carregar_dados_periodos():
             )
             print(_perf_log("aplicar_aliases"))
         st.session_state['dados_periodos'] = dados_cache
+        st.session_state['_metricas_derivadas_v'] = _METRICAS_DERIVADAS_VERSION
+        st.session_state['_dados_capital_mesclados'] = False
+        _bump_dados_version()
         if 'cache_fonte' not in st.session_state:
             st.session_state['cache_fonte'] = resultado_principal.fonte if resultado_principal else 'desconhecida'
         if 'dados_periodos_erro' in st.session_state:
@@ -3716,6 +3768,7 @@ with st.sidebar:
                             st.session_state['dados_periodos'] = dados_merged
                         else:
                             st.session_state['dados_periodos'] = dados
+                        _bump_dados_version()
 
                         st.session_state['cache_fonte'] = 'extração local'
 
@@ -5018,6 +5071,7 @@ elif menu == "Rankings":
                     st.session_state['dados_capital']
                 )
                 st.session_state['_dados_capital_mesclados'] = True
+                _bump_dados_version()
 
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = adicionar_indice_cet1(df)
@@ -8837,6 +8891,7 @@ elif menu == "Atualizar Base":
                                         st.session_state['dados_periodos'].update(dados_dict)
                                     else:
                                         st.session_state['dados_periodos'] = dados_dict
+                                    _bump_dados_version()
                                     st.session_state['cache_fonte'] = 'extração local'
 
                             elif cache_selecionado == "capital" and resultado.dados is not None:
@@ -8949,6 +9004,7 @@ elif menu == "Atualizar Base":
                         st.session_state['dados_periodos'] = dados_merged
                     else:
                         st.session_state['dados_periodos'] = dados
+                    _bump_dados_version()
 
                     st.session_state['cache_fonte'] = 'extração local'
 

@@ -664,18 +664,20 @@ def calcular_lucro_semestral(ano_mes: str, df_pivot: pd.DataFrame) -> pd.DataFra
             df_result = df_result.drop(columns=["Lucro Líquido Acumulado YTD_06"], errors="ignore")
 
     elif mes == "12":
-        periodo_anterior = f"{ano}09"
+        # O BCB publica o LL de Dez como acumulado do 2º semestre (Jul-Dez).
+        # Para obter YTD (ano inteiro), somar H1 (Jan-Jun) do período de Jun.
+        periodo_anterior = f"{ano}06"
         df_lucro_anterior = extrair_lucro_periodo(periodo_anterior)
 
         if not df_lucro_anterior.empty and "Lucro Líquido Acumulado YTD" in df_result.columns:
             df_result = df_result.merge(
-                df_lucro_anterior, on="CodInst", how="left", suffixes=("", "_09")
+                df_lucro_anterior, on="CodInst", how="left", suffixes=("", "_06")
             )
             df_result["Lucro Líquido Acumulado YTD"] = (
                 df_result["Lucro Líquido Acumulado YTD"].fillna(0) +
-                df_result["Lucro Líquido Acumulado YTD_09"].fillna(0)
+                df_result["Lucro Líquido Acumulado YTD_06"].fillna(0)
             )
-            df_result = df_result.drop(columns=["Lucro Líquido Acumulado YTD_09"], errors="ignore")
+            df_result = df_result.drop(columns=["Lucro Líquido Acumulado YTD_06"], errors="ignore")
 
     return df_result
 
