@@ -2340,7 +2340,10 @@ def _render_peers_table_html(
                     elif delta_flag == "down":
                         delta_html = ' <span class="delta-neg">▼</span>'
                     tip = (tooltips or {}).get(chave, "") if tooltips else ""
-                    title_attr = f' title="{_html_mod.escape(tip)}"' if tip else ""
+                    title_attr = ""
+                    if tip:
+                        tip_safe = _html_mod.escape(tip, quote=True).replace("\n", "&#10;")
+                        title_attr = f' title="{tip_safe}"'
                     html += f"<td{title_attr}>{valor_fmt}{delta_html}</td>"
 
             html += "</tr>"
