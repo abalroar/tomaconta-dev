@@ -1553,7 +1553,13 @@ def _normalizar_percentual_display(serie: pd.Series) -> pd.Series:
     serie_num = pd.to_numeric(serie, errors="coerce")
     if serie_num.empty:
         return serie_num
-    return serie_num * 100
+
+    # Normalização por valor (não pela série inteira) para suportar fontes mistas.
+    # Regras de display no Scatter Plot:
+    # - valores em [-1, 1] são tratados como fração e convertidos para percentual;
+    # - valores fora desse intervalo são assumidos como já percentuais (0-100).
+    mask_fracao = serie_num.abs() <= 1
+    return serie_num.where(~mask_fracao, serie_num * 100)
 
 
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
