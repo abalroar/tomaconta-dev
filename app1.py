@@ -655,6 +655,7 @@ def recalcular_metricas_derivadas(dados_periodos):
         # (_ajustar_lucro_acumulado_peers, etc.) lê o valor já acumulado.
         if "Lucro Líquido Acumulado YTD" in df_atualizado.columns and "Patrimônio Líquido" in df_atualizado.columns:
             ll_col = "Lucro Líquido Acumulado YTD"
+            ll_col_legado = "Lucro Líquido"
             pl_col = "Patrimônio Líquido"
             ll_ytd = df_atualizado[ll_col].copy()
 
@@ -664,11 +665,23 @@ def recalcular_metricas_derivadas(dados_periodos):
                 if parsed:
                     parte_p, ano_p, _ = parsed
                     per_jun = f"2/{ano_p}" if 1 <= int(parte_p) <= 4 else f"6/{ano_p}"
-                    df_jun = dados_periodos.get(per_jun)
-                    if df_jun is not None and ll_col in df_jun.columns and "Instituição" in df_jun.columns:
-                        jun_map = df_jun.set_index("Instituição")[ll_col]
-                        if "Instituição" in df_atualizado.columns:
-                            ll_ytd = ll_ytd + df_atualizado["Instituição"].map(jun_map)
+                    # Tentar primeiro em dados_atualizados (já renomeados), depois originais
+                    df_jun = dados_atualizados.get(per_jun, dados_periodos.get(per_jun))
+                    if df_jun is not None and "Instituição" in df_jun.columns:
+                        # Aceitar tanto nome novo quanto legado da coluna de LL
+                        ll_col_jun = ll_col if ll_col in df_jun.columns else (
+                            ll_col_legado if ll_col_legado in df_jun.columns else None
+                        )
+                        if ll_col_jun and "Instituição" in df_atualizado.columns:
+                            # Remover duplicatas de instituição para evitar erro de .map()
+                            df_jun_dedup = df_jun.drop_duplicates(subset=["Instituição"], keep="first")
+                            jun_map = df_jun_dedup.set_index("Instituição")[ll_col_jun]
+                            jun_values = df_atualizado["Instituição"].map(jun_map)
+                            # Usar .add(fill_value=0) para preservar valor original
+                            # quando a instituição não existe no período Jun
+                            ll_ytd = ll_ytd.add(jun_values, fill_value=0)
+                            # Restaurar NaN onde o original era NaN
+                            ll_ytd = ll_ytd.where(df_atualizado[ll_col].notna(), other=np.nan)
 
             # PL médio: (PL_t + PL_Dez_ano_anterior) / 2
             pl_t = df_atualizado[pl_col].copy()
@@ -678,10 +691,11 @@ def recalcular_metricas_derivadas(dados_periodos):
                 _, ano_p, ano_len_p = parsed_per
                 ano_ant = ano_p - 1
                 per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len_p == 2 else f"4/{ano_ant}"
-                df_dez = dados_periodos.get(per_dez)
+                df_dez = dados_atualizados.get(per_dez, dados_periodos.get(per_dez))
                 if df_dez is not None and pl_col in df_dez.columns and "Instituição" in df_dez.columns:
+                    df_dez_dedup = df_dez.drop_duplicates(subset=["Instituição"], keep="first")
                     pl_dez_anterior = df_atualizado["Instituição"].map(
-                        df_dez.set_index("Instituição")[pl_col]
+                        df_dez_dedup.set_index("Instituição")[pl_col]
                     )
 
             df_atualizado["ROE Ac. YTD an. (%)"] = _calcular_roe_anualizado(
@@ -714,6 +728,13 @@ def recalcular_metricas_derivadas(dados_periodos):
         # Migrar nome antigo Carteira/Ativo (%) para Crédito/Ativo (%) se existir
         if "Carteira/Ativo (%)" in df_atualizado.columns and "Crédito/Ativo (%)" not in df_atualizado.columns:
             df_atualizado["Crédito/Ativo (%)"] = df_atualizado["Carteira/Ativo (%)"]
+
+        # Normalizar índices percentuais para base decimal (0-1).
+        # O cache (parquet/pickle) pode conter valores em 0-100 (API bruta)
+        # ou em 0-1 (extrator normalizado). Forçar sempre 0-1.
+        for _col_pct in ("Índice de Basileia", "Índice de Imobilização"):
+            if _col_pct in df_atualizado.columns:
+                df_atualizado[_col_pct] = _normalizar_indice_para_decimal(df_atualizado[_col_pct])
 
         dados_atualizados[periodo] = df_atualizado
 
@@ -831,6 +852,17 @@ def mesclar_dados_capital(dados_periodos, dados_capital):
                     if f'{col}_capital' in df_merged.columns:
                         df_merged[col] = df_merged[f'{col}_capital']
                         df_merged = df_merged.drop(columns=[f'{col}_capital'])
+
+        # Normalizar índices percentuais de capital para base decimal (0-1).
+        # O cache de capital pode ter valores em 0-100 (API bruta) ou 0-1 (extrator normalizado).
+        _INDICES_CAPITAL_PERCENTUAL = [
+            'Índice de Capital Principal',
+            'Índice de Capital Nível I',
+            'Razão de Alavancagem',
+        ]
+        for col in _INDICES_CAPITAL_PERCENTUAL:
+            if col in df_merged.columns:
+                df_merged[col] = _normalizar_indice_para_decimal(df_merged[col])
 
         dados_mesclados[periodo] = df_merged
 
@@ -1575,6 +1607,21 @@ def _inferir_escala_percentual(valor) -> str:
     return "0-1" if abs(valor_num) <= 1 else "0-100"
 
 
+def _normalizar_indice_para_decimal(serie: pd.Series) -> pd.Series:
+    """Normaliza índices percentuais (Basileia, CET1, etc.) para base decimal (0-1).
+
+    Detecta valores na escala 0-100 (ex.: 15.55 para 15.55%) e converte para 0-1
+    (ex.: 0.1555). Valores já em 0-1 são mantidos. Usa limiar > 1 para detecção
+    (índices de capital regulatório típicos ficam entre 5% e 30%, ou 0.05–0.30).
+    """
+    serie_num = pd.to_numeric(serie, errors="coerce")
+    mask_percentual = serie_num.abs() > 1
+    if mask_percentual.any():
+        serie_num = serie_num.copy()
+        serie_num.loc[mask_percentual] = serie_num.loc[mask_percentual] / 100
+    return serie_num
+
+
 def _log_diagnostico_basileia_scatter(
     df_base: pd.DataFrame,
     eixo_variavel: str,
@@ -1642,6 +1689,7 @@ def _garantir_indice_basileia_coluna(df: pd.DataFrame) -> pd.DataFrame:
 
     Usa fallback de colunas equivalentes quando a coluna padrão estiver ausente
     ou com lacunas (ex.: caches legados de capital).
+    Normaliza valores para base decimal (0-1) independentemente da fonte.
     """
     if df is None or df.empty:
         return df
@@ -1656,14 +1704,15 @@ def _garantir_indice_basileia_coluna(df: pd.DataFrame) -> pd.DataFrame:
     if 'Índice de Basileia' not in df_out.columns:
         alt_col = next((c for c in alternativas if c in df_out.columns), None)
         if alt_col:
-            df_out['Índice de Basileia'] = pd.to_numeric(df_out[alt_col], errors='coerce')
+            df_out['Índice de Basileia'] = _normalizar_indice_para_decimal(df_out[alt_col])
         return df_out
 
     # Preencher lacunas da coluna canônica com alternativas, quando houver
+    df_out['Índice de Basileia'] = _normalizar_indice_para_decimal(df_out['Índice de Basileia'])
     for alt_col in alternativas:
         if alt_col in df_out.columns:
-            alt_vals = pd.to_numeric(df_out[alt_col], errors='coerce')
-            df_out['Índice de Basileia'] = pd.to_numeric(df_out['Índice de Basileia'], errors='coerce').fillna(alt_vals)
+            alt_vals = _normalizar_indice_para_decimal(df_out[alt_col])
+            df_out['Índice de Basileia'] = df_out['Índice de Basileia'].fillna(alt_vals)
 
     return df_out
 
@@ -2127,7 +2176,9 @@ def _preparar_metricas_extra_peers(
                     _obter_valor_peers(cache_capital, banco, periodo, col_indice_cap_principal)
                 )
                 if val_precalc is not None and not pd.isna(val_precalc):
-                    indice_cap_principal = float(val_precalc)
+                    v = float(val_precalc)
+                    # Normalizar para decimal (0-1): cache pode ter 0-100
+                    indice_cap_principal = v / 100 if abs(v) > 1 else v
             extra["Índice de Capital Principal (CET1)"][chave] = indice_cap_principal
 
             indice_basileia = None
@@ -2155,7 +2206,9 @@ def _preparar_metricas_extra_peers(
                     _obter_valor_peers(cache_capital, banco, periodo, col_indice_basileia_precalc)
                 )
                 if val_precalc is not None and not pd.isna(val_precalc):
-                    indice_basileia = float(val_precalc)
+                    v = float(val_precalc)
+                    # Normalizar para decimal (0-1): cache pode ter 0-100
+                    indice_basileia = v / 100 if abs(v) > 1 else v
             extra["Índice de Basileia Total"][chave] = indice_basileia
 
     return extra
