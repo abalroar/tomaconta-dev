@@ -2960,11 +2960,12 @@ def _calcular_basileia_periodo(
     if 'Índice de Basileia Capital' in colunas_encontradas:
         col_indice_basileia = colunas_encontradas['Índice de Basileia Capital']
         valores_ib = pd.to_numeric(df_periodo_cap[col_indice_basileia], errors="coerce")
-        max_ib = valores_ib.dropna().max() if not valores_ib.dropna().empty else None
-        fator_ib = 100 if max_ib is not None and max_ib <= 1 else 1
         mask_preencher = df_periodo_cap['Índice de Basileia Total (%)'].isna() & valores_ib.notna()
         if mask_preencher.any():
-            df_periodo_cap.loc[mask_preencher, 'Índice de Basileia Total (%)'] = valores_ib[mask_preencher] * fator_ib
+            valores_fill = valores_ib[mask_preencher].copy()
+            mask_decimal = valores_fill.abs() <= 1
+            valores_fill.loc[mask_decimal] = valores_fill.loc[mask_decimal] * 100
+            df_periodo_cap.loc[mask_preencher, 'Índice de Basileia Total (%)'] = valores_fill
             df_periodo_cap.loc[mask_preencher, 'RWA_valido'] = True
             info["usou_precalc"] = True
             if pode_calcular_composicao:
