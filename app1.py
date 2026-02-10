@@ -6535,10 +6535,10 @@ elif menu == "Carteira 4.966":
         ("C3", "C3"),
         ("C4", "C4"),
         ("C5", "C5"),
-        ("Carteira Total", "Total Geral"),
         ("Carteira Não Informada", "Carteira não Informada ou não se Aplica"),
         ("Carteira no Exterior", "Total Exterior"),
         ("Total não Individualizado", "Total não Individualizado"),
+        ("Carteira Total", "Total Geral"),
     ]
 
     df_carteira = load_carteira_4966_data()
@@ -6723,10 +6723,6 @@ elif menu == "Carteira 4.966":
                         valor_fmt = formatar_valor_br(valor)
                         pct_fmt = formatar_percentual(pct) if pct is not None else "-"
 
-                        # Se for linhas especiais (Não Informada, Exterior, Não Individualizado), não mostrar percentual
-                        if tipo in ["Carteira Não Informada", "Carteira no Exterior", "Total não Individualizado"]:
-                            pct_fmt = "-"
-
                         # Adicionar delta visual se houver período anterior
                         delta_html = ""
                         periodo_base = _periodo_ano_anterior(periodo)
@@ -6818,10 +6814,7 @@ elif menu == "Carteira 4.966":
                             valor = row.get(f"{periodo_exib}")
                             pct = row.get(f"{periodo_exib} %")
                             valor_fmt = formatar_valor_br(valor)
-                            if tipo in ["Carteira Não Informada", "Carteira no Exterior", "Total não Individualizado"]:
-                                pct_fmt = "-"
-                            else:
-                                pct_fmt = formatar_percentual(pct) if pct is not None else "-"
+                            pct_fmt = formatar_percentual(pct) if pct is not None else "-"
                             worksheet.write(row_idx, col_idx, valor_fmt, cell_fmt)
                             worksheet.write(row_idx, col_idx + 1, pct_fmt, cell_fmt)
                             col_idx += 2
