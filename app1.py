@@ -1949,13 +1949,50 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _build_peers_lookup(df: Optional[pd.DataFrame]) -> dict:
+    """Cria índice rápido (Instituição, Período) -> linha para lookups repetidos.
+
+    Esta função evita filtros booleanos O(n) em cada célula da tabela de peers.
+    O lookup é armazenado em ``df.attrs`` e reutilizado enquanto o DataFrame
+    não muda (mesmo shape e mesmas colunas).
+    """
+    if df is None or df.empty:
+        return {}
+    if "Instituição" not in df.columns or "Período" not in df.columns:
+        return {}
+
+    meta_nova = (len(df), tuple(df.columns))
+    meta_existente = df.attrs.get("_peers_lookup_meta")
+    lookup_existente = df.attrs.get("_peers_lookup")
+    if meta_existente == meta_nova and isinstance(lookup_existente, dict):
+        return lookup_existente
+
+    lookup = {}
+    # Evita iterrows(): converte para registros e preserva 1ª ocorrência por chave.
+    inst_vals = df["Instituição"].tolist()
+    per_vals = df["Período"].tolist()
+    registros = df.to_dict("records")
+
+    for inst, per, row in zip(inst_vals, per_vals, registros):
+        chave = (inst, per)
+        if chave not in lookup:
+            lookup[chave] = row
+
+    df.attrs["_peers_lookup"] = lookup
+    df.attrs["_peers_lookup_meta"] = meta_nova
+    return lookup
+
+
 def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optional[str]):
     if coluna is None or df is None or df.empty:
         return None
-    df_cell = df[(df["Instituição"] == banco) & (df["Período"] == periodo)]
-    if df_cell.empty:
+    lookup = _build_peers_lookup(df)
+    if not lookup:
         return None
-    return df_cell.iloc[0].get(coluna)
+    row = lookup.get((banco, periodo))
+    if row is None:
+        return None
+    return row.get(coluna)
 
 
 def _coerce_numeric_value(valor):
@@ -1977,6 +2014,28 @@ def _somar_valores(valores: list) -> Optional[float]:
         return None
     return float(sum(numeros))
 
+
+
+
+def _slice_cache_for_peers(
+    df: Optional[pd.DataFrame],
+    bancos: Optional[list] = None,
+    periodos: Optional[list] = None,
+) -> Optional[pd.DataFrame]:
+    """Recorta cache para peers (bancos/períodos) e reduz custo de varredura."""
+    if df is None or df.empty:
+        return df
+    if "Instituição" not in df.columns or "Período" not in df.columns:
+        return df
+
+    mask = pd.Series(True, index=df.index)
+    if bancos:
+        mask &= df["Instituição"].isin(bancos)
+    if periodos:
+        mask &= df["Período"].isin(periodos)
+
+    # Retorna cópia para permitir attrs de lookup sem side-effects externos.
+    return df.loc[mask].copy()
 
 def _aplicar_aliases_df(df: Optional[pd.DataFrame], dict_aliases: dict) -> Optional[pd.DataFrame]:
     if df is None or df.empty or not dict_aliases:
@@ -4704,6 +4763,17 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
+
+                    # Recorte agressivo para reduzir custo de lookup da tabela peers.
+                    periodos_base_peers = {_periodo_ano_anterior(p) for p in periodos_selecionados}
+                    periodos_ext_peers = [p for p in periodos_selecionados + sorted(periodos_base_peers) if p]
+                    cache_ativo = _slice_cache_for_peers(cache_ativo, bancos_selecionados, periodos_ext_peers)
+                    cache_passivo = _slice_cache_for_peers(cache_passivo, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pf = _slice_cache_for_peers(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pj = _slice_cache_for_peers(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_instr = _slice_cache_for_peers(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
+                    cache_dre = _slice_cache_for_peers(cache_dre, bancos_selecionados, periodos_ext_peers)
+                    cache_capital = _slice_cache_for_peers(cache_capital, bancos_selecionados, periodos_ext_peers)
 
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
