@@ -1559,7 +1559,7 @@ def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = N
     # Nesse caso, evitamos multiplicação dupla apenas para essa variável.
     if variavel and "Basileia" in variavel:
         mask_decimal = serie_num.abs() <= 1
-        return serie_num.where(~mask_decimal, serie_num / 100) * 100
+        return serie_num.where(~mask_decimal, serie_num * 100)
 
     return serie_num * 100
 
@@ -1568,6 +1568,79 @@ def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict
     if _is_variavel_percentual(variavel):
         return _normalizar_percentual_display(serie, variavel)
     return serie * format_info['multiplicador']
+
+
+def _inferir_escala_percentual(valor) -> str:
+    try:
+        valor_num = float(valor)
+    except Exception:
+        return "indefinida"
+    if pd.isna(valor_num):
+        return "indefinida"
+    return "0-1" if abs(valor_num) <= 1 else "0-100"
+
+
+def _log_diagnostico_basileia_scatter(
+    df_base: pd.DataFrame,
+    eixo_variavel: str,
+    eixo_display: str,
+    periodo: str,
+    contexto: str,
+) -> None:
+    if eixo_variavel != "Índice de Basileia" or df_base is None or df_base.empty:
+        return
+
+    bancos_alvo = [
+        "Banco do Brasil",
+        "Itaú Unibanco",
+    ]
+    bancos_registrados = []
+
+    for banco in bancos_alvo:
+        mask = df_base["Instituição"].astype(str).str.contains(banco, case=False, na=False)
+        if not mask.any():
+            print(f"[DIAG][SCATTER][{contexto}] banco não encontrado: {banco} | período={periodo}")
+            continue
+
+        row = df_base.loc[mask].iloc[0]
+        valor_bruto = row.get(eixo_variavel)
+        valor_display = row.get(eixo_display)
+        escala = _inferir_escala_percentual(valor_bruto)
+        if escala == "0-1":
+            transformacao = "display = valor_bruto * 100"
+        elif escala == "0-100":
+            transformacao = "display = valor_bruto (já em percentual)"
+        else:
+            transformacao = "display indefinido (valor nulo/não numérico)"
+
+        print(
+            f"[DIAG][SCATTER][{contexto}] período={periodo} | banco={row.get('Instituição')} | "
+            f"valor_bruto={valor_bruto} | tipo={type(valor_bruto).__name__} | "
+            f"escala_inferida={escala} | transformação={transformacao} | "
+            f"valor_display={valor_display}"
+        )
+        bancos_registrados.append(str(row.get("Instituição")))
+
+    # Banco de controle (primeiro disponível fora BB/Itaú)
+    mask_controle = ~df_base["Instituição"].astype(str).isin(bancos_registrados)
+    if mask_controle.any():
+        row = df_base.loc[mask_controle].iloc[0]
+        valor_bruto = row.get(eixo_variavel)
+        valor_display = row.get(eixo_display)
+        escala = _inferir_escala_percentual(valor_bruto)
+        if escala == "0-1":
+            transformacao = "display = valor_bruto * 100"
+        elif escala == "0-100":
+            transformacao = "display = valor_bruto (já em percentual)"
+        else:
+            transformacao = "display indefinido (valor nulo/não numérico)"
+
+        print(
+            f"[DIAG][SCATTER][{contexto}] período={periodo} | banco_controle={row.get('Instituição')} | "
+            f"valor_bruto={valor_bruto} | tipo={type(valor_bruto).__name__} | "
+            f"escala_inferida={escala} | transformação={transformacao} | "
+            f"valor_display={valor_display}"
+        )
 
 def _garantir_indice_basileia_coluna(df: pd.DataFrame) -> pd.DataFrame:
     """Garante coluna canônica 'Índice de Basileia' para uso no Scatter Plot.
@@ -4565,6 +4638,9 @@ elif menu == "Scatter Plot":
         df_scatter_plot['x_display'] = _calcular_valores_display(df_scatter_plot[var_x], var_x, format_x)
         df_scatter_plot['y_display'] = _calcular_valores_display(df_scatter_plot[var_y], var_y, format_y)
 
+        _log_diagnostico_basileia_scatter(df_scatter_plot, var_x, 'x_display', periodo_scatter, 't=1/x')
+        _log_diagnostico_basileia_scatter(df_scatter_plot, var_y, 'y_display', periodo_scatter, 't=1/y')
+
         if var_size == 'Tamanho Fixo':
             tamanho_constante = 25
         else:
@@ -4733,6 +4809,11 @@ elif menu == "Scatter Plot":
                 df_p1['y_display'] = _calcular_valores_display(df_p1[var_y_n2], var_y_n2, format_y_n2)
                 df_p2['x_display'] = _calcular_valores_display(df_p2[var_x_n2], var_x_n2, format_x_n2)
                 df_p2['y_display'] = _calcular_valores_display(df_p2[var_y_n2], var_y_n2, format_y_n2)
+
+                _log_diagnostico_basileia_scatter(df_p1, var_x_n2, 'x_display', periodo_inicial, 't=2/p1/x')
+                _log_diagnostico_basileia_scatter(df_p1, var_y_n2, 'y_display', periodo_inicial, 't=2/p1/y')
+                _log_diagnostico_basileia_scatter(df_p2, var_x_n2, 'x_display', periodo_subseq, 't=2/p2/x')
+                _log_diagnostico_basileia_scatter(df_p2, var_y_n2, 'y_display', periodo_subseq, 't=2/p2/y')
 
                 # Tamanho dos pontos
                 if var_size_n2 != 'Tamanho Fixo':
