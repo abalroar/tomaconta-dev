@@ -12,6 +12,11 @@ data/cache_info.txt
 data/capital_cache.pkl
 data/capital_cache_info.txt
 
+# Cache parquet (baixado em runtime)
+data/cache/*/dados.parquet
+data/cache/*/metadata.json
+data/cache/data/
+
 # Logs de extração
 data/logs/
 
