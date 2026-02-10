@@ -19,3 +19,9 @@
 ### Risco
 
 - Baixo: mudança aditiva (sem alterar fórmulas ativas nas abas).
+
+
+## Ajuste pós-review
+
+- Removida dependência de `pandas` em `metric_registry.py` (validação agora aceita interface estrutural `empty/columns`).
+- Testes de `tests/test_metric_registry.py` reescritos para usar `FakeDataFrame`, permitindo execução em ambiente mínimo.

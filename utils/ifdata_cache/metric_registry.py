@@ -2,25 +2,36 @@
 metric_registry.py - Registro central de métricas e contratos de dados.
 
 Objetivo:
-- Definir um único catálogo com metadados de métricas (fórmula, unidade, escala interna,
-  anualização e formatação sugerida para UI).
+- Definir um catálogo único com metadados de métricas (fórmula, unidade,
+  escala interna, anualização e formatação sugerida para UI).
 - Definir contratos mínimos de datasets curados para validação estrutural.
 
 Observação:
-- Este módulo não altera os cálculos atuais do app.
+- Este módulo é leve e não depende de pandas em runtime.
 - Escala interna recomendada para percentuais: decimal (0-1).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Literal
-
-import pandas as pd
+from typing import Dict, List, Optional, Literal, Protocol, runtime_checkable, Any
 
 
 ScaleType = Literal["decimal_0_1", "percent_0_100", "currency_brl", "count", "ratio", "raw"]
 DatasetLayer = Literal["raw", "staging", "curated"]
+
+
+@runtime_checkable
+class DataFrameLike(Protocol):
+    """Contrato mínimo para validação estrutural sem acoplamento ao pandas."""
+
+    @property
+    def empty(self) -> bool:  # pragma: no cover - tipagem estrutural
+        ...
+
+    @property
+    def columns(self) -> Any:  # pragma: no cover - tipagem estrutural
+        ...
 
 
 @dataclass(frozen=True)
@@ -197,13 +208,17 @@ def get_dataset_contracts() -> Dict[str, DatasetContract]:
     return dict(DATASET_CONTRACTS)
 
 
-def validate_dataset_contract(df: pd.DataFrame, contract: DatasetContract) -> List[str]:
-    """Valida DataFrame contra contrato e retorna lista de erros."""
+def validate_dataset_contract(df: Optional[DataFrameLike], contract: DatasetContract) -> List[str]:
+    """Valida estrutura de dataset (colunas/chaves) contra um contrato."""
     errors: List[str] = []
 
     if df is None:
         return [f"{contract.name}: dataframe ausente"]
-    if df.empty:
+
+    if not hasattr(df, "empty") or not hasattr(df, "columns"):
+        return [f"{contract.name}: objeto sem interface de dataframe (empty/columns)"]
+
+    if bool(df.empty):
         return [f"{contract.name}: dataframe vazio"]
 
     cols = set(df.columns)
@@ -218,8 +233,8 @@ def validate_dataset_contract(df: pd.DataFrame, contract: DatasetContract) -> Li
     return errors
 
 
-def validate_dataframe_by_contract_name(df: pd.DataFrame, contract_name: str) -> List[str]:
-    """Valida DataFrame usando nome de contrato registrado."""
+def validate_dataframe_by_contract_name(df: Optional[DataFrameLike], contract_name: str) -> List[str]:
+    """Valida dataset usando nome de contrato registrado."""
     contract = DATASET_CONTRACTS.get(contract_name)
     if contract is None:
         return [f"Contrato desconhecido: {contract_name}"]

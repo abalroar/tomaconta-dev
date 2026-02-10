@@ -1,11 +1,25 @@
-import pandas as pd
+import importlib.util
+from pathlib import Path
 
-from utils.ifdata_cache.metric_registry import (
-    METRIC_REGISTRY,
-    DATASET_CONTRACTS,
-    get_metric_definition,
-    validate_dataframe_by_contract_name,
-)
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "utils" / "ifdata_cache" / "metric_registry.py"
+spec = importlib.util.spec_from_file_location("metric_registry", MODULE_PATH)
+metric_registry = importlib.util.module_from_spec(spec)
+assert spec is not None and spec.loader is not None
+import sys
+sys.modules["metric_registry"] = metric_registry
+spec.loader.exec_module(metric_registry)
+
+METRIC_REGISTRY = metric_registry.METRIC_REGISTRY
+DATASET_CONTRACTS = metric_registry.DATASET_CONTRACTS
+get_metric_definition = metric_registry.get_metric_definition
+validate_dataframe_by_contract_name = metric_registry.validate_dataframe_by_contract_name
+
+
+class FakeDataFrame:
+    def __init__(self, columns, empty=False):
+        self.columns = columns
+        self.empty = empty
 
 
 def test_registry_has_core_metrics():
@@ -23,26 +37,20 @@ def test_metric_definition_scale_is_decimal_for_pct_metrics():
 
 def test_dataset_contract_validation_ok():
     contract = DATASET_CONTRACTS["derived_metrics_long"]
-    df = pd.DataFrame(
-        {
-            "Instituição": ["Banco A"],
-            "Período": ["1/2025"],
-            "Métrica": ["Desp Captação / Captação"],
-            "Valor": [0.2],
-            "Unidade": ["pct"],
-        }
+    df = FakeDataFrame(
+        columns=["Instituição", "Período", "Métrica", "Valor", "Unidade"],
+        empty=False,
     )
     errors = validate_dataframe_by_contract_name(df, contract.name)
     assert errors == []
 
 
 def test_dataset_contract_validation_missing_column():
-    df = pd.DataFrame(
-        {
-            "Instituição": ["Banco A"],
-            "Período": ["1/2025"],
-            "Valor": [0.2],
-        }
-    )
+    df = FakeDataFrame(columns=["Instituição", "Período", "Valor"], empty=False)
     errors = validate_dataframe_by_contract_name(df, "derived_metrics_long")
     assert any("coluna obrigatória ausente" in e for e in errors)
+
+
+def test_dataset_contract_validation_invalid_object():
+    errors = validate_dataframe_by_contract_name(object(), "derived_metrics_long")
+    assert any("interface de dataframe" in e for e in errors)
