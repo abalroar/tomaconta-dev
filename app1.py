@@ -1914,7 +1914,7 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     out["_tri_tmp"] = pd.to_numeric(periodo_split[0], errors="coerce")
     out["_ano_tmp"] = pd.to_numeric(periodo_split[1], errors="coerce")
 
-    for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False).groups.items():
+    for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False, observed=False).groups.items():
         g = out.loc[idx].copy().sort_values("_tri_tmp")
         raw_map = g.set_index("_tri_tmp")[col_ll].to_dict()
 
@@ -6707,7 +6707,7 @@ elif menu == "DRE":
             lambda x: pd.Series(parse_periodo(x))
         )
         df["ytd"] = pd.NA
-        for (instituicao, label, ano), grupo in df.groupby(["Instituicao", "Label", "ano"]):
+        for (instituicao, label, ano), grupo in df.groupby(["Instituicao", "Label", "ano"], observed=False):
             valores_mes = {row["mes"]: row["valor"] for _, row in grupo.iterrows()}
             for idx, row in grupo.iterrows():
                 mes = row["mes"]
@@ -6731,7 +6731,7 @@ elif menu == "DRE":
     def compute_yoy(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df["yoy"] = pd.NA
-        for (instituicao, label, mes), grupo in df.groupby(["Instituicao", "Label", "mes"]):
+        for (instituicao, label, mes), grupo in df.groupby(["Instituicao", "Label", "mes"], observed=False):
             valores_ano = {
                 row["ano"]: row["ytd"]
                 for _, row in grupo.iterrows()
@@ -7839,7 +7839,7 @@ elif menu == "Taxas de Juros por Produto":
             df['AnoMes'] = df['Fim Período'].dt.to_period('M')
 
             # Para cada combinação (Segmento, Produto, Instituição, AnoMes), pegar a última data
-            idx = df.groupby(['Segmento', 'Produto', 'Instituição Financeira', 'AnoMes'])['Fim Período'].idxmax()
+            idx = df.groupby(['Segmento', 'Produto', 'Instituição Financeira', 'AnoMes'], observed=False)['Fim Período'].idxmax()
             df_mensal = df.loc[idx].copy()
 
             # Criar coluna de data formatada para o gráfico

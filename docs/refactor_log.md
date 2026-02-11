@@ -72,3 +72,8 @@
 
 - Adicionado `_get_slice_cache_for_peers_fn()` para resolver dinamicamente o recorte de peers com fallback defensivo.
 - Evita `NameError` em cenários de deploy parcial/misto, mantendo o recorte por banco/período no fluxo da aba.
+
+
+## Warnings de groupby (pandas futuro)
+
+- Definido `observed=False` explicitamente nos `groupby` com categorias para silenciar `FutureWarning` e estabilizar comportamento entre versões de pandas.
