@@ -39,3 +39,10 @@
 - Substituído lookup O(n) por célula (`df[(inst)&(periodo)]`) por índice em memória `(Instituição, Período) -> row` com cache em `df.attrs`.
 - Adicionado recorte prévio dos caches extras por bancos/períodos selecionados antes de montar a tabela peers.
 - Objetivo: reduzir drasticamente tempo da aba com múltiplos bancos (ex.: 15 bancos).
+
+
+## Leitura filtrada no cache (Parquet)
+
+- Adicionada função `_carregar_cache_relatorio_slice` para carregar recortes por período/instituição direto do arquivo de cache (com `pyarrow.dataset` quando disponível).
+- A aba **Peers (Tabela)** passou a carregar `ativo/passivo/carteiras/dre/capital` já filtrados, reduzindo I/O e memória antes do cálculo.
+- Fallback preservado: se filtro parquet falhar, carrega e filtra em pandas.

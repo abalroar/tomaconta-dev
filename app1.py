@@ -2017,26 +2017,6 @@ def _somar_valores(valores: list) -> Optional[float]:
 
 
 
-def _slice_cache_for_peers(
-    df: Optional[pd.DataFrame],
-    bancos: Optional[list] = None,
-    periodos: Optional[list] = None,
-) -> Optional[pd.DataFrame]:
-    """Recorta cache para peers (bancos/períodos) e reduz custo de varredura."""
-    if df is None or df.empty:
-        return df
-    if "Instituição" not in df.columns or "Período" not in df.columns:
-        return df
-
-    mask = pd.Series(True, index=df.index)
-    if bancos:
-        mask &= df["Instituição"].isin(bancos)
-    if periodos:
-        mask &= df["Período"].isin(periodos)
-
-    # Retorna cópia para permitir attrs de lookup sem side-effects externos.
-    return df.loc[mask].copy()
-
 def _aplicar_aliases_df(df: Optional[pd.DataFrame], dict_aliases: dict) -> Optional[pd.DataFrame]:
     if df is None or df.empty or not dict_aliases:
         return df
@@ -2058,6 +2038,55 @@ def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
     if resultado.sucesso and resultado.dados is not None:
         return resultado.dados
     return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_cache_relatorio_slice(
+    tipo_cache: str,
+    cache_token: str,
+    periodos: tuple = (),
+    instituicoes: tuple = (),
+) -> Optional[pd.DataFrame]:
+    """Carrega recorte de cache por período/instituição para reduzir I/O e RAM."""
+    manager = get_cache_manager()
+    if manager is None:
+        return None
+
+    cache = manager.get_cache(tipo_cache)
+    if cache is None:
+        return None
+
+    periodos = tuple(periodos or ())
+    instituicoes = tuple(instituicoes or ())
+
+    # Caminho rápido: parquet com filtro no reader
+    if cache.arquivo_dados.exists():
+        try:
+            import pyarrow.dataset as ds
+            dataset = ds.dataset(cache.arquivo_dados)
+            filtro = None
+            if periodos:
+                f = ds.field("Período").isin(list(periodos))
+                filtro = f if filtro is None else filtro & f
+            if instituicoes:
+                f = ds.field("Instituição").isin(list(instituicoes))
+                filtro = f if filtro is None else filtro & f
+            tabela = dataset.to_table(filter=filtro) if filtro is not None else dataset.to_table()
+            return tabela.to_pandas()
+        except Exception:
+            pass
+
+    # Fallback: carregar e filtrar em pandas
+    resultado = manager.carregar(tipo_cache)
+    if not resultado.sucesso or resultado.dados is None:
+        return None
+
+    df = resultado.dados
+    if periodos and "Período" in df.columns:
+        df = df[df["Período"].isin(periodos)]
+    if instituicoes and "Instituição" in df.columns:
+        df = df[df["Instituição"].isin(instituicoes)]
+    return df
 
 
 def _preparar_metricas_extra_peers(
@@ -4748,13 +4777,18 @@ elif menu == "Peers (Tabela)":
 
                 if bancos_selecionados and periodos_selecionados:
                     periodos_selecionados = ordenar_periodos(periodos_selecionados, reverso=True)
-                    cache_ativo = _carregar_cache_relatorio("ativo")
-                    cache_passivo = _carregar_cache_relatorio("passivo")
-                    cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
-                    cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
-                    cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
-                    cache_dre = _carregar_cache_relatorio("dre")
-                    cache_capital = _carregar_cache_relatorio("capital")
+                    periodos_base_peers = {_periodo_ano_anterior(p) for p in periodos_selecionados}
+                    periodos_ext_peers = tuple(sorted({p for p in (periodos_selecionados + sorted(periodos_base_peers)) if p}))
+                    bancos_tuple = tuple(bancos_selecionados)
+
+                    # Carregamento já recortado no nível do cache (evita ler dataset inteiro)
+                    cache_ativo = _carregar_cache_relatorio_slice("ativo", _cache_version_token("ativo"), periodos_ext_peers, bancos_tuple)
+                    cache_passivo = _carregar_cache_relatorio_slice("passivo", _cache_version_token("passivo"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_pf = _carregar_cache_relatorio_slice("carteira_pf", _cache_version_token("carteira_pf"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_pj = _carregar_cache_relatorio_slice("carteira_pj", _cache_version_token("carteira_pj"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_instr = _carregar_cache_relatorio_slice("carteira_instrumentos", _cache_version_token("carteira_instrumentos"), periodos_ext_peers, bancos_tuple)
+                    cache_dre = _carregar_cache_relatorio_slice("dre", _cache_version_token("dre"), periodos_ext_peers, bancos_tuple)
+                    cache_capital = _carregar_cache_relatorio_slice("capital", _cache_version_token("capital"), periodos_ext_peers, bancos_tuple)
 
                     cache_ativo = _aplicar_aliases_df(cache_ativo, dict_aliases)
                     cache_passivo = _aplicar_aliases_df(cache_passivo, dict_aliases)
