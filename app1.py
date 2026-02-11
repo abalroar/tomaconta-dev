@@ -6707,7 +6707,7 @@ elif menu == "Rankings":
 
 elif menu == "DRE":
     st.markdown("### Demonstração de Resultado (DRE)")
-    st.caption("Tabela DRE a partir de Mar/25, com marcadores de crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior")
+    st.caption("Tabela DRE a partir de Mar/25, com marcadores ▲/▼ de crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior")
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_dre_data():
@@ -7205,6 +7205,33 @@ elif menu == "DRE":
             margin-left: 6px;
             cursor: help;
         }
+        .dre-cell.has-tip {
+            position: relative;
+            cursor: help;
+        }
+        .dre-cell .tip-text {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: #fff;
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: normal;
+            z-index: 9999;
+            min-width: 220px;
+            max-width: 360px;
+            text-align: left;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            pointer-events: none;
+            line-height: 1.5;
+        }
+        .dre-cell.has-tip:hover .tip-text {
+            display: block;
+        }
         .dre-subitem {
             font-size: 12px;
         }
@@ -7213,6 +7240,16 @@ elif menu == "DRE":
         }
         .dre-negative {
             color: #7a1e2b;
+            font-weight: 600;
+        }
+        .dre-delta-up {
+            color: #28a745;
+            margin-left: 4px;
+            font-weight: 600;
+        }
+        .dre-delta-down {
+            color: #dc3545;
+            margin-left: 4px;
             font-weight: 600;
         }
         </style>
@@ -7233,16 +7270,23 @@ elif menu == "DRE":
             label = entry["label"]
             label_exib = entry.get("label_exib", label)
             tooltip = tooltip_por_label.get(label, "")
-            info_html = f'<span class="dre-info" title="{tooltip}">ⓘ</span>' if tooltip else ""
+            if tooltip:
+                tip_html = _html_mod.escape(str(tooltip)).replace("\n", "<br>")
+                info_html = f'<span class="dre-info">ⓘ</span><span class="tip-text">{tip_html}</span>'
+            else:
+                info_html = ""
             row_class = "dre-subitem" if entry.get("is_child") else ""
-            html_tabela += f"<tr class=\"{row_class}\"><td>{label_exib} {info_html}</td>"
+            label_cell_class = "dre-cell has-tip" if tooltip else "dre-cell"
+            html_tabela += f"<tr class=\"{row_class}\"><td class=\"{label_cell_class}\">{label_exib} {info_html}</td>"
             linha = df_linhas[df_linhas["Label"] == label]
             for periodo in periodos:
                 cell = linha[linha["PeriodoExib"] == periodo]
                 if not cell.empty:
                     ytd_val = cell["ytd"].iloc[0]
+                    yoy_val = pd.to_numeric(cell["yoy"].iloc[0], errors="coerce")
                 else:
                     ytd_val = pd.NA
+                    yoy_val = pd.NA
                 formato = formato_por_label.get(label, "num")
                 if formato == "pct":
                     ytd_fmt = formatar_percentual(ytd_val, decimais=2)
@@ -7251,7 +7295,13 @@ elif menu == "DRE":
                     ytd_fmt = formatar_valor_br(ytd_val)
                     ytd_neg = pd.notna(ytd_val) and ytd_val < 0
                 ytd_span = f"<span class=\"dre-negative\">{ytd_fmt}</span>" if ytd_neg else ytd_fmt
-                html_tabela += f"<td>{ytd_span}</td>"
+                marcador = ""
+                if pd.notna(yoy_val):
+                    if yoy_val > 0:
+                        marcador = '<span class="dre-delta-up">▲</span>'
+                    elif yoy_val < 0:
+                        marcador = '<span class="dre-delta-down">▼</span>'
+                html_tabela += f"<td>{ytd_span}{marcador}</td>"
             html_tabela += "</tr>"
 
         html_tabela += "</tbody></table></div>"
@@ -7283,8 +7333,25 @@ elif menu == "DRE":
         mapping_entries = load_dre_mapping()
         instit_col = "Instituicao"
         _dict_aliases_dre = st.session_state.get('dict_aliases', {})
+
+        def _alias_instituicao_dre(nome):
+            if pd.isna(nome):
+                return nome
+            nome_str = str(nome).strip()
+            if not _dict_aliases_dre:
+                return nome_str
+            nome_norm = normalizar_nome_instituicao(nome_str)
+            return _dict_aliases_dre.get(nome_str, _dict_aliases_dre.get(nome_norm, nome_str))
+
+        df_base = df_base.copy()
+        df_ytd_base = df_ytd_base.copy()
+        df_base[instit_col] = df_base[instit_col].astype(str).str.strip()
+        df_ytd_base[instit_col] = df_ytd_base[instit_col].astype(str).str.strip()
+        df_base["InstituicaoExib"] = df_base[instit_col].apply(_alias_instituicao_dre)
+        df_ytd_base["InstituicaoExib"] = df_ytd_base[instit_col].apply(_alias_instituicao_dre)
+
         instituicoes = ordenar_bancos_com_alias(
-            df_base[instit_col].dropna().unique().tolist(), _dict_aliases_dre
+            df_base["InstituicaoExib"].dropna().unique().tolist(), _dict_aliases_dre
         )
         anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
 
@@ -7337,7 +7404,7 @@ elif menu == "DRE":
             entradas_com_label.append(entrada_copy)
 
         df_filtrado = df_ytd_base[
-            (df_ytd_base["Instituicao"] == instituicao_selecionada)
+            (df_ytd_base["InstituicaoExib"] == instituicao_selecionada)
             & (df_ytd_base["ano"] == int(ano_selecionado))
         ].copy()
 
@@ -7358,12 +7425,14 @@ elif menu == "DRE":
             df_derived_slice = df_derived_slice.rename(
                 columns={"Métrica": "Label", "Valor": "valor", "Instituição": "Instituicao", "Período": "Periodo"}
             )
+            df_derived_slice["Instituicao"] = df_derived_slice["Instituicao"].astype(str).str.strip()
+            df_derived_slice["InstituicaoExib"] = df_derived_slice["Instituicao"].apply(_alias_instituicao_dre)
             df_derived_slice["Periodo"] = df_derived_slice["Periodo"].astype(str)
             df_derived_slice = compute_ytd_irregular(df_derived_slice)
             df_derived_slice = compute_yoy(df_derived_slice)
             df_derived_slice["PeriodoExib"] = df_derived_slice["Periodo"].apply(periodo_para_exibicao)
             df_derived_filtrado = df_derived_slice[
-                (df_derived_slice["Instituicao"] == instituicao_selecionada)
+                (df_derived_slice["InstituicaoExib"] == instituicao_selecionada)
                 & (df_derived_slice["ano"] == int(ano_selecionado))
             ].copy()
             df_filtrado = pd.concat([df_filtrado, df_derived_filtrado], ignore_index=True)
@@ -7373,10 +7442,18 @@ elif menu == "DRE":
             diag_info["derived_slice_rows"] = len(df_derived_slice)
             diag_info["derived_load_s"] = round(tempo_derived, 3)
 
-        periodos_disponiveis = [
-            periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}")
-            for mes in [9, 6, 3, 12]
-        ]
+        meses_com_publicacao = (
+            df_filtrado.loc[df_filtrado["ytd"].notna(), "mes"]
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+        )
+        meses_ordenados = sorted([m for m in meses_com_publicacao if m in [3, 6, 9, 12]], reverse=True)
+        periodos_disponiveis = [periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}") for mes in meses_ordenados]
+        if not periodos_disponiveis:
+            st.warning("Não há períodos publicados para os filtros selecionados.")
+            st.stop()
 
         render_table_like_carteira_4966(
             df_filtrado,
@@ -7408,34 +7485,58 @@ elif menu == "DRE":
                 st.caption(f"Linhas recorte derivado: {diag_info.get('derived_slice_rows', 0)}")
                 st.caption(f"Tempo recorte derivado: {diag_info.get('derived_load_s', 0):.3f}s")
 
-        st.markdown("#### Exportar DRE (formato simples)")
-        df_export = []
-        for entry in entradas_com_label:
-            label = entry["label"]
-            linha = {"Item": label}
-            for periodo in periodos_disponiveis:
-                cell = df_filtrado[
-                    (df_filtrado["Label"] == label)
-                    & (df_filtrado["PeriodoExib"] == periodo)
-                ]
-                if not cell.empty:
-                    ytd_val = cell["ytd"].iloc[0]
-                else:
-                    ytd_val = pd.NA
-                linha[f"{periodo} YTD"] = ytd_val
-            df_export.append(linha)
-
-        df_export = pd.DataFrame(df_export)
+        st.markdown("#### Exportar DRE (layout da tabela)")
         buffer_excel = BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
-            df_export.to_excel(writer, index=False, sheet_name="DRE")
-            worksheet = writer.sheets["DRE"]
-            for idx, col in enumerate(df_export.columns):
-                max_len = max(
-                    len(str(col)),
-                    df_export[col].astype(str).map(len).max()
-                )
-                worksheet.set_column(idx, idx, min(max_len + 2, 40))
+            workbook = writer.book
+            worksheet = workbook.add_worksheet("DRE")
+            writer.sheets["DRE"] = worksheet
+
+            fmt_head_dark = workbook.add_format({"bold": True, "font_color": "white", "bg_color": "#4a4a4a", "align": "center", "valign": "vcenter", "border": 1})
+            fmt_head_mid = workbook.add_format({"bold": True, "font_color": "white", "bg_color": "#6a6a6a", "align": "center", "valign": "vcenter", "border": 1})
+            fmt_item = workbook.add_format({"align": "left", "valign": "vcenter", "border": 1})
+            fmt_item_child = workbook.add_format({"align": "left", "valign": "vcenter", "border": 1, "indent": 1})
+            fmt_num = workbook.add_format({"align": "right", "valign": "vcenter", "border": 1, "num_format": "#,##0"})
+            fmt_pct = workbook.add_format({"align": "right", "valign": "vcenter", "border": 1, "num_format": "0.00%"})
+
+            worksheet.merge_range(0, 0, 1, 0, "Item", fmt_head_dark)
+            for idx, periodo in enumerate(periodos_disponiveis):
+                col_idx = 1 + idx
+                worksheet.write(0, col_idx, periodo, fmt_head_dark)
+                worksheet.write(1, col_idx, "YTD", fmt_head_mid)
+
+            row_idx = 2
+            for entry in entradas_com_label:
+                label = entry["label"]
+                worksheet.write(row_idx, 0, entry.get("label_exib", label), fmt_item_child if entry.get("is_child") else fmt_item)
+                for idx, periodo in enumerate(periodos_disponiveis):
+                    cell = df_filtrado[
+                        (df_filtrado["Label"] == label)
+                        & (df_filtrado["PeriodoExib"] == periodo)
+                    ]
+                    valor = pd.NA
+                    yoy_val = pd.NA
+                    if not cell.empty:
+                        valor = cell["ytd"].iloc[0]
+                        yoy_val = pd.to_numeric(cell["yoy"].iloc[0], errors="coerce")
+
+                    if pd.isna(valor):
+                        worksheet.write_blank(row_idx, 1 + idx, None, fmt_num)
+                        continue
+
+                    formato = formato_por_label.get(label, "num")
+                    base_fmt = fmt_pct if formato == "pct" else fmt_num
+                    if pd.notna(yoy_val):
+                        marcador = "▲" if yoy_val > 0 else "▼" if yoy_val < 0 else ""
+                        valor_exib = formatar_percentual(valor, decimais=2) if formato == "pct" else formatar_valor_br(valor)
+                        worksheet.write(row_idx, 1 + idx, f"{valor_exib} {marcador}".strip(), base_fmt)
+                    else:
+                        worksheet.write_number(row_idx, 1 + idx, float(valor), base_fmt)
+                row_idx += 1
+
+            worksheet.set_column(0, 0, 52)
+            worksheet.set_column(1, len(periodos_disponiveis), 16)
+            worksheet.freeze_panes(2, 1)
         buffer_excel.seek(0)
 
         st.download_button(
