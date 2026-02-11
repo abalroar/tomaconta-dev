@@ -59,3 +59,10 @@
 
 - Reintroduzido `_slice_cache_for_peers` como shim de compatibilidade para evitar quebra em deployments com código parcial (erro `NameError`).
 - Mantida lógica de recorte por `Instituição`/`Período` sem impacto na semântica dos indicadores.
+
+
+## Export PNG no Ranking
+
+- Adicionado utilitário `_plotly_fig_to_png_bytes` para converter figuras Plotly em PNG.
+- Incluído botão de exportação PNG no ranking geral e no ranking de Basileia (capital).
+- Fallback amigável quando engine de imagem não estiver disponível no ambiente.

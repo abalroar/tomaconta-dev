@@ -3319,6 +3319,17 @@ def _carregar_logo_base64(logo_path: str, target_width: int = 200) -> str:
 
 
 @st.cache_data(show_spinner=False)
+def _plotly_fig_to_png_bytes(fig, width: int = 1600, height: int = 900, scale: int = 2) -> Optional[bytes]:
+    """Converte figura Plotly para PNG (retorna None se dependência indisponível)."""
+    if fig is None:
+        return None
+    try:
+        import plotly.io as pio
+        return pio.to_image(fig, format="png", width=width, height=height, scale=scale)
+    except Exception:
+        return None
+
+
 def _get_dados_concatenados(periodos_hash: str, dados_keys: tuple) -> pd.DataFrame:
     """Concatena todos os DataFrames de períodos uma única vez.
 
@@ -5693,6 +5704,18 @@ elif menu == "Rankings":
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key="exportar_resumo_excel_basileia"
                                 )
+
+                                png_bytes = _plotly_fig_to_png_bytes(fig_basileia)
+                                if png_bytes:
+                                    st.download_button(
+                                        label="exportar gráfico PNG",
+                                        data=png_bytes,
+                                        file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.png",
+                                        mime="image/png",
+                                        key="exportar_grafico_png_basileia"
+                                    )
+                                else:
+                                    st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
                 else:
                     if df_selecionado.empty:
                         st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
@@ -5835,6 +5858,18 @@ elif menu == "Rankings":
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key="exportar_resumo_excel"
                             )
+
+                            png_bytes = _plotly_fig_to_png_bytes(fig_resumo)
+                            if png_bytes:
+                                st.download_button(
+                                    label="exportar gráfico PNG",
+                                    data=png_bytes,
+                                    file_name=f"ranking_{periodo_resumo.replace('/', '-')}.png",
+                                    mime="image/png",
+                                    key="exportar_grafico_png_ranking"
+                                )
+                            else:
+                                st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
 
             if grafico_base == "Deltas (antes e depois)":
                 st.markdown("---")
