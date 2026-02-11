@@ -1613,6 +1613,47 @@ def _normalizar_indice_para_decimal(serie: pd.Series) -> pd.Series:
     return serie_num
 
 
+
+
+def _ajustar_basileia_para_scatter(df: pd.DataFrame) -> pd.DataFrame:
+    """Ajuste específico da aba Scatter para evitar dupla divisão por 100.
+
+    Regras:
+    - Se vier em 0-100, converte para decimal (0-1).
+    - Se aparentar já ter sido dividido duas vezes (ex.: 0.00165 para 16.5%),
+      reescala para decimal correto multiplicando por 100.
+
+    Observação: ajuste aplicado apenas para o uso da coluna canônica
+    ``Índice de Basileia`` no Scatter.
+    """
+    if df is None or df.empty or "Índice de Basileia" not in df.columns:
+        return df
+
+    df_out = df.copy()
+    serie = pd.to_numeric(df_out["Índice de Basileia"], errors="coerce")
+
+    # 1) Normalização padrão para decimal (0-1)
+    mask_0_100 = serie.abs() > 1
+    if mask_0_100.any():
+        serie = serie.copy()
+        serie.loc[mask_0_100] = serie.loc[mask_0_100] / 100
+
+    # 2) Correção excepcional: provável dupla divisão por 100
+    #    Cenário típico do bug: 0.00165 (deveria 0.165)
+    serie_valid = serie.dropna().abs()
+    if not serie_valid.empty:
+        q95 = float(serie_valid.quantile(0.95))
+        med = float(serie_valid.median())
+        # Se praticamente toda a distribuição está abaixo de 3%,
+        # assume erro de dupla divisão e corrige para base decimal correta.
+        if q95 < 0.03 and med < 0.02:
+            serie = serie * 100
+            print(f"[DIAG][SCATTER][BASILEIA] Reescala aplicada (dupla divisão detectada): med={med:.6f}, q95={q95:.6f}")
+
+    # mantém somente valores positivos plausíveis (sem truncar extremos altos)
+    df_out["Índice de Basileia"] = serie
+    return df_out
+
 def _log_diagnostico_basileia_scatter(
     df_base: pd.DataFrame,
     eixo_variavel: str,
@@ -5023,6 +5064,7 @@ elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = _garantir_indice_basileia_coluna(df)
+        df = _ajustar_basileia_para_scatter(df)
 
         colunas_base = [
             col for col in df.columns
