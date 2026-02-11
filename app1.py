@@ -7069,7 +7069,14 @@ elif menu == "DRE":
         except Exception:
             return "—"
 
-    def render_table_like_carteira_4966(df_linhas: pd.DataFrame, entradas: list, periodos: list, formato_por_label: dict, tooltip_por_label: dict):
+    def render_table_like_carteira_4966(
+        df_linhas: pd.DataFrame,
+        entradas: list,
+        periodos: list,
+        formato_por_label: dict,
+        tooltip_por_label: dict,
+        tooltip_celula: Optional[dict] = None,
+    ):
         html_tabela = """
         <style>
         .carteira-table {
@@ -7208,7 +7215,12 @@ elif menu == "DRE":
                         marcador = '<span class="dre-delta-up">▲</span>'
                     elif yoy_val < 0:
                         marcador = '<span class="dre-delta-down">▼</span>'
-                html_tabela += f"<td>{ytd_span}{marcador}</td>"
+                tip_celula = (tooltip_celula or {}).get((label, periodo), "") if tooltip_celula else ""
+                if tip_celula:
+                    tip_celula_html = _html_mod.escape(str(tip_celula)).replace("\n", "<br>")
+                    html_tabela += f'<td class="dre-cell has-tip">{ytd_span}{marcador}<span class="tip-text">{tip_celula_html}</span></td>'
+                else:
+                    html_tabela += f"<td>{ytd_span}{marcador}</td>"
             html_tabela += "</tr>"
 
         html_tabela += "</tbody></table></div>"
@@ -7266,11 +7278,16 @@ elif menu == "DRE":
         _instituicoes_principal = set()
         _dados_periodos_dre = st.session_state.get('dados_periodos', {})
         for _df_p in _dados_periodos_dre.values():
-            if _df_p is not None and "Instituição" in _df_p.columns:
-                _instituicoes_principal.update(
-                    _df_p["Instituição"].dropna().unique().tolist()
-                )
-        _instituicoes_combinadas = _instituicoes_dre_raw | _instituicoes_principal
+            if _df_p is None:
+                continue
+            for _col_inst in ["Instituição", "Instituicao", "Instituição Financeira", "IF"]:
+                if _col_inst in _df_p.columns:
+                    _instituicoes_principal.update(
+                        _df_p[_col_inst].dropna().astype(str).str.strip().tolist()
+                    )
+        _instituicoes_combinadas = {
+            str(_inst).strip() for _inst in (_instituicoes_dre_raw | _instituicoes_principal) if str(_inst).strip()
+        }
         instituicoes_raw = ordenar_bancos_com_alias(
             list(_instituicoes_combinadas), _dict_aliases_dre
         )
@@ -7319,10 +7336,20 @@ elif menu == "DRE":
         instituicao_selecionada = _formatar_opcao_instituicao_dre(instituicao_selecionada_raw)
         instituicao_alias_selecionada = _alias_instituicao_dre(instituicao_selecionada_raw)
 
-        formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries}
+        # Exibir ratios no final da tabela (sem quebrar a ordem dos demais itens)
+        _labels_ratio_dre = {
+            "Desp PDD / NIM bruta",
+            "Desp PDD / Resultado Intermediação Fin. Bruto",
+            "Desp Captação / Captação",
+        }
+        mapping_entries_ordenado = [e for e in mapping_entries if e.get("label") not in _labels_ratio_dre] + [
+            e for e in mapping_entries if e.get("label") in _labels_ratio_dre
+        ]
+
+        formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries_ordenado}
         tooltip_por_label = {}
         entradas_com_label = []
-        for entry in mapping_entries:
+        for entry in mapping_entries_ordenado:
             fonte_original = entry.get("original_label")
             fontes = [fonte_original] if fonte_original else entry.get("sources", [])
             fontes_fmt = ", ".join([f for f in fontes if f])
@@ -7364,6 +7391,8 @@ elif menu == "DRE":
         )
         tempo_derived = _perf_end("dre_derived_load")
 
+        tooltip_celula = {}
+
         if not df_derived_slice.empty:
             df_derived_slice = df_derived_slice.rename(
                 columns={"Métrica": "Label", "Valor": "valor", "Instituição": "Instituicao", "Período": "Periodo"}
@@ -7375,6 +7404,85 @@ elif menu == "DRE":
             df_derived_slice = compute_ytd_irregular(df_derived_slice)
             df_derived_slice = compute_yoy(df_derived_slice)
             df_derived_slice["PeriodoExib"] = df_derived_slice["Periodo"].apply(periodo_para_exibicao)
+
+            _colunas_calculo = [
+                "Resultado com Perda Esperada (f)",
+                "Rendas de Operações de Crédito (c)",
+                "Rendas de Arrendamento Financeiro (d)",
+                "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
+                "Rendas de Aplicações Interfinanceiras de Liquidez (a)",
+                "Rendas de Títulos e Valores Mobiliários (b)",
+                "Despesas de Captações (g)",
+            ]
+            _df_calc_base = df_base[
+                (df_base["InstituicaoRaw"] == instituicao_selecionada_raw)
+                & (df_base["ano"] == int(ano_selecionado))
+            ].copy()
+            if not _df_calc_base.empty:
+                _df_calc_base["Periodo"] = _df_calc_base["Periodo"].astype(str)
+                _df_calc_base["PeriodoExib"] = _df_calc_base["Periodo"].apply(periodo_para_exibicao)
+                _cols_existentes = [c for c in _colunas_calculo if c in _df_calc_base.columns]
+                for _col in _cols_existentes:
+                    _df_calc_base[_col] = pd.to_numeric(_df_calc_base[_col], errors="coerce")
+
+                def _fmt_mm_tip(_v):
+                    if pd.isna(_v):
+                        return "—"
+                    return formatar_valor_br(_v)
+
+                for _, _r in _df_calc_base.iterrows():
+                    _periodo_exib = _r.get("PeriodoExib")
+                    if not _periodo_exib:
+                        continue
+                    _mes_periodo = _r.get("mes", pd.NA)
+                    _mes_periodo = int(_mes_periodo) if pd.notna(_mes_periodo) and _mes_periodo else None
+                    _fator_anual = (12 / _mes_periodo) if _mes_periodo else None
+
+                    _desp_pdd = pd.to_numeric(_r.get("Resultado com Perda Esperada (f)"), errors="coerce")
+                    _rec_cred = pd.to_numeric(_r.get("Rendas de Operações de Crédito (c)"), errors="coerce")
+                    _rec_arr = pd.to_numeric(_r.get("Rendas de Arrendamento Financeiro (d)"), errors="coerce")
+                    _rec_out = pd.to_numeric(_r.get("Rendas de Outras Operações com Características de Concessão de Crédito (e)"), errors="coerce")
+                    _rec_liq = pd.to_numeric(_r.get("Rendas de Aplicações Interfinanceiras de Liquidez (a)"), errors="coerce")
+                    _rec_tvm = pd.to_numeric(_r.get("Rendas de Títulos e Valores Mobiliários (b)"), errors="coerce")
+                    _desp_capt = pd.to_numeric(_r.get("Despesas de Captações (g)"), errors="coerce")
+
+                    _nim = _rec_cred + _rec_arr + _rec_out if pd.notna(_rec_cred) and pd.notna(_rec_arr) and pd.notna(_rec_out) else pd.NA
+                    _interm = _rec_liq + _rec_tvm + _rec_cred + _rec_arr + _rec_out if all(pd.notna(v) for v in [_rec_liq, _rec_tvm, _rec_cred, _rec_arr, _rec_out]) else pd.NA
+                    _desp_capt_anual = _desp_capt * _fator_anual if pd.notna(_desp_capt) and _fator_anual else pd.NA
+
+                    _cap = pd.NA
+                    _per = _r.get("Periodo")
+                    if _per:
+                        _df_p = _dados_periodos_dre.get(_per)
+                        if _df_p is not None and not _df_p.empty and "Instituição" in _df_p.columns and "Captações" in _df_p.columns:
+                            _m_cap = _df_p[_df_p["Instituição"].astype(str).str.strip() == instituicao_selecionada_raw]
+                            if not _m_cap.empty:
+                                _cap = pd.to_numeric(_m_cap["Captações"], errors="coerce").iloc[0]
+
+                    _ratio_pdd_nim = (_desp_pdd / _nim) if pd.notna(_desp_pdd) and pd.notna(_nim) and _nim != 0 else pd.NA
+                    _ratio_pdd_interm = (_desp_pdd / _interm) if pd.notna(_desp_pdd) and pd.notna(_interm) and _interm != 0 else pd.NA
+                    _ratio_capt = (_desp_capt_anual / _cap) if pd.notna(_desp_capt_anual) and pd.notna(_cap) and _cap != 0 else pd.NA
+
+                    tooltip_celula[("Desp PDD / NIM bruta", _periodo_exib)] = (
+                        f"Memória de cálculo\n"
+                        f"Desp. PDD: {_fmt_mm_tip(_desp_pdd)}\n"
+                        f"NIM bruta = Rec. Crédito ({_fmt_mm_tip(_rec_cred)}) + Rec. Arrendamento ({_fmt_mm_tip(_rec_arr)}) + Rec. Outras Op. Crédito ({_fmt_mm_tip(_rec_out)}) = {_fmt_mm_tip(_nim)}\n"
+                        f"Desp PDD / NIM bruta = {_fmt_mm_tip(_desp_pdd)} ÷ {_fmt_mm_tip(_nim)} = {formatar_percentual(_ratio_pdd_nim, decimais=2)}"
+                    )
+                    tooltip_celula[("Desp PDD / Resultado Intermediação Fin. Bruto", _periodo_exib)] = (
+                        f"Memória de cálculo\n"
+                        f"Desp. PDD: {_fmt_mm_tip(_desp_pdd)}\n"
+                        f"Resultado Interm. Fin. Bruto = Rec. AIL ({_fmt_mm_tip(_rec_liq)}) + Rec. TVM ({_fmt_mm_tip(_rec_tvm)}) + Rec. Crédito ({_fmt_mm_tip(_rec_cred)}) + Rec. Arrendamento ({_fmt_mm_tip(_rec_arr)}) + Rec. Outras Op. Crédito ({_fmt_mm_tip(_rec_out)}) = {_fmt_mm_tip(_interm)}\n"
+                        f"Desp PDD / Resultado Interm. Fin. Bruto = {_fmt_mm_tip(_desp_pdd)} ÷ {_fmt_mm_tip(_interm)} = {formatar_percentual(_ratio_pdd_interm, decimais=2)}"
+                    )
+                    _fator_txt = f"12/{_mes_periodo}" if _mes_periodo else "12/mes"
+                    tooltip_celula[("Desp Captação / Captação", _periodo_exib)] = (
+                        f"Memória de cálculo\n"
+                        f"Desp. Captação (YTD): {_fmt_mm_tip(_desp_capt)}\n"
+                        f"Desp. Captação anualizada = {_fmt_mm_tip(_desp_capt)} × ({_fator_txt}) = {_fmt_mm_tip(_desp_capt_anual)}\n"
+                        f"Captações: {_fmt_mm_tip(_cap)}\n"
+                        f"Desp Captação / Captação = {_fmt_mm_tip(_desp_capt_anual)} ÷ {_fmt_mm_tip(_cap)} = {formatar_percentual(_ratio_capt, decimais=2)}"
+                    )
             df_derived_filtrado = df_derived_slice[
                 (
                     (df_derived_slice["InstituicaoRaw"] == instituicao_selecionada_raw)
@@ -7411,7 +7519,8 @@ elif menu == "DRE":
             entradas_com_label,
             periodos_disponiveis,
             formato_por_label,
-            tooltip_por_label
+            tooltip_por_label,
+            tooltip_celula,
         )
 
         st.markdown(
