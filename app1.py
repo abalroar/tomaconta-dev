@@ -7444,7 +7444,17 @@ elif menu == "DRE":
                     _rec_out = pd.to_numeric(_r.get("Rendas de Outras Operações com Características de Concessão de Crédito (e)"), errors="coerce")
                     _rec_liq = pd.to_numeric(_r.get("Rendas de Aplicações Interfinanceiras de Liquidez (a)"), errors="coerce")
                     _rec_tvm = pd.to_numeric(_r.get("Rendas de Títulos e Valores Mobiliários (b)"), errors="coerce")
-                    _desp_capt = pd.to_numeric(_r.get("Despesas de Captações (g)"), errors="coerce")
+                    _desp_capt_periodo = pd.to_numeric(_r.get("Despesas de Captações (g)"), errors="coerce")
+                    _desp_capt = _desp_capt_periodo
+                    if _mes_periodo in (9, 12):
+                        _jun_mask = _df_calc_base["mes"] == 6
+                        _jun_series = pd.to_numeric(
+                            _df_calc_base.loc[_jun_mask, "Despesas de Captações (g)"],
+                            errors="coerce",
+                        )
+                        _desp_capt_jun = _jun_series.iloc[-1] if not _jun_series.empty else pd.NA
+                        if pd.notna(_desp_capt_jun) and pd.notna(_desp_capt_periodo):
+                            _desp_capt = _desp_capt_jun + _desp_capt_periodo
 
                     _nim = _rec_cred + _rec_arr + _rec_out if pd.notna(_rec_cred) and pd.notna(_rec_arr) and pd.notna(_rec_out) else pd.NA
                     _interm = _rec_liq + _rec_tvm + _rec_cred + _rec_arr + _rec_out if all(pd.notna(v) for v in [_rec_liq, _rec_tvm, _rec_cred, _rec_arr, _rec_out]) else pd.NA
@@ -7476,9 +7486,12 @@ elif menu == "DRE":
                         f"Desp PDD / Resultado Interm. Fin. Bruto = {_fmt_mm_tip(_desp_pdd)} ÷ {_fmt_mm_tip(_interm)} = {formatar_percentual(_ratio_pdd_interm, decimais=2)}"
                     )
                     _fator_txt = f"12/{_mes_periodo}" if _mes_periodo else "12/mes"
+                    _desp_capt_memoria = _fmt_mm_tip(_desp_capt)
+                    if _mes_periodo in (9, 12):
+                        _desp_capt_memoria = f"{_fmt_mm_tip(_desp_capt_jun)} + {_fmt_mm_tip(_desp_capt_periodo)} = {_fmt_mm_tip(_desp_capt)}"
                     tooltip_celula[("Desp Captação / Captação", _periodo_exib)] = (
                         f"Memória de cálculo\n"
-                        f"Desp. Captação (YTD): {_fmt_mm_tip(_desp_capt)}\n"
+                        f"Desp. Captação (YTD): {_desp_capt_memoria}\n"
                         f"Desp. Captação anualizada = {_fmt_mm_tip(_desp_capt)} × ({_fator_txt}) = {_fmt_mm_tip(_desp_capt_anual)}\n"
                         f"Captações: {_fmt_mm_tip(_cap)}\n"
                         f"Desp Captação / Captação = {_fmt_mm_tip(_desp_capt_anual)} ÷ {_fmt_mm_tip(_cap)} = {formatar_percentual(_ratio_capt, decimais=2)}"
