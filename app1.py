@@ -2112,6 +2112,28 @@ def _carregar_cache_relatorio_slice(
     return df
 
 
+
+
+def _get_slice_cache_for_peers_fn():
+    """Retorna função de recorte para peers com fallback defensivo."""
+    fn = globals().get("_slice_cache_for_peers")
+    if callable(fn):
+        return fn
+
+    def _fallback(df: Optional[pd.DataFrame], bancos: Optional[list] = None, periodos: Optional[list] = None):
+        if df is None or df.empty:
+            return df
+        if "Instituição" not in df.columns or "Período" not in df.columns:
+            return df
+        mask = pd.Series(True, index=df.index)
+        if bancos:
+            mask &= df["Instituição"].isin(bancos)
+        if periodos:
+            mask &= df["Período"].isin(periodos)
+        return df.loc[mask].copy()
+
+    return _fallback
+
 def _preparar_metricas_extra_peers(
     bancos: list,
     periodos: list,
@@ -4881,6 +4903,16 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
+
+                    # Fallback defensivo: garante ausência de NameError em deploy parcial.
+                    slice_fn = _get_slice_cache_for_peers_fn()
+                    cache_ativo = slice_fn(cache_ativo, bancos_selecionados, periodos_ext_peers)
+                    cache_passivo = slice_fn(cache_passivo, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pf = slice_fn(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pj = slice_fn(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_instr = slice_fn(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
+                    cache_dre = slice_fn(cache_dre, bancos_selecionados, periodos_ext_peers)
+                    cache_capital = slice_fn(cache_capital, bancos_selecionados, periodos_ext_peers)
 
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
