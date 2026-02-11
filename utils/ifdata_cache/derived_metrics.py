@@ -19,6 +19,11 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 
 from .base import BaseCache, CacheConfig
+from .metric_registry import (
+    get_derived_metric_labels,
+    get_derived_metric_format_map,
+    get_derived_metric_formula_map,
+)
 
 logger = logging.getLogger("ifdata_cache")
 
@@ -27,26 +32,33 @@ METRIC_PDD_NIM = "Desp PDD / NIM bruta"
 METRIC_PDD_INTERMED = "Desp PDD / Resultado Intermediação Fin. Bruto"
 METRIC_DESP_CAPT = "Desp Captação / Captação"
 
-DERIVED_METRICS = [
-    METRIC_PDD_NIM,
-    METRIC_PDD_INTERMED,
-    METRIC_DESP_CAPT,
-]
+# Fonte canônica: metric_registry (mantemos labels locais para compatibilidade)
+DERIVED_METRICS = get_derived_metric_labels()
+if not DERIVED_METRICS:
+    DERIVED_METRICS = [
+        METRIC_PDD_NIM,
+        METRIC_PDD_INTERMED,
+        METRIC_DESP_CAPT,
+    ]
 
-DERIVED_METRICS_FORMAT = {
-    METRIC_PDD_NIM: "pct",
-    METRIC_PDD_INTERMED: "pct",
-    METRIC_DESP_CAPT: "pct",
-}
+DERIVED_METRICS_FORMAT = get_derived_metric_format_map()
+if not DERIVED_METRICS_FORMAT:
+    DERIVED_METRICS_FORMAT = {
+        METRIC_PDD_NIM: "pct",
+        METRIC_PDD_INTERMED: "pct",
+        METRIC_DESP_CAPT: "pct",
+    }
 
-DERIVED_METRICS_FORMULAS = {
-    METRIC_PDD_NIM: (
-        "Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + "
-        "Rec. Outras Operações c/ Características de Crédito)"
-    ),
-    METRIC_PDD_INTERMED: "Desp. PDD / Resultado de Intermediação Financeira Bruto",
-    METRIC_DESP_CAPT: "Desp. Captação anualizada / Captações",
-}
+DERIVED_METRICS_FORMULAS = get_derived_metric_formula_map()
+if not DERIVED_METRICS_FORMULAS:
+    DERIVED_METRICS_FORMULAS = {
+        METRIC_PDD_NIM: (
+            "Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + "
+            "Rec. Outras Operações c/ Características de Crédito)"
+        ),
+        METRIC_PDD_INTERMED: "Desp. PDD / Resultado de Intermediação Financeira Bruto",
+        METRIC_DESP_CAPT: "Desp. Captação anualizada / Captações",
+    }
 
 
 DRE_REQUIRED_COLUMNS = {

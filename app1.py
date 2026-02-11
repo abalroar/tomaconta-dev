@@ -1613,6 +1613,47 @@ def _normalizar_indice_para_decimal(serie: pd.Series) -> pd.Series:
     return serie_num
 
 
+
+
+def _ajustar_basileia_para_scatter(df: pd.DataFrame) -> pd.DataFrame:
+    """Ajuste específico da aba Scatter para evitar dupla divisão por 100.
+
+    Regras:
+    - Se vier em 0-100, converte para decimal (0-1).
+    - Se aparentar já ter sido dividido duas vezes (ex.: 0.00165 para 16.5%),
+      reescala para decimal correto multiplicando por 100.
+
+    Observação: ajuste aplicado apenas para o uso da coluna canônica
+    ``Índice de Basileia`` no Scatter.
+    """
+    if df is None or df.empty or "Índice de Basileia" not in df.columns:
+        return df
+
+    df_out = df.copy()
+    serie = pd.to_numeric(df_out["Índice de Basileia"], errors="coerce")
+
+    # 1) Normalização padrão para decimal (0-1)
+    mask_0_100 = serie.abs() > 1
+    if mask_0_100.any():
+        serie = serie.copy()
+        serie.loc[mask_0_100] = serie.loc[mask_0_100] / 100
+
+    # 2) Correção excepcional: provável dupla divisão por 100
+    #    Cenário típico do bug: 0.00165 (deveria 0.165)
+    serie_valid = serie.dropna().abs()
+    if not serie_valid.empty:
+        q95 = float(serie_valid.quantile(0.95))
+        med = float(serie_valid.median())
+        # Se praticamente toda a distribuição está abaixo de 3%,
+        # assume erro de dupla divisão e corrige para base decimal correta.
+        if q95 < 0.03 and med < 0.02:
+            serie = serie * 100
+            print(f"[DIAG][SCATTER][BASILEIA] Reescala aplicada (dupla divisão detectada): med={med:.6f}, q95={q95:.6f}")
+
+    # mantém somente valores positivos plausíveis (sem truncar extremos altos)
+    df_out["Índice de Basileia"] = serie
+    return df_out
+
 def _log_diagnostico_basileia_scatter(
     df_base: pd.DataFrame,
     eixo_variavel: str,
@@ -1914,7 +1955,7 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     out["_tri_tmp"] = pd.to_numeric(periodo_split[0], errors="coerce")
     out["_ano_tmp"] = pd.to_numeric(periodo_split[1], errors="coerce")
 
-    for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False).groups.items():
+    for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False, observed=False).groups.items():
         g = out.loc[idx].copy().sort_values("_tri_tmp")
         raw_map = g.set_index("_tri_tmp")[col_ll].to_dict()
 
@@ -1949,13 +1990,50 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _build_peers_lookup(df: Optional[pd.DataFrame]) -> dict:
+    """Cria índice rápido (Instituição, Período) -> linha para lookups repetidos.
+
+    Esta função evita filtros booleanos O(n) em cada célula da tabela de peers.
+    O lookup é armazenado em ``df.attrs`` e reutilizado enquanto o DataFrame
+    não muda (mesmo shape e mesmas colunas).
+    """
+    if df is None or df.empty:
+        return {}
+    if "Instituição" not in df.columns or "Período" not in df.columns:
+        return {}
+
+    meta_nova = (len(df), tuple(df.columns))
+    meta_existente = df.attrs.get("_peers_lookup_meta")
+    lookup_existente = df.attrs.get("_peers_lookup")
+    if meta_existente == meta_nova and isinstance(lookup_existente, dict):
+        return lookup_existente
+
+    lookup = {}
+    # Evita iterrows(): converte para registros e preserva 1ª ocorrência por chave.
+    inst_vals = df["Instituição"].tolist()
+    per_vals = df["Período"].tolist()
+    registros = df.to_dict("records")
+
+    for inst, per, row in zip(inst_vals, per_vals, registros):
+        chave = (inst, per)
+        if chave not in lookup:
+            lookup[chave] = row
+
+    df.attrs["_peers_lookup"] = lookup
+    df.attrs["_peers_lookup_meta"] = meta_nova
+    return lookup
+
+
 def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optional[str]):
     if coluna is None or df is None or df.empty:
         return None
-    df_cell = df[(df["Instituição"] == banco) & (df["Período"] == periodo)]
-    if df_cell.empty:
+    lookup = _build_peers_lookup(df)
+    if not lookup:
         return None
-    return df_cell.iloc[0].get(coluna)
+    row = lookup.get((banco, periodo))
+    if row is None:
+        return None
+    return row.get(coluna)
 
 
 def _coerce_numeric_value(valor):
@@ -1976,6 +2054,8 @@ def _somar_valores(valores: list) -> Optional[float]:
     if not numeros:
         return None
     return float(sum(numeros))
+
+
 
 
 def _aplicar_aliases_df(df: Optional[pd.DataFrame], dict_aliases: dict) -> Optional[pd.DataFrame]:
@@ -2000,6 +2080,100 @@ def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
         return resultado.dados
     return None
 
+
+
+
+def _slice_cache_for_peers(
+    df: Optional[pd.DataFrame],
+    bancos: Optional[list] = None,
+    periodos: Optional[list] = None,
+) -> Optional[pd.DataFrame]:
+    """Compat shim para versões que ainda chamam este helper.
+
+    Mantido para evitar NameError em deployments com código parcialmente atualizado.
+    """
+    if df is None or df.empty:
+        return df
+    if "Instituição" not in df.columns or "Período" not in df.columns:
+        return df
+
+    mask = pd.Series(True, index=df.index)
+    if bancos:
+        mask &= df["Instituição"].isin(bancos)
+    if periodos:
+        mask &= df["Período"].isin(periodos)
+    return df.loc[mask].copy()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_cache_relatorio_slice(
+    tipo_cache: str,
+    cache_token: str,
+    periodos: tuple = (),
+    instituicoes: tuple = (),
+) -> Optional[pd.DataFrame]:
+    """Carrega recorte de cache por período/instituição para reduzir I/O e RAM."""
+    manager = get_cache_manager()
+    if manager is None:
+        return None
+
+    cache = manager.get_cache(tipo_cache)
+    if cache is None:
+        return None
+
+    periodos = tuple(periodos or ())
+    instituicoes = tuple(instituicoes or ())
+
+    # Caminho rápido: parquet com filtro no reader
+    if cache.arquivo_dados.exists():
+        try:
+            import pyarrow.dataset as ds
+            dataset = ds.dataset(cache.arquivo_dados)
+            filtro = None
+            if periodos:
+                f = ds.field("Período").isin(list(periodos))
+                filtro = f if filtro is None else filtro & f
+            if instituicoes:
+                f = ds.field("Instituição").isin(list(instituicoes))
+                filtro = f if filtro is None else filtro & f
+            tabela = dataset.to_table(filter=filtro) if filtro is not None else dataset.to_table()
+            return tabela.to_pandas()
+        except Exception:
+            pass
+
+    # Fallback: carregar e filtrar em pandas
+    resultado = manager.carregar(tipo_cache)
+    if not resultado.sucesso or resultado.dados is None:
+        return None
+
+    df = resultado.dados
+    if periodos and "Período" in df.columns:
+        df = df[df["Período"].isin(periodos)]
+    if instituicoes and "Instituição" in df.columns:
+        df = df[df["Instituição"].isin(instituicoes)]
+    return df
+
+
+
+
+def _get_slice_cache_for_peers_fn():
+    """Retorna função de recorte para peers com fallback defensivo."""
+    fn = globals().get("_slice_cache_for_peers")
+    if callable(fn):
+        return fn
+
+    def _fallback(df: Optional[pd.DataFrame], bancos: Optional[list] = None, periodos: Optional[list] = None):
+        if df is None or df.empty:
+            return df
+        if "Instituição" not in df.columns or "Período" not in df.columns:
+            return df
+        mask = pd.Series(True, index=df.index)
+        if bancos:
+            mask &= df["Instituição"].isin(bancos)
+        if periodos:
+            mask &= df["Período"].isin(periodos)
+        return df.loc[mask].copy()
+
+    return _fallback
 
 def _preparar_metricas_extra_peers(
     bancos: list,
@@ -3208,6 +3382,17 @@ def _carregar_logo_base64(logo_path: str, target_width: int = 200) -> str:
 
 
 @st.cache_data(show_spinner=False)
+def _plotly_fig_to_png_bytes(fig, width: int = 1600, height: int = 900, scale: int = 2) -> Optional[bytes]:
+    """Converte figura Plotly para PNG (retorna None se dependência indisponível)."""
+    if fig is None:
+        return None
+    try:
+        import plotly.io as pio
+        return pio.to_image(fig, format="png", width=width, height=height, scale=scale)
+    except Exception:
+        return None
+
+
 def _get_dados_concatenados(periodos_hash: str, dados_keys: tuple) -> pd.DataFrame:
     """Concatena todos os DataFrames de períodos uma única vez.
 
@@ -3623,6 +3808,56 @@ def carregar_dados_periodos():
         st.session_state['dados_periodos_fonte'] = 'desconhecida'
     print(_perf_log("init_dados_periodos"))
 
+
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_rankings_base_df(
+    principal_token: str,
+    capital_token: str,
+    capital_mesclado: bool,
+    alias_sig: tuple,
+) -> pd.DataFrame:
+    """Pré-processa DataFrame base de Rankings uma única vez por versão de cache.
+
+    Evita recomputar, a cada interação do multiselect, etapas pesadas como:
+    - normalização de lucro líquido no dataframe completo
+    - enriquecimento CET1/merge de capital
+    """
+    _ = (principal_token, capital_token, capital_mesclado, alias_sig)
+    df = get_dados_concatenados()
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = _normalizar_lucro_liquido(df.copy())
+    df = adicionar_indice_cet1(df)
+
+    precisa_enriquecer_cet1 = (
+        "Índice de CET1" not in df.columns
+        or df["Índice de CET1"].isna().any()
+    )
+
+    if precisa_enriquecer_cet1:
+        df_cet1 = construir_cet1_capital(
+            st.session_state.get("dados_capital", {}),
+            st.session_state.get("dict_aliases", {}),
+            st.session_state.get("df_aliases"),
+            st.session_state.get("dados_periodos"),
+        )
+        if not df_cet1.empty:
+            df = df.merge(
+                df_cet1,
+                on=["Período", "Instituição"],
+                how="left",
+                suffixes=("", "_cet1"),
+            )
+            if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
+                df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
+            elif "Índice de CET1_cet1" in df.columns:
+                df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
+                df = df.drop(columns=["Índice de CET1_cet1"])
+
+    return df
 
 def carregar_dados_capital():
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
@@ -4642,6 +4877,7 @@ elif False and menu == "Painel":
 elif menu == "Peers (Tabela)":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()
+        df = _normalizar_lucro_liquido(df)
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -4689,13 +4925,18 @@ elif menu == "Peers (Tabela)":
 
                 if bancos_selecionados and periodos_selecionados:
                     periodos_selecionados = ordenar_periodos(periodos_selecionados, reverso=True)
-                    cache_ativo = _carregar_cache_relatorio("ativo")
-                    cache_passivo = _carregar_cache_relatorio("passivo")
-                    cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
-                    cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
-                    cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
-                    cache_dre = _carregar_cache_relatorio("dre")
-                    cache_capital = _carregar_cache_relatorio("capital")
+                    periodos_base_peers = {_periodo_ano_anterior(p) for p in periodos_selecionados}
+                    periodos_ext_peers = tuple(sorted({p for p in (periodos_selecionados + sorted(periodos_base_peers)) if p}))
+                    bancos_tuple = tuple(bancos_selecionados)
+
+                    # Carregamento já recortado no nível do cache (evita ler dataset inteiro)
+                    cache_ativo = _carregar_cache_relatorio_slice("ativo", _cache_version_token("ativo"), periodos_ext_peers, bancos_tuple)
+                    cache_passivo = _carregar_cache_relatorio_slice("passivo", _cache_version_token("passivo"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_pf = _carregar_cache_relatorio_slice("carteira_pf", _cache_version_token("carteira_pf"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_pj = _carregar_cache_relatorio_slice("carteira_pj", _cache_version_token("carteira_pj"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_instr = _carregar_cache_relatorio_slice("carteira_instrumentos", _cache_version_token("carteira_instrumentos"), periodos_ext_peers, bancos_tuple)
+                    cache_dre = _carregar_cache_relatorio_slice("dre", _cache_version_token("dre"), periodos_ext_peers, bancos_tuple)
+                    cache_capital = _carregar_cache_relatorio_slice("capital", _cache_version_token("capital"), periodos_ext_peers, bancos_tuple)
 
                     cache_ativo = _aplicar_aliases_df(cache_ativo, dict_aliases)
                     cache_passivo = _aplicar_aliases_df(cache_passivo, dict_aliases)
@@ -4704,6 +4945,16 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
+
+                    # Fallback defensivo: garante ausência de NameError em deploy parcial.
+                    slice_fn = _get_slice_cache_for_peers_fn()
+                    cache_ativo = slice_fn(cache_ativo, bancos_selecionados, periodos_ext_peers)
+                    cache_passivo = slice_fn(cache_passivo, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pf = slice_fn(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pj = slice_fn(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_instr = slice_fn(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
+                    cache_dre = slice_fn(cache_dre, bancos_selecionados, periodos_ext_peers)
+                    cache_capital = slice_fn(cache_capital, bancos_selecionados, periodos_ext_peers)
 
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
@@ -4813,6 +5064,7 @@ elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = _garantir_indice_basileia_coluna(df)
+        df = _ajustar_basileia_para_scatter(df)
 
         colunas_base = [
             col for col in df.columns
@@ -5205,36 +5457,14 @@ elif menu == "Rankings":
                 )
                 st.session_state['_dados_capital_mesclados'] = True
 
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-        df = _normalizar_lucro_liquido(df)
-        df = adicionar_indice_cet1(df)
-
-        # Evita merge custoso de CET1 quando a coluna já está preenchida no dataset base.
-        precisa_enriquecer_cet1 = (
-            "Índice de CET1" not in df.columns
-            or df["Índice de CET1"].isna().any()
+        _perf_start("rankings_base_df")
+        df = _get_rankings_base_df(
+            _cache_version_token("principal"),
+            _cache_version_token("capital"),
+            bool(st.session_state.get('_dados_capital_mesclados', False)),
+            _alias_signature(),
         )
-        if precisa_enriquecer_cet1:
-            _perf_start("rankings_merge_cet1")
-            df_cet1 = construir_cet1_capital(
-                st.session_state.get("dados_capital", {}),
-                st.session_state.get("dict_aliases", {}),
-                st.session_state.get("df_aliases"),
-                st.session_state.get("dados_periodos"),
-            )
-            if not df_cet1.empty:
-                df = df.merge(
-                    df_cet1,
-                    on=["Período", "Instituição"],
-                    how="left",
-                    suffixes=("", "_cet1"),
-                )
-                if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
-                    df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
-                elif "Índice de CET1_cet1" in df.columns:
-                    df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
-                    df = df.drop(columns=["Índice de CET1_cet1"])
-            print(_perf_log("rankings_merge_cet1"))
+        print(_perf_log("rankings_base_df"))
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
@@ -5549,6 +5779,18 @@ elif menu == "Rankings":
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key="exportar_resumo_excel_basileia"
                                 )
+
+                                png_bytes = _plotly_fig_to_png_bytes(fig_basileia)
+                                if png_bytes:
+                                    st.download_button(
+                                        label="exportar gráfico PNG",
+                                        data=png_bytes,
+                                        file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.png",
+                                        mime="image/png",
+                                        key="exportar_grafico_png_basileia"
+                                    )
+                                else:
+                                    st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
                 else:
                     if df_selecionado.empty:
                         st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
@@ -5692,6 +5934,18 @@ elif menu == "Rankings":
                                 key="exportar_resumo_excel"
                             )
 
+                            png_bytes = _plotly_fig_to_png_bytes(fig_resumo)
+                            if png_bytes:
+                                st.download_button(
+                                    label="exportar gráfico PNG",
+                                    data=png_bytes,
+                                    file_name=f"ranking_{periodo_resumo.replace('/', '-')}.png",
+                                    mime="image/png",
+                                    key="exportar_grafico_png_ranking"
+                                )
+                            else:
+                                st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
+
             if grafico_base == "Deltas (antes e depois)":
                 st.markdown("---")
 
@@ -5797,7 +6051,7 @@ elif menu == "Rankings":
                             st.warning(f"variável '{variavel}' não encontrada nos dados")
                             continue
 
-                        format_info = get_axis_format(variavel)
+                        format_info = get_axis_format(coluna_variavel)
 
                         dados_grafico = []
                         for instituicao in bancos_selecionados_delta:
@@ -5813,9 +6067,9 @@ elif menu == "Rankings":
 
                                 delta_absoluto = v_sub - v_ini
 
-                                if variavel in VARS_PERCENTUAL:
-                                    delta_texto = f"{delta_absoluto * 100:+.2f}pp"
-                                elif variavel in VARS_MOEDAS:
+                                if _is_variavel_percentual(coluna_variavel):
+                                    delta_texto = f"{delta_absoluto * 100:+.2f}%"
+                                elif coluna_variavel in VARS_MOEDAS:
                                     delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
                                 else:
                                     delta_texto = f"{delta_absoluto:+.2f}"
@@ -5992,7 +6246,12 @@ elif menu == "Rankings":
 
                             eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
                             eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
-                            eixo_titulo = "Δ %" if tipo_variacao == "Δ %" else "Δ absoluto"
+                            if tipo_variacao == "Δ %":
+                                eixo_titulo = "Δ %"
+                            elif _is_variavel_percentual(coluna_variavel):
+                                eixo_titulo = "Δ absoluto (%)"
+                            else:
+                                eixo_titulo = "Δ absoluto"
 
                             fig_barras = go.Figure()
                             fig_barras.add_trace(go.Bar(
@@ -6496,7 +6755,7 @@ elif menu == "DRE":
             lambda x: pd.Series(parse_periodo(x))
         )
         df["ytd"] = pd.NA
-        for (instituicao, label, ano), grupo in df.groupby(["Instituicao", "Label", "ano"]):
+        for (instituicao, label, ano), grupo in df.groupby(["Instituicao", "Label", "ano"], observed=False):
             valores_mes = {row["mes"]: row["valor"] for _, row in grupo.iterrows()}
             for idx, row in grupo.iterrows():
                 mes = row["mes"]
@@ -6520,7 +6779,7 @@ elif menu == "DRE":
     def compute_yoy(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df["yoy"] = pd.NA
-        for (instituicao, label, mes), grupo in df.groupby(["Instituicao", "Label", "mes"]):
+        for (instituicao, label, mes), grupo in df.groupby(["Instituicao", "Label", "mes"], observed=False):
             valores_ano = {
                 row["ano"]: row["ytd"]
                 for _, row in grupo.iterrows()
@@ -7628,7 +7887,7 @@ elif menu == "Taxas de Juros por Produto":
             df['AnoMes'] = df['Fim Período'].dt.to_period('M')
 
             # Para cada combinação (Segmento, Produto, Instituição, AnoMes), pegar a última data
-            idx = df.groupby(['Segmento', 'Produto', 'Instituição Financeira', 'AnoMes'])['Fim Período'].idxmax()
+            idx = df.groupby(['Segmento', 'Produto', 'Instituição Financeira', 'AnoMes'], observed=False)['Fim Período'].idxmax()
             df_mensal = df.loc[idx].copy()
 
             # Criar coluna de data formatada para o gráfico
