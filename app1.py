@@ -4798,6 +4798,17 @@ elif menu == "Peers (Tabela)":
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
 
+                    # Recorte agressivo para reduzir custo de lookup da tabela peers.
+                    periodos_base_peers = {_periodo_ano_anterior(p) for p in periodos_selecionados}
+                    periodos_ext_peers = [p for p in periodos_selecionados + sorted(periodos_base_peers) if p]
+                    cache_ativo = _slice_cache_for_peers(cache_ativo, bancos_selecionados, periodos_ext_peers)
+                    cache_passivo = _slice_cache_for_peers(cache_passivo, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pf = _slice_cache_for_peers(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pj = _slice_cache_for_peers(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_instr = _slice_cache_for_peers(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
+                    cache_dre = _slice_cache_for_peers(cache_dre, bancos_selecionados, periodos_ext_peers)
+                    cache_capital = _slice_cache_for_peers(cache_capital, bancos_selecionados, periodos_ext_peers)
+
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
                         bancos_selecionados,
