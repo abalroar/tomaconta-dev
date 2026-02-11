@@ -563,6 +563,8 @@ def get_cache_info_detalhado():
 
 def _fator_anualizacao(mes: int) -> float:
     """Retorna fator de anualização por mês: Mar=4, Jun=2, Set=12/9, Dez=1."""
+    if isinstance(mes, pd.Series):
+        return pd.to_numeric(mes, errors='coerce').map(_fator_anualizacao)
     if mes == 3:
         return 4.0
     elif mes == 6:
@@ -668,10 +670,8 @@ def recalcular_metricas_derivadas(dados_periodos):
             pl_dez_anterior = pd.Series(np.nan, index=df_atualizado.index)
             parsed_per = _parse_periodo(periodo_str) if periodo_str else _parse_periodo(periodo)
             if parsed_per and "Instituição" in df_atualizado.columns:
-                _, ano_p, ano_len_p = parsed_per
-                ano_ant = ano_p - 1
-                per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len_p == 2 else f"4/{ano_ant}"
-                df_dez = dados_atualizados.get(per_dez, dados_periodos.get(per_dez))
+                per_dez = _periodo_dez_ano_anterior(periodo_str or periodo)
+                df_dez = dados_atualizados.get(per_dez, dados_periodos.get(per_dez)) if per_dez else None
                 if df_dez is not None and pl_col in df_dez.columns and "Instituição" in df_dez.columns:
                     df_dez_dedup = df_dez.drop_duplicates(subset=["Instituição"], keep="first")
                     pl_dez_anterior = df_atualizado["Instituição"].map(
@@ -760,10 +760,8 @@ def _sincronizar_roe_anualizado(dados_periodos: dict) -> dict:
 
             parsed_per = _parse_periodo(periodo_str) if periodo_str else _parse_periodo(periodo)
             if parsed_per:
-                _, ano_p, ano_len_p = parsed_per
-                ano_ant = ano_p - 1
-                per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len_p == 2 else f"4/{ano_ant}"
-                df_dez = dados_out.get(per_dez, dados_periodos.get(per_dez))
+                per_dez = _periodo_dez_ano_anterior(periodo_str or periodo)
+                df_dez = dados_out.get(per_dez, dados_periodos.get(per_dez)) if per_dez else None
                 if df_dez is not None and not df_dez.empty and {"Instituição", "Patrimônio Líquido"}.issubset(df_dez.columns):
                     df_dez_dedup = df_dez.drop_duplicates(subset=["Instituição"], keep="first")
                     pl_dez_anterior = df_atualizado["Instituição"].map(
@@ -1899,10 +1897,8 @@ def _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor_roe):
     parsed = _parse_periodo(periodo)
     if not parsed:
         return ""
-    _, ano, ano_len = parsed
-    ano_ant = ano - 1
-    per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len == 2 else f"4/{ano_ant}"
-    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl))
+    per_dez = _periodo_dez_ano_anterior(periodo)
+    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl)) if per_dez else None
     mes = _extrair_mes_periodo(periodo, periodo)
     fator = _fator_anualizacao(mes) if mes else 1
     per_exib = periodo_para_exibicao(periodo)
@@ -2018,6 +2014,40 @@ def _parte_periodo_para_trimestre_idx(valor) -> Optional[int]:
     if parte == 12:
         return 4
     return None
+
+
+def _periodo_dez_ano_anterior(periodo: str) -> Optional[str]:
+    """Retorna período de dezembro do ano anterior respeitando formato da parte.
+
+    Exemplos:
+    - 3/2025  -> 4/2024
+    - 03/2025 -> 12/2024
+    - 09/25   -> 12/24
+    """
+    parsed = _parse_periodo(periodo)
+    if not parsed:
+        return None
+
+    parte, ano, ano_len = parsed
+    try:
+        parte_int = int(str(parte).strip())
+    except Exception:
+        return None
+
+    parte_txt = str(parte).strip()
+    if parte_txt in ("03", "06", "09", "12"):
+        parte_dez = "12"
+    elif parte_int in (1, 2, 3, 4):
+        parte_dez = "4"
+    elif parte_int in (6, 9, 12):
+        parte_dez = "12"
+    else:
+        # fallback conservador para formato trimestral
+        parte_dez = "4"
+
+    ano_ant = ano - 1
+    ano_txt = str(ano_ant)[-2:] if ano_len == 2 else str(ano_ant)
+    return f"{parte_dez}/{ano_txt}"
 
 
 def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
@@ -2705,10 +2735,8 @@ def _calcular_roe_anualizado_peers(
     parsed = _parse_periodo(periodo)
     if not parsed:
         return None
-    _, ano, ano_len = parsed
-    ano_ant = ano - 1
-    per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len == 2 else f"4/{ano_ant}"
-    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl))
+    per_dez = _periodo_dez_ano_anterior(periodo)
+    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl)) if per_dez else None
     if pl_dez is None or pd.isna(pl_dez):
         return None
 
