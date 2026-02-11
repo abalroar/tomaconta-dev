@@ -2721,14 +2721,34 @@ def _calcular_roe_anualizado_peers(
     Retorna None quando PL médio <= 0 ou qualquer componente faltar.
     O LL já está acumulado YTD no DataFrame (feito em recalcular_metricas_derivadas).
     """
-    lucro = _ajustar_lucro_acumulado_peers(df, banco, periodo, coluna_lucro)
-    lucro_num = _coerce_numeric_value(lucro)
-    if lucro_num is None or pd.isna(lucro_num):
+    # Alguns caches antigos/deploys mistos podem trazer mais de uma linha para
+    # (Instituição, Período) no dataframe concatenado. Em peers, isso pode levar
+    # ao uso da 1ª linha (via lookup) com LL trimestral, causando ROE ~7.13%.
+    # Aqui resolvemos de forma local/robusta escolhendo a melhor linha para ROE.
+    subset_t = df[(df.get("Instituição") == banco) & (df.get("Período") == periodo)]
+    if subset_t is None or subset_t.empty:
         return None
 
-    # PL_t
-    pl_t = _coerce_numeric_value(_obter_valor_peers(df, banco, periodo, coluna_pl))
-    if pl_t is None or pd.isna(pl_t):
+    if coluna_lucro is None or coluna_lucro not in subset_t.columns:
+        return None
+    if coluna_pl is None or coluna_pl not in subset_t.columns:
+        return None
+
+    lucro_num_series = pd.to_numeric(subset_t[coluna_lucro], errors="coerce")
+    pl_num_series = pd.to_numeric(subset_t[coluna_pl], errors="coerce")
+    valid_t = lucro_num_series.notna() & pl_num_series.notna()
+    if valid_t.any():
+        cand_t = subset_t.loc[valid_t].copy()
+        cand_t["_ll_num"] = lucro_num_series.loc[valid_t]
+        # Heurística local da aba Peers: prioriza maior |LL YTD| para evitar
+        # linha stale/trimestral quando coexistem registros duplicados.
+        row_t = cand_t.loc[cand_t["_ll_num"].abs().idxmax()]
+        lucro_num = _coerce_numeric_value(row_t.get(coluna_lucro))
+        pl_t = _coerce_numeric_value(row_t.get(coluna_pl))
+    else:
+        return None
+
+    if lucro_num is None or pd.isna(lucro_num) or pl_t is None or pd.isna(pl_t):
         return None
 
     # PL_Dez_ano_anterior
@@ -2736,7 +2756,14 @@ def _calcular_roe_anualizado_peers(
     if not parsed:
         return None
     per_dez = _periodo_dez_ano_anterior(periodo)
-    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl)) if per_dez else None
+    pl_dez = None
+    if per_dez and coluna_pl in df.columns:
+        subset_dez = df[(df.get("Instituição") == banco) & (df.get("Período") == per_dez)]
+        if subset_dez is not None and not subset_dez.empty:
+            pl_dez_series = pd.to_numeric(subset_dez[coluna_pl], errors="coerce").dropna()
+            if not pl_dez_series.empty:
+                # Em caso de duplicidade, escolhe o maior |PL| (registro mais completo).
+                pl_dez = float(pl_dez_series.loc[pl_dez_series.abs().idxmax()])
     if pl_dez is None or pd.isna(pl_dez):
         return None
 
