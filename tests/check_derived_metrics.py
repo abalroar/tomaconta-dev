@@ -73,11 +73,12 @@ def test_anualizacao_desp_captacao():
     )
 
     df_resultado, _ = build_derived_metrics(df_dre, df_principal)
+    # Set/Dez no DRE são semestrais (2º semestre) e devem ser acumulados com Jun antes da anualização.
     esperado = {
         "1/2025": 0.4,
         "2/2025": 0.2,
-        "3/2025": 12.0 * (12 / 9) / 120.0,
-        "4/2025": 0.1,
+        "3/2025": (12.0 + 12.0) * (12 / 9) / 120.0,
+        "4/2025": (12.0 + 12.0) * (12 / 12) / 120.0,
     }
     for periodo, valor in esperado.items():
         atual = df_resultado.loc[

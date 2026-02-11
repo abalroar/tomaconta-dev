@@ -186,6 +186,59 @@ def _parse_periodo(periodo_val: str) -> Tuple[Optional[int], Optional[int]]:
     return None, None
 
 
+def _acumular_dre_ytd_por_periodo(
+    df_base: pd.DataFrame,
+    serie_valor: pd.Series,
+) -> pd.Series:
+    """Converte série DRE para acumulado YTD quando necessário.
+
+    Relatório 4 (DRE) do BCB é semestral no 2º semestre:
+      - 3/AAAA (Set): Jul-Set, precisa somar 2/AAAA (Jan-Jun)
+      - 4/AAAA (Dez): Jul-Dez, precisa somar 2/AAAA (Jan-Jun)
+
+    Para períodos no formato mensal:
+      - MM=09 ou MM=12, soma MM=06 do mesmo ano.
+    """
+    out = serie_valor.astype("float64").copy()
+
+    if out.empty:
+        return out
+
+    df_aux = pd.DataFrame(
+        {
+            "Instituição": df_base["Instituição"],
+            "Período": df_base["Período"].astype(str),
+            "Valor": out,
+        }
+    )
+    ano_mes = df_aux["Período"].apply(_parse_periodo)
+    df_aux["Ano"] = ano_mes.str[0]
+    df_aux["Mes"] = ano_mes.str[1]
+
+    base_lookup = (
+        df_aux[["Instituição", "Ano", "Mes", "Valor"]]
+        .dropna(subset=["Ano", "Mes"])
+        .drop_duplicates(subset=["Instituição", "Ano", "Mes"], keep="last")
+        .rename(columns={"Valor": "Valor_lookup"})
+    )
+
+    precisa_acumular = df_aux["Mes"].isin([9, 12])
+    if not precisa_acumular.any():
+        return out
+
+    idx = df_aux.index[precisa_acumular]
+    chave = df_aux.loc[idx, ["Instituição", "Ano"]].copy()
+    chave["Mes"] = 6
+    jun_lookup = chave.merge(
+        base_lookup,
+        on=["Instituição", "Ano", "Mes"],
+        how="left",
+    )["Valor_lookup"]
+
+    out.loc[idx] = out.loc[idx] + jun_lookup.values
+    return out
+
+
 def _detect_period_type(periodos: Iterable[str]) -> str:
     for periodo in periodos:
         texto = str(periodo)
@@ -298,7 +351,8 @@ def build_derived_metrics(
     meses = periodos.apply(lambda x: _parse_periodo(x)[1])
     meses = meses.where(meses.notna() & (meses > 0), pd.NA)
     fator_anualizacao = 12 / meses.astype("float32")
-    desp_captacao_anualizada = desp_captacao * fator_anualizacao
+    desp_captacao_ytd = _acumular_dre_ytd_por_periodo(df_base, desp_captacao)
+    desp_captacao_anualizada = desp_captacao_ytd * fator_anualizacao
 
     df_merge = df_base[["Instituição", "Período"]].copy()
     df_merge = df_merge.merge(
