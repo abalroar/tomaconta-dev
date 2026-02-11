@@ -6707,7 +6707,10 @@ elif menu == "Rankings":
 
 elif menu == "DRE":
     st.markdown("### Demonstração de Resultado (DRE)")
-    st.caption("Tabela DRE a partir de Mar/25, com marcadores ▲/▼ de crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior")
+    st.caption("Tabela DRE a partir de Mar/25, com marcadores ▲/▼ (quando há base comparável no ano anterior) em relação ao mesmo período acumulado")
+
+    DRE_ANO_EXIBICAO_INICIAL = 2025
+    DRE_MES_EXIBICAO_INICIAL = 3
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_dre_data():
@@ -7097,10 +7100,10 @@ elif menu == "DRE":
         df_base = df_base.rename(columns={col_periodo: "Periodo"})
 
         df_base[["ano", "mes"]] = extrair_ano_mes_periodo(df_base["Periodo"])
-        df_new = df_base[
-            (df_base["ano"].fillna(0) > 2025)
-            | ((df_base["ano"] == 2025) & (df_base["mes"].fillna(0) >= 3))
-        ].copy()
+        # Mantém um ano anterior para cálculo YoY (marcadores ▲/▼),
+        # mas a exibição ao usuário continua a partir de Mar/25.
+        ano_min_calculo = DRE_ANO_EXIBICAO_INICIAL - 1
+        df_new = df_base[df_base["ano"].fillna(0) >= ano_min_calculo].copy()
 
         numericas = {col: coerce_numeric(df_new[col]) for col in set(fonte_para_coluna.values())}
         df_values = []
@@ -7347,26 +7350,45 @@ elif menu == "DRE":
         df_ytd_base = df_ytd_base.copy()
         df_base[instit_col] = df_base[instit_col].astype(str).str.strip()
         df_ytd_base[instit_col] = df_ytd_base[instit_col].astype(str).str.strip()
+        df_base["InstituicaoRaw"] = df_base[instit_col]
+        df_ytd_base["InstituicaoRaw"] = df_ytd_base[instit_col]
         df_base["InstituicaoExib"] = df_base[instit_col].apply(_alias_instituicao_dre)
         df_ytd_base["InstituicaoExib"] = df_ytd_base[instit_col].apply(_alias_instituicao_dre)
 
-        instituicoes = ordenar_bancos_com_alias(
-            df_base["InstituicaoExib"].dropna().unique().tolist(), _dict_aliases_dre
+        instituicoes_raw = ordenar_bancos_com_alias(
+            df_base["InstituicaoRaw"].dropna().unique().tolist(), _dict_aliases_dre
         )
-        anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
+        alias_counts = pd.Series(
+            [_alias_instituicao_dre(inst_raw) for inst_raw in instituicoes_raw], dtype="object"
+        ).value_counts()
 
-        if not instituicoes or not anos_disponiveis:
+        def _formatar_opcao_instituicao_dre(inst_raw: str) -> str:
+            alias = _alias_instituicao_dre(inst_raw)
+            if alias != inst_raw and alias_counts.get(alias, 0) > 1:
+                return f"{alias} ({inst_raw})"
+            return alias
+
+        anos_disponiveis = sorted(
+            [
+                ano for ano in df_base["ano"].dropna().unique().astype(int).tolist()
+                if ano >= DRE_ANO_EXIBICAO_INICIAL
+            ]
+        )
+
+        if not instituicoes_raw or not anos_disponiveis:
             st.warning("Dados DRE sem instituições ou períodos válidos.")
             st.stop()
 
-        _default_dre = _encontrar_bancos_default(instituicoes, [("itau", "itaú")])
-        _idx_dre = instituicoes.index(_default_dre[0]) if _default_dre else 0
+        instituicoes_label = [_formatar_opcao_instituicao_dre(inst_raw) for inst_raw in instituicoes_raw]
+        _default_dre = _encontrar_bancos_default(instituicoes_label, [("itau", "itaú")])
+        _idx_dre = instituicoes_label.index(_default_dre[0]) if _default_dre else 0
 
         col_inst, col_ano = st.columns([1, 1])
         with col_inst:
-            instituicao_selecionada = st.selectbox(
+            instituicao_selecionada_raw = st.selectbox(
                 "Instituição",
-                instituicoes,
+                instituicoes_raw,
+                format_func=_formatar_opcao_instituicao_dre,
                 index=_idx_dre,
                 key="dre_instituicao"
             )
@@ -7377,6 +7399,9 @@ elif menu == "DRE":
                 index=0,
                 key="dre_ano"
             )
+
+        instituicao_selecionada = _formatar_opcao_instituicao_dre(instituicao_selecionada_raw)
+        instituicao_alias_selecionada = _alias_instituicao_dre(instituicao_selecionada_raw)
 
         formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries}
         tooltip_por_label = {}
@@ -7393,6 +7418,7 @@ elif menu == "DRE":
                 if formula:
                     tooltip_parts.append(f"Fórmula: {formula}")
             if fontes_fmt:
+                tooltip_parts.append(f"Denominação IFData: {fontes_fmt}")
                 tooltip_parts.append(f"Fontes: {fontes_fmt}")
             if entry.get("ytd_note"):
                 tooltip_parts.append("Nota YTD: no BC o DRE é semestral acumulado; aqui exibimos acumulado do ano (YTD).")
@@ -7404,9 +7430,10 @@ elif menu == "DRE":
             entradas_com_label.append(entrada_copy)
 
         df_filtrado = df_ytd_base[
-            (df_ytd_base["InstituicaoExib"] == instituicao_selecionada)
+            (df_ytd_base["InstituicaoRaw"] == instituicao_selecionada_raw)
             & (df_ytd_base["ano"] == int(ano_selecionado))
         ].copy()
+        df_filtrado_base = df_filtrado.copy()
 
         diag_info = {}
         if st.session_state.get("modo_diagnostico"):
@@ -7416,7 +7443,7 @@ elif menu == "DRE":
 
         _perf_start("dre_derived_load")
         df_derived_slice = carregar_metricas_derivadas_slice(
-            instituicoes=[instituicao_selecionada],
+            instituicoes=[instituicao_selecionada_raw, instituicao_alias_selecionada],
             metricas=DERIVED_METRICS,
         )
         tempo_derived = _perf_end("dre_derived_load")
@@ -7426,13 +7453,17 @@ elif menu == "DRE":
                 columns={"Métrica": "Label", "Valor": "valor", "Instituição": "Instituicao", "Período": "Periodo"}
             )
             df_derived_slice["Instituicao"] = df_derived_slice["Instituicao"].astype(str).str.strip()
+            df_derived_slice["InstituicaoRaw"] = df_derived_slice["Instituicao"]
             df_derived_slice["InstituicaoExib"] = df_derived_slice["Instituicao"].apply(_alias_instituicao_dre)
             df_derived_slice["Periodo"] = df_derived_slice["Periodo"].astype(str)
             df_derived_slice = compute_ytd_irregular(df_derived_slice)
             df_derived_slice = compute_yoy(df_derived_slice)
             df_derived_slice["PeriodoExib"] = df_derived_slice["Periodo"].apply(periodo_para_exibicao)
             df_derived_filtrado = df_derived_slice[
-                (df_derived_slice["InstituicaoExib"] == instituicao_selecionada)
+                (
+                    (df_derived_slice["InstituicaoRaw"] == instituicao_selecionada_raw)
+                    | (df_derived_slice["InstituicaoExib"] == instituicao_alias_selecionada)
+                )
                 & (df_derived_slice["ano"] == int(ano_selecionado))
             ].copy()
             df_filtrado = pd.concat([df_filtrado, df_derived_filtrado], ignore_index=True)
@@ -7442,13 +7473,17 @@ elif menu == "DRE":
             diag_info["derived_slice_rows"] = len(df_derived_slice)
             diag_info["derived_load_s"] = round(tempo_derived, 3)
 
+        # Os períodos exibidos/baixados devem refletir apenas publicações da DRE-base,
+        # sem ser "forçados" por métricas derivadas que possam existir no trimestre.
         meses_com_publicacao = (
-            df_filtrado.loc[df_filtrado["ytd"].notna(), "mes"]
+            df_filtrado_base.loc[df_filtrado_base["ytd"].notna(), "mes"]
             .dropna()
             .astype(int)
             .unique()
             .tolist()
         )
+        if int(ano_selecionado) == DRE_ANO_EXIBICAO_INICIAL:
+            meses_com_publicacao = [m for m in meses_com_publicacao if m >= DRE_MES_EXIBICAO_INICIAL]
         meses_ordenados = sorted([m for m in meses_com_publicacao if m in [3, 6, 9, 12]], reverse=True)
         periodos_disponiveis = [periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}") for mes in meses_ordenados]
         if not periodos_disponiveis:
