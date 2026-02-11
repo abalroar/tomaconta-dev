@@ -86,7 +86,7 @@ METRIC_REGISTRY: Dict[str, MetricDefinition] = {
     ),
     "roe_ac_ytd_an": MetricDefinition(
         key="roe_ac_ytd_an",
-        display_name="ROE Ac. YTD an. (%)",
+        display_name="ROE Ac. Anualizado (%)",
         domain="rentabilidade",
         formula="(LL_YTD × fator_anualização) / ((PL_t + PL_dez_ano_anterior)/2)",
         dependencies=["Lucro Líquido Acumulado YTD", "Patrimônio Líquido"],

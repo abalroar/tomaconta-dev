@@ -280,6 +280,7 @@ LOGO_PATH = str(DATA_DIR / "logo.jpg")
 SENHA_ADMIN = "m4th3u$987"
 
 VARS_PERCENTUAL = [
+    'ROE Ac. Anualizado (%)',
     'ROE Ac. YTD an. (%)',
     'Índice de Basileia',
     'Índice de CET1',
@@ -435,9 +436,9 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Lucro Líquido Acumulado YTD",
             },
             {
-                "label": "ROE AC. Anualizado (%)",
-                "data_keys": ["ROE Ac. YTD an. (%)"],
-                "format_key": "ROE Ac. YTD an. (%)",
+                "label": "ROE Ac. Anualizado (%)",
+                "data_keys": ["ROE Ac. Anualizado (%)", "ROE Ac. YTD an. (%)"],
+                "format_key": "ROE Ac. Anualizado (%)",
             },
         ],
     },
@@ -674,6 +675,8 @@ def recalcular_metricas_derivadas(dados_periodos):
             df_atualizado["ROE Ac. YTD an. (%)"] = _calcular_roe_anualizado(
                 ll_ytd, pl_t, pl_dez_anterior, mes
             )
+            # Nome canônico preferido na UI e para consumo transversal.
+            df_atualizado["ROE Ac. Anualizado (%)"] = df_atualizado["ROE Ac. YTD an. (%)"]
             # Persistir valor de LL utilizado no cálculo do ROE para uso downstream
             df_atualizado[ll_col] = ll_ytd
 
@@ -709,9 +712,65 @@ def recalcular_metricas_derivadas(dados_periodos):
             if _col_pct in df_atualizado.columns:
                 df_atualizado[_col_pct] = _normalizar_indice_para_decimal(df_atualizado[_col_pct])
 
+        if "ROE Ac. Anualizado (%)" not in df_atualizado.columns and "ROE Ac. YTD an. (%)" in df_atualizado.columns:
+            df_atualizado["ROE Ac. Anualizado (%)"] = df_atualizado["ROE Ac. YTD an. (%)"]
+
         dados_atualizados[periodo] = df_atualizado
 
     return dados_atualizados
+
+
+
+def _sincronizar_roe_anualizado(dados_periodos: dict) -> dict:
+    """Recalcula e padroniza ROE Ac. Anualizado (%) em todos os períodos.
+
+    Usa a mesma fórmula econômica aplicada em peers para garantir consistência
+    entre Scatter, Rankings e Peers com a mesma base de LL YTD e PL médio.
+    """
+    if not dados_periodos:
+        return dados_periodos
+
+    periodos_ordenados = ordenar_periodos(list(dados_periodos.keys()), reverso=False)
+    dados_out = {}
+
+    for periodo in periodos_ordenados:
+        df_periodo = dados_periodos.get(periodo)
+        if df_periodo is None or df_periodo.empty:
+            dados_out[periodo] = df_periodo
+            continue
+
+        df_atualizado = df_periodo.copy()
+        if {"Lucro Líquido Acumulado YTD", "Patrimônio Líquido", "Instituição"}.issubset(df_atualizado.columns):
+            periodo_str = None
+            if 'Período' in df_atualizado.columns and len(df_atualizado) > 0:
+                periodo_str = df_atualizado['Período'].iloc[0]
+            mes = _extrair_mes_periodo(periodo_str, periodo)
+            if mes is None:
+                mes = 12
+
+            ll_ytd = pd.to_numeric(df_atualizado["Lucro Líquido Acumulado YTD"], errors="coerce")
+            pl_t = pd.to_numeric(df_atualizado["Patrimônio Líquido"], errors="coerce")
+            pl_dez_anterior = pd.Series(np.nan, index=df_atualizado.index)
+
+            parsed_per = _parse_periodo(periodo_str) if periodo_str else _parse_periodo(periodo)
+            if parsed_per:
+                _, ano_p, ano_len_p = parsed_per
+                ano_ant = ano_p - 1
+                per_dez = f"4/{str(ano_ant)[-2:]}" if ano_len_p == 2 else f"4/{ano_ant}"
+                df_dez = dados_out.get(per_dez, dados_periodos.get(per_dez))
+                if df_dez is not None and not df_dez.empty and {"Instituição", "Patrimônio Líquido"}.issubset(df_dez.columns):
+                    df_dez_dedup = df_dez.drop_duplicates(subset=["Instituição"], keep="first")
+                    pl_dez_anterior = df_atualizado["Instituição"].map(
+                        pd.to_numeric(df_dez_dedup.set_index("Instituição")["Patrimônio Líquido"], errors="coerce")
+                    )
+
+            roe = _calcular_roe_anualizado(ll_ytd, pl_t, pl_dez_anterior, mes)
+            df_atualizado["ROE Ac. Anualizado (%)"] = roe
+            df_atualizado["ROE Ac. YTD an. (%)"] = roe
+
+        dados_out[periodo] = df_atualizado
+
+    return dados_out
 
 
 def _extrair_mes_periodo(periodo_preferencial: Optional[str], periodo_fallback: Optional[str]) -> Optional[int]:
@@ -3724,7 +3783,7 @@ def _precisa_recalcular_metricas_rapido(dados_periodos: dict) -> bool:
         if cols & colunas_obsoletas:
             return True
 
-        if {"Lucro Líquido Acumulado YTD", "Patrimônio Líquido"}.issubset(cols) and "ROE Ac. YTD an. (%)" not in cols:
+        if {"Lucro Líquido Acumulado YTD", "Patrimônio Líquido"}.issubset(cols) and not ({"ROE Ac. YTD an. (%)", "ROE Ac. Anualizado (%)"} & cols):
             return True
         if {"Carteira de Crédito", "Patrimônio Líquido"}.issubset(cols) and "Crédito/PL (%)" not in cols:
             return True
@@ -3755,6 +3814,9 @@ def _carregar_dados_periodos_preparados(cache_token: str, alias_sig: tuple):
 
     if _precisa_recalcular_metricas_rapido(dados_cache):
         dados_cache = recalcular_metricas_derivadas(dados_cache)
+
+    # Garante coluna canônica e valores consistentes de ROE entre abas.
+    dados_cache = _sincronizar_roe_anualizado(dados_cache)
 
     if alias_sig:
         dict_aliases = dict(alias_sig)
@@ -5071,6 +5133,8 @@ elif menu == "Scatter Plot":
             if col not in ['Instituição', 'Período'] and pd.api.types.is_numeric_dtype(df[col])
         ]
         colunas_numericas = colunas_base + [m for m in DERIVED_METRICS if m not in colunas_base]
+        if 'ROE Ac. Anualizado (%)' in colunas_numericas and 'ROE Ac. YTD an. (%)' in colunas_numericas:
+            colunas_numericas = [c for c in colunas_numericas if c != 'ROE Ac. YTD an. (%)']
         periodos = ordenar_periodos(df['Período'].unique(), reverso=True)
 
         # Lista de todos os bancos disponíveis com ordenação por alias
@@ -5084,7 +5148,7 @@ elif menu == "Scatter Plot":
         with col1:
             var_x = st.selectbox("eixo x", colunas_numericas, index=colunas_numericas.index('Índice de Basileia') if 'Índice de Basileia' in colunas_numericas else 0)
         with col2:
-            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1)
+            var_y = st.selectbox("eixo y", colunas_numericas, index=colunas_numericas.index('ROE Ac. Anualizado (%)') if 'ROE Ac. Anualizado (%)' in colunas_numericas else (colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1))
         with col3:
             opcoes_tamanho = ['Tamanho Fixo'] + colunas_numericas
             var_size = st.selectbox("tamanho", opcoes_tamanho, index=0)
@@ -5213,7 +5277,7 @@ elif menu == "Scatter Plot":
             var_y_n2 = st.selectbox(
                 "eixo y",
                 colunas_numericas,
-                index=colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1,
+                index=colunas_numericas.index('ROE Ac. Anualizado (%)') if 'ROE Ac. Anualizado (%)' in colunas_numericas else (colunas_numericas.index('ROE Ac. YTD an. (%)') if 'ROE Ac. YTD an. (%)' in colunas_numericas else 1),
                 key="var_y_n2"
             )
         with col_p3:
@@ -5498,7 +5562,7 @@ elif menu == "Rankings":
             'Índice de Basileia': ['Índice de Basileia'],
             'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
             'Lucro Líquido Trimestral': ['Lucro Líquido Trimestral'],
-            'ROE Ac. Anualizado (%)': ['ROE Ac. YTD an. (%)'],
+            'ROE Ac. Anualizado (%)': ['ROE Ac. Anualizado (%)', 'ROE Ac. YTD an. (%)'],
         }
 
         indicadores_disponiveis = {}
@@ -9579,7 +9643,7 @@ elif menu == "Glossário":
 
     ## **Métricas Calculadas**
 
-    **ROE Ac. YTD an. (%):** (LL YTD × fator de anualização) ÷ PL Médio. PL Médio = (PL no período + PL em Dez do ano anterior) / 2. Fator: Mar=4, Jun=2, Set≈1.33, Dez=1. N/A se PL médio ≤ 0 ou dado faltante.
+    **ROE Ac. Anualizado (%):** (LL YTD × fator de anualização) ÷ PL Médio. PL Médio = (PL no período + PL em Dez do ano anterior) / 2. Fator: Mar=4, Jun=2, Set≈1.33, Dez=1. N/A se PL médio ≤ 0 ou dado faltante.
 
     **Crédito/PL (%):** Carteira de Crédito Líquida dividida pelo Patrimônio Líquido.
 
