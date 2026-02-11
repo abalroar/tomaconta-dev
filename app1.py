@@ -2049,6 +2049,51 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _recalcular_roe_anualizado_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Recalcula ROE anualizado no dataframe consolidado (multi-períodos).
+
+    Pré-condição recomendada: LL já normalizado para YTD consistente
+    via ``_normalizar_lucro_liquido``.
+    """
+    if df is None or df.empty:
+        return df
+    if not {"Instituição", "Período", "Lucro Líquido Acumulado YTD", "Patrimônio Líquido"}.issubset(df.columns):
+        return df
+
+    out = df.copy()
+    periodo_split = out["Período"].astype(str).str.split("/", expand=True)
+    tri = pd.to_numeric(periodo_split[0], errors="coerce")
+    ano = pd.to_numeric(periodo_split[1], errors="coerce")
+
+    out["_tri_tmp"] = tri
+    out["_ano_tmp"] = ano
+    out["_mes_tmp"] = out["_tri_tmp"].map({1: 3, 2: 6, 3: 9, 4: 12}).fillna(12)
+
+    pl_num = pd.to_numeric(out["Patrimônio Líquido"], errors="coerce")
+    ll_num = pd.to_numeric(out["Lucro Líquido Acumulado YTD"], errors="coerce")
+
+    # PL de dezembro do ano anterior por instituição/ano.
+    pl_dez = (
+        out[out["_tri_tmp"] == 4]
+        .dropna(subset=["_ano_tmp"])
+        .sort_values(["Instituição", "_ano_tmp", "Período"])
+        .drop_duplicates(subset=["Instituição", "_ano_tmp"], keep="last")
+        .set_index(["Instituição", "_ano_tmp"])["Patrimônio Líquido"]
+    )
+
+    idx_prev = pd.MultiIndex.from_arrays(
+        [out["Instituição"].values, (out["_ano_tmp"] - 1).values],
+        names=["Instituição", "_ano_tmp"],
+    )
+    pl_dez_prev = pd.to_numeric(pl_dez.reindex(idx_prev).to_numpy(), errors="coerce")
+
+    roe = _calcular_roe_anualizado(ll_num, pl_num, pl_dez_prev, out["_mes_tmp"])
+    out["ROE Ac. Anualizado (%)"] = roe
+    out["ROE Ac. YTD an. (%)"] = roe
+
+    return out.drop(columns=["_tri_tmp", "_ano_tmp", "_mes_tmp"], errors="ignore")
+
+
 def _build_peers_lookup(df: Optional[pd.DataFrame]) -> dict:
     """Cria índice rápido (Instituição, Período) -> linha para lookups repetidos.
 
@@ -3892,6 +3937,7 @@ def _get_rankings_base_df(
         return pd.DataFrame()
 
     df = _normalizar_lucro_liquido(df.copy())
+    df = _recalcular_roe_anualizado_df(df)
     df = adicionar_indice_cet1(df)
 
     precisa_enriquecer_cet1 = (
@@ -5125,6 +5171,8 @@ elif menu == "Peers (Tabela)":
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
+        df = _normalizar_lucro_liquido(df)
+        df = _recalcular_roe_anualizado_df(df)
         df = _garantir_indice_basileia_coluna(df)
         df = _ajustar_basileia_para_scatter(df)
 
