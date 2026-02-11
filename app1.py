@@ -6624,6 +6624,28 @@ elif menu == "DRE":
             return resultado.dados, None
         return None, resultado.mensagem
 
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_principal_captacoes_data():
+        manager = get_cache_manager()
+        resultado = manager.carregar("principal")
+        if not resultado.sucesso or resultado.dados is None:
+            return pd.DataFrame(), resultado.mensagem
+
+        df_principal = resultado.dados.copy()
+        col_inst = find_column(df_principal, "Instituição") or find_column(df_principal, "Instituicao")
+        col_periodo = find_column(df_principal, "Período") or find_column(df_principal, "Periodo")
+        col_capt = find_column(df_principal, "Captações") or find_column(df_principal, "Captação")
+        if not col_inst or not col_periodo or not col_capt:
+            return pd.DataFrame(), "Colunas de Captações não encontradas no cache principal"
+
+        df_principal = df_principal[[col_inst, col_periodo, col_capt]].rename(
+            columns={col_inst: "Instituicao", col_periodo: "Periodo", col_capt: "Captacoes"}
+        )
+        df_principal["Instituicao"] = df_principal["Instituicao"].astype(str).str.strip()
+        df_principal["Periodo"] = df_principal["Periodo"].astype(str).str.strip()
+        df_principal["Captacoes"] = pd.to_numeric(df_principal["Captacoes"], errors="coerce")
+        return df_principal, None
+
     def normalize_sources(value):
         if value is None:
             return []
@@ -7345,6 +7367,9 @@ elif menu == "DRE":
         mapping_entries_ordenado = [e for e in mapping_entries if e.get("label") not in _labels_ratio_dre] + [
             e for e in mapping_entries if e.get("label") in _labels_ratio_dre
         ]
+        for _entry in mapping_entries_ordenado:
+            if _entry.get("label") in _labels_ratio_dre:
+                _entry["is_ratio_footer"] = True
 
         formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries_ordenado}
         tooltip_por_label = {}
@@ -7389,6 +7414,7 @@ elif menu == "DRE":
             instituicoes=[instituicao_selecionada_raw, instituicao_alias_selecionada],
             metricas=DERIVED_METRICS,
         )
+        df_principal_capt, _ = load_principal_captacoes_data()
         tempo_derived = _perf_end("dre_derived_load")
 
         tooltip_celula = {}
@@ -7461,13 +7487,20 @@ elif menu == "DRE":
                     _desp_capt_anual = _desp_capt * _fator_anual if pd.notna(_desp_capt) and _fator_anual else pd.NA
 
                     _cap = pd.NA
-                    _per = _r.get("Periodo")
-                    if _per:
-                        _df_p = _dados_periodos_dre.get(_per)
-                        if _df_p is not None and not _df_p.empty and "Instituição" in _df_p.columns and "Captações" in _df_p.columns:
-                            _m_cap = _df_p[_df_p["Instituição"].astype(str).str.strip() == instituicao_selecionada_raw]
-                            if not _m_cap.empty:
-                                _cap = pd.to_numeric(_m_cap["Captações"], errors="coerce").iloc[0]
+                    _per = str(_r.get("Periodo") or "").strip()
+                    if _per and not df_principal_capt.empty:
+                        _m_cap_raw = df_principal_capt[
+                            (df_principal_capt["Instituicao"] == instituicao_selecionada_raw)
+                            & (df_principal_capt["Periodo"] == _per)
+                        ]
+                        _m_cap = _m_cap_raw
+                        if _m_cap.empty and instituicao_alias_selecionada:
+                            _m_cap = df_principal_capt[
+                                (df_principal_capt["Instituicao"] == instituicao_alias_selecionada)
+                                & (df_principal_capt["Periodo"] == _per)
+                            ]
+                        if not _m_cap.empty:
+                            _cap = _m_cap["Captacoes"].iloc[0]
 
                     _ratio_pdd_nim = (_desp_pdd / _nim) if pd.notna(_desp_pdd) and pd.notna(_nim) and _nim != 0 else pd.NA
                     _ratio_pdd_interm = (_desp_pdd / _interm) if pd.notna(_desp_pdd) and pd.notna(_interm) and _interm != 0 else pd.NA
@@ -7496,13 +7529,21 @@ elif menu == "DRE":
                         f"Captações: {_fmt_mm_tip(_cap)}\n"
                         f"Desp Captação / Captação = {_fmt_mm_tip(_desp_capt_anual)} ÷ {_fmt_mm_tip(_cap)} = {formatar_percentual(_ratio_capt, decimais=2)}"
                     )
-            df_derived_filtrado = df_derived_slice[
-                (
-                    (df_derived_slice["InstituicaoRaw"] == instituicao_selecionada_raw)
-                    | (df_derived_slice["InstituicaoExib"] == instituicao_alias_selecionada)
-                )
-                & (df_derived_slice["ano"] == int(ano_selecionado))
+            _filtro_ano = df_derived_slice["ano"] == int(ano_selecionado)
+            df_derived_filtrado_raw = df_derived_slice[
+                _filtro_ano & (df_derived_slice["InstituicaoRaw"] == instituicao_selecionada_raw)
             ].copy()
+            if not df_derived_filtrado_raw.empty:
+                df_derived_filtrado = df_derived_filtrado_raw
+            else:
+                df_derived_filtrado = df_derived_slice[
+                    _filtro_ano & (df_derived_slice["InstituicaoExib"] == instituicao_alias_selecionada)
+                ].copy()
+            df_derived_filtrado = (
+                df_derived_filtrado
+                .sort_values(["Label", "ano", "mes", "Periodo"], na_position="last")
+                .drop_duplicates(subset=["Label", "Periodo"], keep="last")
+            )
             df_filtrado = pd.concat([df_filtrado, df_derived_filtrado], ignore_index=True)
 
         if st.session_state.get("modo_diagnostico"):
