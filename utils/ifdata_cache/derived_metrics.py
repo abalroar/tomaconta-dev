@@ -239,6 +239,14 @@ def _acumular_dre_ytd_por_periodo(
     return out
 
 
+def _anualizar_serie_por_periodo(serie_valor: pd.Series, periodos: pd.Series) -> pd.Series:
+    """Aplica fator 12/meses com base no período informado."""
+    meses = periodos.astype(str).apply(lambda x: _parse_periodo(x)[1])
+    meses = meses.where(meses.notna() & (meses > 0), pd.NA)
+    fator_anualizacao = 12 / meses.astype("float32")
+    return serie_valor * fator_anualizacao
+
+
 def _detect_period_type(periodos: Iterable[str]) -> str:
     for periodo in periodos:
         texto = str(periodo)
@@ -348,11 +356,17 @@ def build_derived_metrics(
         raise ValueError("Coluna de Desp. Captação não encontrada no DRE")
 
     periodos = df_base["Período"].astype(str)
-    meses = periodos.apply(lambda x: _parse_periodo(x)[1])
-    meses = meses.where(meses.notna() & (meses > 0), pd.NA)
-    fator_anualizacao = 12 / meses.astype("float32")
+
+    # Para Set/Dez, DRE vem como 2º semestre (não YTD). Precisamos acumular
+    # com Jun e anualizar na mesma lógica de captação.
+    desp_pdd_ytd = _acumular_dre_ytd_por_periodo(df_base, desp_pdd)
+    desp_pdd_anualizada = _anualizar_serie_por_periodo(desp_pdd_ytd, periodos)
+
+    resultado_intermed_bruto_ytd = _acumular_dre_ytd_por_periodo(df_base, resultado_intermed_bruto)
+    resultado_intermed_bruto_anualizado = _anualizar_serie_por_periodo(resultado_intermed_bruto_ytd, periodos)
+
     desp_captacao_ytd = _acumular_dre_ytd_por_periodo(df_base, desp_captacao)
-    desp_captacao_anualizada = desp_captacao_ytd * fator_anualizacao
+    desp_captacao_anualizada = _anualizar_serie_por_periodo(desp_captacao_ytd, periodos)
 
     df_merge = df_base[["Instituição", "Período"]].copy()
     df_merge = df_merge.merge(
@@ -365,7 +379,7 @@ def build_derived_metrics(
     dados_metricas = []
 
     serie_metric_1 = _safe_ratio(
-        desp_pdd,
+        desp_pdd_anualizada,
         nim_bruta,
         METRIC_PDD_NIM,
         denominador_counts,
@@ -373,8 +387,8 @@ def build_derived_metrics(
     dados_metricas.append((METRIC_PDD_NIM, serie_metric_1))
 
     serie_metric_2 = _safe_ratio(
-        desp_pdd,
-        resultado_intermed_bruto,
+        desp_pdd_anualizada,
+        resultado_intermed_bruto_anualizado,
         METRIC_PDD_INTERMED,
         denominador_counts,
     )
