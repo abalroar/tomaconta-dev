@@ -580,11 +580,17 @@ def _calcular_roe_anualizado(ll_ytd, pl_t, pl_dez_anterior, mes):
     Aceita escalares ou pandas Series.
     Retorna None (escalar) ou NaN (Series) quando PL médio <= 0 ou dados faltantes.
     """
-    fator = _fator_anualizacao(mes)
     pl_medio = (pl_t + pl_dez_anterior) / 2
 
     if isinstance(pl_medio, pd.Series):
+        # Suporta mes escalar ou vetorial para cálculos em lote.
+        if isinstance(mes, pd.Series):
+            fator = pd.to_numeric(mes, errors='coerce').map(_fator_anualizacao)
+        else:
+            fator = _fator_anualizacao(mes)
         return (fator * ll_ytd) / pl_medio.where(pl_medio > 0, np.nan)
+
+    fator = _fator_anualizacao(mes)
 
     # Escalar
     for v in [ll_ytd, pl_t, pl_dez_anterior]:
@@ -1993,6 +1999,27 @@ def _periodo_mesma_estrutura(periodo: str, novo_parte: int) -> Optional[str]:
     return f"{nova_parte}/{ano}"
 
 
+def _parte_periodo_para_trimestre_idx(valor) -> Optional[int]:
+    """Normaliza parte do período para índice trimestral (1..4).
+
+    Aceita formatos com trimestre (1/2/3/4) e mensal trimestral (03/06/09/12).
+    """
+    try:
+        parte = int(str(valor).strip())
+    except Exception:
+        return None
+
+    if parte in (1, 2, 3, 4):
+        return parte
+    if parte == 6:
+        return 2
+    if parte == 9:
+        return 3
+    if parte == 12:
+        return 4
+    return None
+
+
 def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     """Normaliza LL para YTD consistente e calcula LL Trimestral.
 
@@ -2012,13 +2039,14 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
 
     periodo_split = out["Período"].astype(str).str.split("/", expand=True)
     out["_tri_tmp"] = pd.to_numeric(periodo_split[0], errors="coerce")
+    out["_tri_idx_tmp"] = out["_tri_tmp"].map(_parte_periodo_para_trimestre_idx)
     out["_ano_tmp"] = pd.to_numeric(periodo_split[1], errors="coerce")
 
     for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False, observed=False).groups.items():
-        g = out.loc[idx].copy().sort_values("_tri_tmp")
-        raw_map = g.set_index("_tri_tmp")[col_ll].to_dict()
+        g = out.loc[idx].copy().sort_values("_tri_idx_tmp")
+        raw_map = g.set_index("_tri_idx_tmp")[col_ll].to_dict()
 
-        for row_idx, tri in zip(g.index, g["_tri_tmp"]):
+        for row_idx, tri in zip(g.index, g["_tri_idx_tmp"]):
             raw_val = out.at[row_idx, col_ll]
             if pd.isna(raw_val):
                 continue
@@ -2045,7 +2073,7 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
                 ll_ytd_ajustado.at[row_idx] = raw_val
 
     out[col_ll] = ll_ytd_ajustado.where(ll_ytd_ajustado.notna(), out[col_ll])
-    out = out.drop(columns=["_tri_tmp", "_ano_tmp"], errors="ignore")
+    out = out.drop(columns=["_tri_tmp", "_tri_idx_tmp", "_ano_tmp"], errors="ignore")
     return out
 
 
@@ -2066,15 +2094,16 @@ def _recalcular_roe_anualizado_df(df: pd.DataFrame) -> pd.DataFrame:
     ano = pd.to_numeric(periodo_split[1], errors="coerce")
 
     out["_tri_tmp"] = tri
+    out["_tri_idx_tmp"] = out["_tri_tmp"].map(_parte_periodo_para_trimestre_idx)
     out["_ano_tmp"] = ano
-    out["_mes_tmp"] = out["_tri_tmp"].map({1: 3, 2: 6, 3: 9, 4: 12}).fillna(12)
+    out["_mes_tmp"] = out["_tri_idx_tmp"].map({1: 3, 2: 6, 3: 9, 4: 12}).fillna(12)
 
     pl_num = pd.to_numeric(out["Patrimônio Líquido"], errors="coerce")
     ll_num = pd.to_numeric(out["Lucro Líquido Acumulado YTD"], errors="coerce")
 
     # PL de dezembro do ano anterior por instituição/ano.
     pl_dez = (
-        out[out["_tri_tmp"] == 4]
+        out[out["_tri_idx_tmp"] == 4]
         .dropna(subset=["_ano_tmp"])
         .sort_values(["Instituição", "_ano_tmp", "Período"])
         .drop_duplicates(subset=["Instituição", "_ano_tmp"], keep="last")
@@ -2091,7 +2120,7 @@ def _recalcular_roe_anualizado_df(df: pd.DataFrame) -> pd.DataFrame:
     out["ROE Ac. Anualizado (%)"] = roe
     out["ROE Ac. YTD an. (%)"] = roe
 
-    return out.drop(columns=["_tri_tmp", "_ano_tmp", "_mes_tmp"], errors="ignore")
+    return out.drop(columns=["_tri_tmp", "_tri_idx_tmp", "_ano_tmp", "_mes_tmp"], errors="ignore")
 
 
 def _build_peers_lookup(df: Optional[pd.DataFrame]) -> dict:
