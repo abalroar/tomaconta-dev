@@ -435,11 +435,6 @@ PEERS_TABELA_LAYOUT = [
                 "data_keys": ["Lucro Líquido Acumulado YTD"],
                 "format_key": "Lucro Líquido Acumulado YTD",
             },
-            {
-                "label": "ROE Ac. Anualizado (%)",
-                "data_keys": ["ROE Ac. Anualizado (%)", "ROE Ac. YTD an. (%)"],
-                "format_key": "ROE Ac. Anualizado (%)",
-            },
         ],
     },
 ]
@@ -1926,40 +1921,6 @@ def _fmt_tooltip_mm(valor) -> str:
         return "N/A"
 
 
-def _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor_roe):
-    """Tooltip com memória de cálculo do ROE Ac. Anualizado."""
-    lucro = _obter_valor_peers(df, banco, periodo, coluna_lucro)
-    lucro_num = _coerce_numeric_value(lucro)
-    pl_t = _coerce_numeric_value(_obter_valor_peers(df, banco, periodo, coluna_pl))
-    parsed = _parse_periodo(periodo)
-    if not parsed:
-        return ""
-    per_dez = _periodo_dez_ano_anterior(periodo)
-    pl_dez = _coerce_numeric_value(_obter_valor_peers(df, banco, per_dez, coluna_pl)) if per_dez else None
-    mes = _extrair_mes_periodo(periodo, periodo)
-    fator = _fator_anualizacao(mes) if mes else 1
-    per_exib = periodo_para_exibicao(periodo)
-    dez_exib = periodo_para_exibicao(per_dez)
-    fmt = _fmt_tooltip_mm
-    lines = [
-        f"LL YTD: {fmt(lucro_num)}",
-        f"Fator: x{fator:.4g} (12/{mes})",
-        f"PL ({per_exib}): {fmt(pl_t)}",
-        f"PL ({dez_exib}): {fmt(pl_dez)}",
-    ]
-    if pl_t is not None and pl_dez is not None and not pd.isna(pl_t) and not pd.isna(pl_dez):
-        pl_medio = (float(pl_t) + float(pl_dez)) / 2
-        lines.append(f"PL Medio: {fmt(pl_medio)}")
-    if valor_roe is not None and not pd.isna(valor_roe):
-        v = float(valor_roe)
-        if abs(v) <= 1:
-            v *= 100
-        lines.append(f"ROE = {v:.2f}%")
-    else:
-        lines.append("ROE = N/A")
-    return "\n".join(lines)
-
-
 def _tooltip_ll_peers(df, banco, periodo, coluna, valor):
     """Tooltip para Lucro Líquido (BCB Rel. 1 já publica YTD acumulado)."""
     fmt = _fmt_tooltip_mm
@@ -2745,73 +2706,6 @@ def _ajustar_lucro_acumulado_peers(
     return _obter_valor_peers(df, banco, periodo, coluna)
 
 
-def _calcular_roe_anualizado_peers(
-    df: pd.DataFrame,
-    banco: str,
-    periodo: str,
-    coluna_lucro: Optional[str],
-    coluna_pl: Optional[str],
-) -> Optional[float]:
-    """ROE Ac. Anualizado = (LL_YTD × fator) / ((PL_t + PL_Dez_anterior) / 2).
-
-    Usa PL médio entre período atual (t) e Dez do ano anterior.
-    Retorna None quando PL médio <= 0 ou qualquer componente faltar.
-    O LL já está acumulado YTD no DataFrame (feito em recalcular_metricas_derivadas).
-    """
-    # Alguns caches antigos/deploys mistos podem trazer mais de uma linha para
-    # (Instituição, Período) no dataframe concatenado. Em peers, isso pode levar
-    # ao uso da 1ª linha (via lookup) com LL trimestral, causando ROE ~7.13%.
-    # Aqui resolvemos de forma local/robusta escolhendo a melhor linha para ROE.
-    subset_t = df[(df.get("Instituição") == banco) & (df.get("Período") == periodo)]
-    if subset_t is None or subset_t.empty:
-        return None
-
-    if coluna_lucro is None or coluna_lucro not in subset_t.columns:
-        return None
-    if coluna_pl is None or coluna_pl not in subset_t.columns:
-        return None
-
-    lucro_num_series = pd.to_numeric(subset_t[coluna_lucro], errors="coerce")
-    pl_num_series = pd.to_numeric(subset_t[coluna_pl], errors="coerce")
-    valid_t = lucro_num_series.notna() & pl_num_series.notna()
-    if valid_t.any():
-        cand_t = subset_t.loc[valid_t].copy()
-        cand_t["_ll_num"] = lucro_num_series.loc[valid_t]
-        cand_t["_pl_num"] = pl_num_series.loc[valid_t]
-
-        # Heurística robusta para duplicidades no período:
-        # 1) prioriza maior PL (linha mais completa/atualizada);
-        # 2) desempata por maior |LL YTD|.
-        cand_t = cand_t.sort_values(["_pl_num", "_ll_num"], key=lambda c: c.abs(), ascending=False)
-        row_t = cand_t.iloc[0]
-        lucro_num = _coerce_numeric_value(row_t.get(coluna_lucro))
-        pl_t = _coerce_numeric_value(row_t.get(coluna_pl))
-    else:
-        return None
-
-    if lucro_num is None or pd.isna(lucro_num) or pl_t is None or pd.isna(pl_t):
-        return None
-
-    # PL_Dez_ano_anterior
-    parsed = _parse_periodo(periodo)
-    if not parsed:
-        return None
-    per_dez = _periodo_dez_ano_anterior(periodo)
-    pl_dez = None
-    if per_dez and coluna_pl in df.columns:
-        subset_dez = df[(df.get("Instituição") == banco) & (df.get("Período") == per_dez)]
-        if subset_dez is not None and not subset_dez.empty:
-            pl_dez_series = pd.to_numeric(subset_dez[coluna_pl], errors="coerce").dropna()
-            if not pl_dez_series.empty:
-                # Em caso de duplicidade, escolhe o maior |PL| (registro mais completo).
-                pl_dez = float(pl_dez_series.loc[pl_dez_series.abs().idxmax()])
-    if pl_dez is None or pd.isna(pl_dez):
-        return None
-
-    mes = _extrair_mes_periodo(periodo, periodo)
-    return _calcular_roe_anualizado(float(lucro_num), float(pl_t), float(pl_dez), mes)
-
-
 def _montar_tabela_peers(
     df: pd.DataFrame,
     bancos: list,
@@ -2827,7 +2721,6 @@ def _montar_tabela_peers(
     coluna_ativo = _resolver_coluna_peers(df, ["Ativo Total"])
     coluna_pl = _resolver_coluna_peers(df, ["Patrimônio Líquido"])
     coluna_lucro = _resolver_coluna_peers(df, ["Lucro Líquido Acumulado YTD", "Lucro Líquido"])
-    coluna_roe = _resolver_coluna_peers(df, ["ROE Ac. Anualizado (%)", "ROE Ac. YTD an. (%)"])
     extra_values = _preparar_metricas_extra_peers(
         bancos,
         periodos,
@@ -2878,17 +2771,6 @@ def _montar_tabela_peers(
                                 tip = f"{label}: N/A"
                         else:
                             tip = f"{label}: {_fmt_tooltip_mm(valor)}" if valor is not None else ""
-                    elif label == "ROE AC. Anualizado (%)":
-                        valor = _obter_valor_peers(df, banco, periodo, coluna_roe) if coluna_roe else None
-                        if valor is None or pd.isna(valor):
-                            valor = _calcular_roe_anualizado_peers(
-                                df,
-                                banco,
-                                periodo,
-                                coluna_lucro,
-                                coluna_pl,
-                            )
-                        tip = _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor)
                     elif label == "Ativo / PL":
                         valor_ativo = _obter_valor_peers(df, banco, periodo, coluna_ativo)
                         valor_pl = _obter_valor_peers(df, banco, periodo, coluna_pl)
@@ -2914,16 +2796,6 @@ def _montar_tabela_peers(
                     periodo_base = _periodo_ano_anterior(periodo)
                     if periodo_base and label in extra_values:
                         valor_base = extra_values[label].get((banco, periodo_base))
-                    elif periodo_base and label == "ROE AC. Anualizado (%)":
-                        valor_base = _obter_valor_peers(df, banco, periodo_base, coluna_roe) if coluna_roe else None
-                        if valor_base is None or pd.isna(valor_base):
-                            valor_base = _calcular_roe_anualizado_peers(
-                                df,
-                                banco,
-                                periodo_base,
-                                coluna_lucro,
-                                coluna_pl,
-                            )
                     elif periodo_base and coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor_base = _ajustar_lucro_acumulado_peers(df, banco, periodo_base, coluna)
