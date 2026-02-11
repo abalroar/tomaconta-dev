@@ -46,3 +46,10 @@
 - Adicionada função `_carregar_cache_relatorio_slice` para carregar recortes por período/instituição direto do arquivo de cache (com `pyarrow.dataset` quando disponível).
 - A aba **Peers (Tabela)** passou a carregar `ativo/passivo/carteiras/dre/capital` já filtrados, reduzindo I/O e memória antes do cálculo.
 - Fallback preservado: se filtro parquet falhar, carrega e filtra em pandas.
+
+
+## Cache agressivo do pré-processamento de Rankings
+
+- Extraído pré-processamento pesado da aba Rankings para `_get_rankings_base_df` com `@st.cache_data` (normalização de lucro, CET1 e merge complementar).
+- Cache invalidado por token de versão dos caches `principal/capital`, flag de mescla de capital e assinatura de aliases.
+- Objetivo: remover recomputação completa a cada clique no multiselect de bancos.

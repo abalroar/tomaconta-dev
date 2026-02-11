@@ -3712,6 +3712,56 @@ def carregar_dados_periodos():
     print(_perf_log("init_dados_periodos"))
 
 
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_rankings_base_df(
+    principal_token: str,
+    capital_token: str,
+    capital_mesclado: bool,
+    alias_sig: tuple,
+) -> pd.DataFrame:
+    """Pré-processa DataFrame base de Rankings uma única vez por versão de cache.
+
+    Evita recomputar, a cada interação do multiselect, etapas pesadas como:
+    - normalização de lucro líquido no dataframe completo
+    - enriquecimento CET1/merge de capital
+    """
+    _ = (principal_token, capital_token, capital_mesclado, alias_sig)
+    df = get_dados_concatenados()
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = _normalizar_lucro_liquido(df.copy())
+    df = adicionar_indice_cet1(df)
+
+    precisa_enriquecer_cet1 = (
+        "Índice de CET1" not in df.columns
+        or df["Índice de CET1"].isna().any()
+    )
+
+    if precisa_enriquecer_cet1:
+        df_cet1 = construir_cet1_capital(
+            st.session_state.get("dados_capital", {}),
+            st.session_state.get("dict_aliases", {}),
+            st.session_state.get("df_aliases"),
+            st.session_state.get("dados_periodos"),
+        )
+        if not df_cet1.empty:
+            df = df.merge(
+                df_cet1,
+                on=["Período", "Instituição"],
+                how="left",
+                suffixes=("", "_cet1"),
+            )
+            if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
+                df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
+            elif "Índice de CET1_cet1" in df.columns:
+                df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
+                df = df.drop(columns=["Índice de CET1_cet1"])
+
+    return df
+
 def carregar_dados_capital():
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
         return
@@ -5309,36 +5359,14 @@ elif menu == "Rankings":
                 )
                 st.session_state['_dados_capital_mesclados'] = True
 
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-        df = _normalizar_lucro_liquido(df)
-        df = adicionar_indice_cet1(df)
-
-        # Evita merge custoso de CET1 quando a coluna já está preenchida no dataset base.
-        precisa_enriquecer_cet1 = (
-            "Índice de CET1" not in df.columns
-            or df["Índice de CET1"].isna().any()
+        _perf_start("rankings_base_df")
+        df = _get_rankings_base_df(
+            _cache_version_token("principal"),
+            _cache_version_token("capital"),
+            bool(st.session_state.get('_dados_capital_mesclados', False)),
+            _alias_signature(),
         )
-        if precisa_enriquecer_cet1:
-            _perf_start("rankings_merge_cet1")
-            df_cet1 = construir_cet1_capital(
-                st.session_state.get("dados_capital", {}),
-                st.session_state.get("dict_aliases", {}),
-                st.session_state.get("df_aliases"),
-                st.session_state.get("dados_periodos"),
-            )
-            if not df_cet1.empty:
-                df = df.merge(
-                    df_cet1,
-                    on=["Período", "Instituição"],
-                    how="left",
-                    suffixes=("", "_cet1"),
-                )
-                if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
-                    df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
-                elif "Índice de CET1_cet1" in df.columns:
-                    df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
-                    df = df.drop(columns=["Índice de CET1_cet1"])
-            print(_perf_log("rankings_merge_cet1"))
+        print(_perf_log("rankings_base_df"))
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
