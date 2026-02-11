@@ -2786,6 +2786,7 @@ def _montar_tabela_peers(
     coluna_ativo = _resolver_coluna_peers(df, ["Ativo Total"])
     coluna_pl = _resolver_coluna_peers(df, ["Patrimônio Líquido"])
     coluna_lucro = _resolver_coluna_peers(df, ["Lucro Líquido Acumulado YTD", "Lucro Líquido"])
+    coluna_roe = _resolver_coluna_peers(df, ["ROE Ac. Anualizado (%)", "ROE Ac. YTD an. (%)"])
     extra_values = _preparar_metricas_extra_peers(
         bancos,
         periodos,
@@ -2837,13 +2838,15 @@ def _montar_tabela_peers(
                         else:
                             tip = f"{label}: {_fmt_tooltip_mm(valor)}" if valor is not None else ""
                     elif label == "ROE AC. Anualizado (%)":
-                        valor = _calcular_roe_anualizado_peers(
-                            df,
-                            banco,
-                            periodo,
-                            coluna_lucro,
-                            coluna_pl,
-                        )
+                        valor = _obter_valor_peers(df, banco, periodo, coluna_roe) if coluna_roe else None
+                        if valor is None or pd.isna(valor):
+                            valor = _calcular_roe_anualizado_peers(
+                                df,
+                                banco,
+                                periodo,
+                                coluna_lucro,
+                                coluna_pl,
+                            )
                         tip = _tooltip_roe_peers(df, banco, periodo, coluna_lucro, coluna_pl, valor)
                     elif label == "Ativo / PL":
                         valor_ativo = _obter_valor_peers(df, banco, periodo, coluna_ativo)
@@ -2871,13 +2874,15 @@ def _montar_tabela_peers(
                     if periodo_base and label in extra_values:
                         valor_base = extra_values[label].get((banco, periodo_base))
                     elif periodo_base and label == "ROE AC. Anualizado (%)":
-                        valor_base = _calcular_roe_anualizado_peers(
-                            df,
-                            banco,
-                            periodo_base,
-                            coluna_lucro,
-                            coluna_pl,
-                        )
+                        valor_base = _obter_valor_peers(df, banco, periodo_base, coluna_roe) if coluna_roe else None
+                        if valor_base is None or pd.isna(valor_base):
+                            valor_base = _calcular_roe_anualizado_peers(
+                                df,
+                                banco,
+                                periodo_base,
+                                coluna_lucro,
+                                coluna_pl,
+                            )
                     elif periodo_base and coluna:
                         if label == "Lucro Líquido Acumulado":
                             valor_base = _ajustar_lucro_acumulado_peers(df, banco, periodo_base, coluna)
