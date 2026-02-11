@@ -7427,7 +7427,11 @@ elif menu == "DRE":
             df_derived_slice["InstituicaoRaw"] = df_derived_slice["Instituicao"]
             df_derived_slice["InstituicaoExib"] = df_derived_slice["Instituicao"].apply(_alias_instituicao_dre)
             df_derived_slice["Periodo"] = df_derived_slice["Periodo"].astype(str)
-            df_derived_slice = compute_ytd_irregular(df_derived_slice)
+            # Métricas derivadas já são gravadas no cache em base anualizada/YTD.
+            # Reaplicar a regra semestral (somar jun em set/dez) aqui duplica
+            # o acumulado e distorce o número exibido na DRE.
+            df_derived_slice[["ano", "mes"]] = extrair_ano_mes_periodo(df_derived_slice["Periodo"])
+            df_derived_slice["ytd"] = pd.to_numeric(df_derived_slice["valor"], errors="coerce")
             df_derived_slice = compute_yoy(df_derived_slice)
             df_derived_slice["PeriodoExib"] = df_derived_slice["Periodo"].apply(periodo_para_exibicao)
 
