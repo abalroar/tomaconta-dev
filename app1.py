@@ -435,6 +435,11 @@ PEERS_TABELA_LAYOUT = [
                 "data_keys": ["Lucro Líquido Acumulado YTD"],
                 "format_key": "Lucro Líquido Acumulado YTD",
             },
+            {
+                "label": "ROE Acumulado YTD (%)",
+                "data_keys": ["ROE Ac. Anualizado (%)", "ROE Ac. YTD an. (%)"],
+                "format_key": "ROE Ac. Anualizado (%)",
+            },
         ],
     },
 ]
@@ -1630,12 +1635,33 @@ def _normalizar_percentual_display(serie: pd.Series, variavel: Optional[str] = N
 
 
 def _normalizar_basileia_display(serie: pd.Series) -> pd.Series:
-    """Tratamento específico de exceção para Basileia no display.
+    """Converte Basileia de base decimal (0-1) para display (0-100).
 
-    Evita duplo tratamento ao exibir valores em % quando a base já vem 0-100,
-    mantendo compatibilidade com bases em 0-1.
+    Os dados de Basileia em dados_periodos são normalizados para base
+    decimal (0-1) por _normalizar_indice_para_decimal / recalcular_metricas_derivadas.
+    Para display, usa a mediana da série para detectar a escala de forma
+    robusta (evitando o heurístico per-value ``abs <= 1`` que falha em
+    corner cases como dupla divisão residual).
+
+    - mediana < 1  → série em base decimal  → multiplicar por 100
+    - mediana >= 1 → série já em base 0-100 → manter sem multiplicar
     """
-    return _normalizar_percentual_display(serie, "Índice de Basileia")
+    serie_num = pd.to_numeric(serie, errors="coerce")
+    if serie_num.empty:
+        return serie_num
+
+    serie_valid = serie_num.dropna().abs()
+    if serie_valid.empty:
+        return serie_num
+
+    med = float(serie_valid.median())
+
+    if med < 1:
+        # Base decimal (0-1) → converter para 0-100
+        return serie_num * 100
+    else:
+        # Já em 0-100 → manter
+        return serie_num
 
 
 def _normalizar_valor_indicador(valor, variavel: Optional[str]):
@@ -2788,7 +2814,13 @@ def _montar_tabela_peers(
                             tip = _tooltip_ll_peers(df, banco, periodo, coluna, valor)
                         else:
                             valor = _obter_valor_peers(df, banco, periodo, coluna)
-                            tip = f"{coluna}: {_fmt_tooltip_mm(valor)}" if valor is not None else ""
+                            if coluna and "(%)" in coluna and valor is not None and not pd.isna(valor):
+                                try:
+                                    tip = f"{label}: {float(valor) * 100:.2f}%"
+                                except Exception:
+                                    tip = ""
+                            else:
+                                tip = f"{coluna}: {_fmt_tooltip_mm(valor)}" if valor is not None else ""
                     valores[chave] = valor
                     tooltips[chave] = tip
 
@@ -7227,8 +7259,20 @@ elif menu == "DRE":
         df_base["InstituicaoExib"] = df_base[instit_col].apply(_alias_instituicao_dre)
         df_ytd_base["InstituicaoExib"] = df_ytd_base[instit_col].apply(_alias_instituicao_dre)
 
+        # Combinar instituições do DRE (Rel. 4) com as do principal (Rel. 1)
+        # para que IFs presentes no dados principal (ex.: DOCK IP) apareçam no dropdown
+        # mesmo quando não possuem dados no Relatório 4.
+        _instituicoes_dre_raw = set(df_base["InstituicaoRaw"].dropna().unique().tolist())
+        _instituicoes_principal = set()
+        _dados_periodos_dre = st.session_state.get('dados_periodos', {})
+        for _df_p in _dados_periodos_dre.values():
+            if _df_p is not None and "Instituição" in _df_p.columns:
+                _instituicoes_principal.update(
+                    _df_p["Instituição"].dropna().unique().tolist()
+                )
+        _instituicoes_combinadas = _instituicoes_dre_raw | _instituicoes_principal
         instituicoes_raw = ordenar_bancos_com_alias(
-            df_base["InstituicaoRaw"].dropna().unique().tolist(), _dict_aliases_dre
+            list(_instituicoes_combinadas), _dict_aliases_dre
         )
         alias_counts = pd.Series(
             [_alias_instituicao_dre(inst_raw) for inst_raw in instituicoes_raw], dtype="object"
@@ -8596,6 +8640,8 @@ elif menu == "Crie sua métrica!":
 
                     # Filtrar dados para o período
                     df_periodo = get_df_periodo_brincar(periodo_scatter_brincar).copy()
+                    # Garantir coluna canônica de Basileia (mesma normalização do Scatter Plot principal)
+                    df_periodo = _garantir_indice_basileia_coluna(df_periodo)
                     df_scatter_brincar = df_periodo[df_periodo['Instituição'].isin(bancos_selecionados_brincar)].copy()
 
                     # Calcular métrica derivada
