@@ -6974,6 +6974,20 @@ elif menu == "DRE":
         df.loc[mask_set_dez & df["valor_jun"].isna(), "ytd"] = np.nan
         return df.drop(columns=["valor_jun"])
 
+    def anualizar_ytd_por_mes(df: pd.DataFrame, labels: list[str]) -> pd.DataFrame:
+        """Anualiza YTD (ytd * 12/mes) para labels informados."""
+        if df.empty or "mes" not in df.columns or "Label" not in df.columns:
+            return df
+        out = df.copy()
+        mask_label = out["Label"].isin(labels)
+        if not mask_label.any():
+            return out
+        meses = pd.to_numeric(out.loc[mask_label, "mes"], errors="coerce")
+        fator = 12 / meses
+        fator[(meses <= 0) | meses.isna()] = np.nan
+        out.loc[mask_label, "ytd"] = pd.to_numeric(out.loc[mask_label, "ytd"], errors="coerce") * fator
+        return out
+
     def compute_yoy(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df["ytd"] = pd.to_numeric(df["ytd"], errors="coerce")
@@ -7051,6 +7065,7 @@ elif menu == "DRE":
 
         df_valores = pd.concat(df_values, ignore_index=True)
         df_ytd = compute_ytd_irregular(df_valores)
+        df_ytd = anualizar_ytd_por_mes(df_ytd, ["Resultado de Intermediação Financeira Bruto"])
         df_ytd = compute_yoy(df_ytd)
         df_ytd["PeriodoExib"] = df_ytd["Periodo"].apply(periodo_para_exibicao)
         return df_ytd, dre_msg, df_base, df_valores

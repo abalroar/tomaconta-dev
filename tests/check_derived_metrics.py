@@ -89,6 +89,48 @@ def test_anualizacao_desp_captacao():
         _assert_close(atual, valor)
 
 
+def test_pdd_set_dez_acumulado_e_anualizado_nas_metricas():
+    df_dre = pd.DataFrame(
+        {
+            "Instituição": ["Banco A"] * 4,
+            "Período": ["1/2025", "2/2025", "3/2025", "4/2025"],
+            "Resultado com Perda Esperada (f)": [3.0, 6.0, 9.0, 12.0],
+            "Rendas de Operações de Crédito (c)": [20.0, 20.0, 20.0, 20.0],
+            "Rendas de Arrendamento Financeiro (d)": [10.0, 10.0, 10.0, 10.0],
+            "Rendas de Outras Operações com Características de Concessão de Crédito (e)": [10.0, 10.0, 10.0, 10.0],
+            "Rendas de Aplicações Interfinanceiras de Liquidez (a)": [8.0, 8.0, 8.0, 8.0],
+            "Rendas de Títulos e Valores Mobiliários (b)": [12.0, 12.0, 12.0, 12.0],
+            "Despesas de Captações (g)": [1.0, 1.0, 1.0, 1.0],
+        }
+    )
+    df_principal = pd.DataFrame(
+        {
+            "Instituição": ["Banco A"] * 4,
+            "Período": ["1/2025", "2/2025", "3/2025", "4/2025"],
+            "Captações": [100.0, 100.0, 100.0, 100.0],
+        }
+    )
+
+    df_resultado, _ = build_derived_metrics(df_dre, df_principal)
+
+    # NIM bruta = 40 em todos os períodos. Para Set/Dez:
+    # desp_pdd_ytd = jun + periodo; anualização = ytd * (12/mes)
+    esperado_nim = {
+        "1/2025": 3.0 * (12 / 3) / 40.0,
+        "2/2025": 6.0 * (12 / 6) / 40.0,
+        "3/2025": (6.0 + 9.0) * (12 / 9) / 40.0,
+        "4/2025": (6.0 + 12.0) * (12 / 12) / 40.0,
+    }
+
+    for periodo, valor in esperado_nim.items():
+        atual = df_resultado.loc[
+            (df_resultado["Período"] == periodo)
+            & (df_resultado["Métrica"] == "Desp PDD / NIM bruta"),
+            "Valor",
+        ].iloc[0]
+        _assert_close(atual, valor)
+
+
 def test_denominador_zero_nan():
     df_dre = pd.DataFrame(
         {
@@ -131,5 +173,6 @@ def test_denominador_zero_nan():
 if __name__ == "__main__":
     test_metricas_derivadas_basico()
     test_anualizacao_desp_captacao()
+    test_pdd_set_dez_acumulado_e_anualizado_nas_metricas()
     test_denominador_zero_nan()
     print("OK")
