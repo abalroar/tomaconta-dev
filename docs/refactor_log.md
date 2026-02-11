@@ -53,3 +53,22 @@
 - Extraído pré-processamento pesado da aba Rankings para `_get_rankings_base_df` com `@st.cache_data` (normalização de lucro, CET1 e merge complementar).
 - Cache invalidado por token de versão dos caches `principal/capital`, flag de mescla de capital e assinatura de aliases.
 - Objetivo: remover recomputação completa a cada clique no multiselect de bancos.
+
+
+## Hotfix NameError na aba Peers
+
+- Reintroduzido `_slice_cache_for_peers` como shim de compatibilidade para evitar quebra em deployments com código parcial (erro `NameError`).
+- Mantida lógica de recorte por `Instituição`/`Período` sem impacto na semântica dos indicadores.
+
+
+## Export PNG no Ranking
+
+- Adicionado utilitário `_plotly_fig_to_png_bytes` para converter figuras Plotly em PNG.
+- Incluído botão de exportação PNG no ranking geral e no ranking de Basileia (capital).
+- Fallback amigável quando engine de imagem não estiver disponível no ambiente.
+
+
+## Hardening de compatibilidade Peers
+
+- Adicionado `_get_slice_cache_for_peers_fn()` para resolver dinamicamente o recorte de peers com fallback defensivo.
+- Evita `NameError` em cenários de deploy parcial/misto, mantendo o recorte por banco/período no fluxo da aba.

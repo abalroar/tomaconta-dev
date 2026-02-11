@@ -2040,6 +2040,29 @@ def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
     return None
 
 
+
+
+def _slice_cache_for_peers(
+    df: Optional[pd.DataFrame],
+    bancos: Optional[list] = None,
+    periodos: Optional[list] = None,
+) -> Optional[pd.DataFrame]:
+    """Compat shim para versões que ainda chamam este helper.
+
+    Mantido para evitar NameError em deployments com código parcialmente atualizado.
+    """
+    if df is None or df.empty:
+        return df
+    if "Instituição" not in df.columns or "Período" not in df.columns:
+        return df
+
+    mask = pd.Series(True, index=df.index)
+    if bancos:
+        mask &= df["Instituição"].isin(bancos)
+    if periodos:
+        mask &= df["Período"].isin(periodos)
+    return df.loc[mask].copy()
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _carregar_cache_relatorio_slice(
     tipo_cache: str,
@@ -2088,6 +2111,28 @@ def _carregar_cache_relatorio_slice(
         df = df[df["Instituição"].isin(instituicoes)]
     return df
 
+
+
+
+def _get_slice_cache_for_peers_fn():
+    """Retorna função de recorte para peers com fallback defensivo."""
+    fn = globals().get("_slice_cache_for_peers")
+    if callable(fn):
+        return fn
+
+    def _fallback(df: Optional[pd.DataFrame], bancos: Optional[list] = None, periodos: Optional[list] = None):
+        if df is None or df.empty:
+            return df
+        if "Instituição" not in df.columns or "Período" not in df.columns:
+            return df
+        mask = pd.Series(True, index=df.index)
+        if bancos:
+            mask &= df["Instituição"].isin(bancos)
+        if periodos:
+            mask &= df["Período"].isin(periodos)
+        return df.loc[mask].copy()
+
+    return _fallback
 
 def _preparar_metricas_extra_peers(
     bancos: list,
@@ -3296,6 +3341,17 @@ def _carregar_logo_base64(logo_path: str, target_width: int = 200) -> str:
 
 
 @st.cache_data(show_spinner=False)
+def _plotly_fig_to_png_bytes(fig, width: int = 1600, height: int = 900, scale: int = 2) -> Optional[bytes]:
+    """Converte figura Plotly para PNG (retorna None se dependência indisponível)."""
+    if fig is None:
+        return None
+    try:
+        import plotly.io as pio
+        return pio.to_image(fig, format="png", width=width, height=height, scale=scale)
+    except Exception:
+        return None
+
+
 def _get_dados_concatenados(periodos_hash: str, dados_keys: tuple) -> pd.DataFrame:
     """Concatena todos os DataFrames de períodos uma única vez.
 
@@ -4848,16 +4904,15 @@ elif menu == "Peers (Tabela)":
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
 
-                    # Recorte agressivo para reduzir custo de lookup da tabela peers.
-                    periodos_base_peers = {_periodo_ano_anterior(p) for p in periodos_selecionados}
-                    periodos_ext_peers = [p for p in periodos_selecionados + sorted(periodos_base_peers) if p]
-                    cache_ativo = _slice_cache_for_peers(cache_ativo, bancos_selecionados, periodos_ext_peers)
-                    cache_passivo = _slice_cache_for_peers(cache_passivo, bancos_selecionados, periodos_ext_peers)
-                    cache_carteira_pf = _slice_cache_for_peers(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
-                    cache_carteira_pj = _slice_cache_for_peers(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
-                    cache_carteira_instr = _slice_cache_for_peers(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
-                    cache_dre = _slice_cache_for_peers(cache_dre, bancos_selecionados, periodos_ext_peers)
-                    cache_capital = _slice_cache_for_peers(cache_capital, bancos_selecionados, periodos_ext_peers)
+                    # Fallback defensivo: garante ausência de NameError em deploy parcial.
+                    slice_fn = _get_slice_cache_for_peers_fn()
+                    cache_ativo = slice_fn(cache_ativo, bancos_selecionados, periodos_ext_peers)
+                    cache_passivo = slice_fn(cache_passivo, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pf = slice_fn(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pj = slice_fn(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_instr = slice_fn(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
+                    cache_dre = slice_fn(cache_dre, bancos_selecionados, periodos_ext_peers)
+                    cache_capital = slice_fn(cache_capital, bancos_selecionados, periodos_ext_peers)
 
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
@@ -5681,6 +5736,18 @@ elif menu == "Rankings":
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key="exportar_resumo_excel_basileia"
                                 )
+
+                                png_bytes = _plotly_fig_to_png_bytes(fig_basileia)
+                                if png_bytes:
+                                    st.download_button(
+                                        label="exportar gráfico PNG",
+                                        data=png_bytes,
+                                        file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.png",
+                                        mime="image/png",
+                                        key="exportar_grafico_png_basileia"
+                                    )
+                                else:
+                                    st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
                 else:
                     if df_selecionado.empty:
                         st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
@@ -5823,6 +5890,18 @@ elif menu == "Rankings":
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key="exportar_resumo_excel"
                             )
+
+                            png_bytes = _plotly_fig_to_png_bytes(fig_resumo)
+                            if png_bytes:
+                                st.download_button(
+                                    label="exportar gráfico PNG",
+                                    data=png_bytes,
+                                    file_name=f"ranking_{periodo_resumo.replace('/', '-')}.png",
+                                    mime="image/png",
+                                    key="exportar_grafico_png_ranking"
+                                )
+                            else:
+                                st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
 
             if grafico_base == "Deltas (antes e depois)":
                 st.markdown("---")
