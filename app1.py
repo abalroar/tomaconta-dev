@@ -4836,6 +4836,7 @@ elif False and menu == "Painel":
 elif menu == "Peers (Tabela)":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()
+        df = _normalizar_lucro_liquido(df)
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -6008,7 +6009,7 @@ elif menu == "Rankings":
                             st.warning(f"variável '{variavel}' não encontrada nos dados")
                             continue
 
-                        format_info = get_axis_format(variavel)
+                        format_info = get_axis_format(coluna_variavel)
 
                         dados_grafico = []
                         for instituicao in bancos_selecionados_delta:
@@ -6024,9 +6025,9 @@ elif menu == "Rankings":
 
                                 delta_absoluto = v_sub - v_ini
 
-                                if variavel in VARS_PERCENTUAL:
-                                    delta_texto = f"{delta_absoluto * 100:+.2f}pp"
-                                elif variavel in VARS_MOEDAS:
+                                if _is_variavel_percentual(coluna_variavel):
+                                    delta_texto = f"{delta_absoluto * 100:+.2f}%"
+                                elif coluna_variavel in VARS_MOEDAS:
                                     delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
                                 else:
                                     delta_texto = f"{delta_absoluto:+.2f}"
@@ -6203,7 +6204,12 @@ elif menu == "Rankings":
 
                             eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
                             eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
-                            eixo_titulo = "Δ %" if tipo_variacao == "Δ %" else "Δ absoluto"
+                            if tipo_variacao == "Δ %":
+                                eixo_titulo = "Δ %"
+                            elif _is_variavel_percentual(coluna_variavel):
+                                eixo_titulo = "Δ absoluto (%)"
+                            else:
+                                eixo_titulo = "Δ absoluto"
 
                             fig_barras = go.Figure()
                             fig_barras.add_trace(go.Bar(

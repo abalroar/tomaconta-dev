@@ -77,3 +77,9 @@
 ## Warnings de groupby (pandas futuro)
 
 - Definido `observed=False` explicitamente nos `groupby` com categorias para silenciar `FutureWarning` e estabilizar comportamento entre versões de pandas.
+
+
+## Correções funcionais Peers/Rankings
+
+- Na aba **Peers (Tabela)**, aplicado `_normalizar_lucro_liquido(df)` antes da montagem para garantir `Lucro Líquido Acumulado YTD` consistente (mesma lógica da aba Rankings).
+- Na aba **Rankings > Deltas**, o formato de eixo e rótulo para variáveis percentuais agora usa a coluna base (`coluna_variavel`) e exibe `%` em `Δ absoluto` (ex.: `6.23%` em vez de `0.06`).
