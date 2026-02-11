@@ -1643,6 +1643,43 @@ def _normalizar_basileia_display(serie: pd.Series) -> pd.Series:
     return _normalizar_percentual_display(serie, "Índice de Basileia")
 
 
+def _normalizar_valor_indicador(valor, variavel: Optional[str]):
+    """Normaliza valor bruto para escala interna consistente antes do display.
+
+    Para variáveis percentuais, converte escala 0-100 para decimal (0-1),
+    preservando valores já em decimal.
+    """
+    if valor is None or pd.isna(valor):
+        return np.nan
+
+    try:
+        valor_num = float(valor)
+    except Exception:
+        return np.nan
+
+    if _is_variavel_percentual(variavel) and abs(valor_num) > 1:
+        return valor_num / 100
+    return valor_num
+
+
+def _selecionar_valor_delta(df_periodo: pd.DataFrame, instituicao: str, coluna_variavel: str):
+    """Seleciona valor robusto para cálculo de delta em caso de duplicidades."""
+    if df_periodo is None or df_periodo.empty or coluna_variavel not in df_periodo.columns:
+        return np.nan
+
+    serie = pd.to_numeric(
+        df_periodo.loc[df_periodo['Instituição'] == instituicao, coluna_variavel],
+        errors='coerce'
+    ).dropna()
+    if serie.empty:
+        return np.nan
+
+    # Em períodos com linhas duplicadas para a instituição, prioriza maior |valor|,
+    # reduzindo chance de capturar registro parcial/stale.
+    idx = serie.abs().idxmax()
+    return _normalizar_valor_indicador(serie.loc[idx], coluna_variavel)
+
+
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
     if variavel and "Basileia" in variavel:
         return _normalizar_basileia_display(serie)
@@ -2740,9 +2777,13 @@ def _calcular_roe_anualizado_peers(
     if valid_t.any():
         cand_t = subset_t.loc[valid_t].copy()
         cand_t["_ll_num"] = lucro_num_series.loc[valid_t]
-        # Heurística local da aba Peers: prioriza maior |LL YTD| para evitar
-        # linha stale/trimestral quando coexistem registros duplicados.
-        row_t = cand_t.loc[cand_t["_ll_num"].abs().idxmax()]
+        cand_t["_pl_num"] = pl_num_series.loc[valid_t]
+
+        # Heurística robusta para duplicidades no período:
+        # 1) prioriza maior PL (linha mais completa/atualizada);
+        # 2) desempata por maior |LL YTD|.
+        cand_t = cand_t.sort_values(["_pl_num", "_ll_num"], key=lambda c: c.abs(), ascending=False)
+        row_t = cand_t.iloc[0]
         lucro_num = _coerce_numeric_value(row_t.get(coluna_lucro))
         pl_t = _coerce_numeric_value(row_t.get(coluna_pl))
     else:
@@ -4920,11 +4961,14 @@ elif False and menu == "Painel":
 
             format_info = get_axis_format(indicador_col)
 
-            def formatar_numero(valor, fmt_info, incluir_sinal=False):
-                if pd.isna(valor):
+            def formatar_numero(valor, fmt_info, incluir_sinal=False, variavel_ref: Optional[str] = None):
+                valor_norm = _normalizar_valor_indicador(valor, variavel_ref)
+                if pd.isna(valor_norm):
                     return "N/A"
-                valor_formatado = format(valor, fmt_info['tickformat'])
-                if incluir_sinal and valor > 0:
+
+                valor_display = valor_norm * fmt_info['multiplicador']
+                valor_formatado = format(valor_display, fmt_info['tickformat'])
+                if incluir_sinal and valor_display > 0:
                     valor_formatado = f"+{valor_formatado}"
                 return f"{valor_formatado}{fmt_info['ticksuffix']}"
 
@@ -5793,11 +5837,13 @@ elif menu == "Rankings":
 
             format_info = get_axis_format(indicador_col)
 
-            def formatar_numero(valor, fmt_info, incluir_sinal=False):
-                if pd.isna(valor):
+            def formatar_numero(valor, fmt_info, incluir_sinal=False, variavel_ref: Optional[str] = None):
+                valor_norm = _normalizar_valor_indicador(valor, variavel_ref)
+                if pd.isna(valor_norm):
                     return "N/A"
-                valor_formatado = format(valor, fmt_info['tickformat'])
-                if incluir_sinal and valor > 0:
+                valor_display = valor_norm * fmt_info['multiplicador']
+                valor_formatado = format(valor_display, fmt_info['tickformat'])
+                if incluir_sinal and valor_display > 0:
                     valor_formatado = f"+{valor_formatado}"
                 return f"{valor_formatado}{fmt_info['ticksuffix']}"
 
@@ -5996,7 +6042,10 @@ elif menu == "Rankings":
                     if df_selecionado.empty:
                         st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
                     else:
-                        df_selecionado['valor_display'] = df_selecionado[indicador_col] * format_info['multiplicador']
+                        df_selecionado['_valor_norm'] = df_selecionado[indicador_col].apply(
+                            lambda v: _normalizar_valor_indicador(v, indicador_col)
+                        )
+                        df_selecionado['valor_display'] = df_selecionado['_valor_norm'] * format_info['multiplicador']
                         media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
                         label_media = get_label_media(coluna_peso_resumo)
 
@@ -6008,7 +6057,7 @@ elif menu == "Rankings":
                             df_selecionado['ordem'] = pd.Categorical(df_selecionado['Instituição'], categories=ordem, ordered=True)
                             df_selecionado = df_selecionado.sort_values('ordem')
 
-                        df_selecionado['ranking'] = df_selecionado[indicador_col].rank(method='first', ascending=False).astype(int)
+                        df_selecionado['ranking'] = df_selecionado['valor_display'].rank(method='first', ascending=False).astype(int)
                         df_selecionado['diff_media'] = df_selecionado['valor_display'] - media_display
 
                         if media_display and media_display != 0:
@@ -6018,10 +6067,10 @@ elif menu == "Rankings":
                             df_selecionado['diff_pct_text'] = "N/A"
 
                         df_selecionado['valor_text'] = df_selecionado['valor_display'].map(
-                            lambda v: formatar_numero(v, format_info)
+                            lambda v: formatar_numero(v, format_info, variavel_ref=indicador_col)
                         )
                         df_selecionado['diff_text'] = df_selecionado['diff_media'].map(
-                            lambda v: formatar_numero(v, format_info, incluir_sinal=True)
+                            lambda v: formatar_numero(v, format_info, incluir_sinal=True, variavel_ref=indicador_col)
                         )
 
                         n_bancos = len(df_selecionado)
@@ -6260,62 +6309,58 @@ elif menu == "Rankings":
 
                         dados_grafico = []
                         for instituicao in bancos_selecionados_delta:
-                            valor_ini = df_inicial[df_inicial['Instituição'] == instituicao][coluna_variavel].values
-                            valor_sub = df_subsequente[df_subsequente['Instituição'] == instituicao][coluna_variavel].values
+                            v_ini = _selecionar_valor_delta(df_inicial, instituicao, coluna_variavel)
+                            v_sub = _selecionar_valor_delta(df_subsequente, instituicao, coluna_variavel)
 
-                            if len(valor_ini) > 0 and len(valor_sub) > 0:
-                                v_ini = valor_ini[0]
-                                v_sub = valor_sub[0]
+                            if pd.isna(v_ini) or pd.isna(v_sub):
+                                continue
 
-                                if pd.isna(v_ini) or pd.isna(v_sub):
-                                    continue
+                            delta_absoluto = v_sub - v_ini
 
-                                delta_absoluto = v_sub - v_ini
+                            if _is_variavel_percentual(coluna_variavel):
+                                delta_texto = f"{delta_absoluto * 100:+.2f}%"
+                            elif coluna_variavel in VARS_MOEDAS:
+                                delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                            else:
+                                delta_texto = f"{delta_absoluto:+.2f}"
 
-                                if _is_variavel_percentual(coluna_variavel):
-                                    delta_texto = f"{delta_absoluto * 100:+.2f}%"
-                                elif coluna_variavel in VARS_MOEDAS:
-                                    delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
+                            if v_ini == 0:
+                                if delta_absoluto > 0:
+                                    variacao_pct = float('inf')
+                                    variacao_texto = "Valor Inicial 0 - ∞"
+                                elif delta_absoluto < 0:
+                                    variacao_pct = float('-inf')
+                                    variacao_texto = "Valor Inicial 0 - ∞"
                                 else:
-                                    delta_texto = f"{delta_absoluto:+.2f}"
+                                    variacao_pct = 0
+                                    variacao_texto = "0.0%"
+                            elif v_ini < 0 and v_sub > 0:
+                                variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
+                            elif v_ini > 0 and v_sub < 0:
+                                variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
+                            else:
+                                variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
+                                variacao_texto = f"{variacao_pct:+.1f}%"
 
-                                if v_ini == 0:
-                                    if delta_absoluto > 0:
-                                        variacao_pct = float('inf')
-                                        variacao_texto = "Valor Inicial 0 - ∞"
-                                    elif delta_absoluto < 0:
-                                        variacao_pct = float('-inf')
-                                        variacao_texto = "Valor Inicial 0 - ∞"
-                                    else:
-                                        variacao_pct = 0
-                                        variacao_texto = "0.0%"
-                                elif v_ini < 0 and v_sub > 0:
-                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                                    variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
-                                elif v_ini > 0 and v_sub < 0:
-                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                                    variacao_texto = f"{variacao_pct:+.1f}% (inversão)"
-                                else:
-                                    variacao_pct = ((v_sub - v_ini) / abs(v_ini)) * 100
-                                    variacao_texto = f"{variacao_pct:+.1f}%"
+                            memoria_calculo = (
+                                f"{periodo_subsequente_delta}: R$ {v_sub/1e6:,.1f}MM\n"
+                                f"{periodo_inicial_delta}: R$ {v_ini/1e6:,.1f}MM\n"
+                                f"Δ abs: {delta_texto}\n"
+                                f"Δ %: {variacao_texto}"
+                            ).replace(',', '.')
 
-                                memoria_calculo = (
-                                    f"{periodo_subsequente_delta}: R$ {v_sub/1e6:,.1f}MM\n"
-                                    f"{periodo_inicial_delta}: R$ {v_ini/1e6:,.1f}MM\n"
-                                    f"Δ abs: {delta_texto}\n"
-                                    f"Δ %: {variacao_texto}"
-                                ).replace(',', '.')
-
-                                dados_grafico.append({
-                                    'instituicao': instituicao,
-                                    'valor_ini': v_ini,
-                                    'valor_sub': v_sub,
-                                    'delta': delta_absoluto,
-                                    'delta_texto': delta_texto,
-                                    'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
-                                    'variacao_texto': variacao_texto,
-                                    'memoria_calculo': memoria_calculo
-                                })
+                            dados_grafico.append({
+                                'instituicao': instituicao,
+                                'valor_ini': v_ini,
+                                'valor_sub': v_sub,
+                                'delta': delta_absoluto,
+                                'delta_texto': delta_texto,
+                                'variacao_pct': variacao_pct if not (variacao_pct == float('inf') or variacao_pct == float('-inf')) else (1e10 if variacao_pct > 0 else -1e10),
+                                'variacao_texto': variacao_texto,
+                                'memoria_calculo': memoria_calculo
+                            })
 
                         if not dados_grafico:
                             st.info(f"sem dados disponíveis para '{variavel}' nos períodos selecionados")
@@ -6330,13 +6375,13 @@ elif menu == "Rankings":
                             fig_delta = go.Figure()
                             todos_y = []
                             for dado in dados_grafico:
-                                todos_y.append(dado['valor_ini'] * format_info['multiplicador'])
-                                todos_y.append(dado['valor_sub'] * format_info['multiplicador'])
+                                todos_y.append(_normalizar_valor_indicador(dado['valor_ini'], coluna_variavel) * format_info['multiplicador'])
+                                todos_y.append(_normalizar_valor_indicador(dado['valor_sub'], coluna_variavel) * format_info['multiplicador'])
 
                             for i, dado in enumerate(dados_grafico):
                                 inst = dado['instituicao']
-                                y_ini = dado['valor_ini'] * format_info['multiplicador']
-                                y_sub = dado['valor_sub'] * format_info['multiplicador']
+                                y_ini = _normalizar_valor_indicador(dado['valor_ini'], coluna_variavel) * format_info['multiplicador']
+                                y_sub = _normalizar_valor_indicador(dado['valor_sub'], coluna_variavel) * format_info['multiplicador']
                                 delta_positivo = dado['delta'] > 0
 
                                 cor_sub = '#2E7D32' if delta_positivo else '#7B1E3A'
@@ -6440,7 +6485,7 @@ elif menu == "Rankings":
                                     else:
                                         dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
                                 else:
-                                    dado['valor_plot'] = dado['delta'] * format_info['multiplicador']
+                                    dado['valor_plot'] = _normalizar_valor_indicador(dado['delta'], coluna_variavel) * format_info['multiplicador']
 
                             n_bancos = len(dados_grafico)
                             orientacao_horizontal = n_bancos > 15
