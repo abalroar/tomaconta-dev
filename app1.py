@@ -1613,6 +1613,47 @@ def _normalizar_indice_para_decimal(serie: pd.Series) -> pd.Series:
     return serie_num
 
 
+
+
+def _ajustar_basileia_para_scatter(df: pd.DataFrame) -> pd.DataFrame:
+    """Ajuste específico da aba Scatter para evitar dupla divisão por 100.
+
+    Regras:
+    - Se vier em 0-100, converte para decimal (0-1).
+    - Se aparentar já ter sido dividido duas vezes (ex.: 0.00165 para 16.5%),
+      reescala para decimal correto multiplicando por 100.
+
+    Observação: ajuste aplicado apenas para o uso da coluna canônica
+    ``Índice de Basileia`` no Scatter.
+    """
+    if df is None or df.empty or "Índice de Basileia" not in df.columns:
+        return df
+
+    df_out = df.copy()
+    serie = pd.to_numeric(df_out["Índice de Basileia"], errors="coerce")
+
+    # 1) Normalização padrão para decimal (0-1)
+    mask_0_100 = serie.abs() > 1
+    if mask_0_100.any():
+        serie = serie.copy()
+        serie.loc[mask_0_100] = serie.loc[mask_0_100] / 100
+
+    # 2) Correção excepcional: provável dupla divisão por 100
+    #    Cenário típico do bug: 0.00165 (deveria 0.165)
+    serie_valid = serie.dropna().abs()
+    if not serie_valid.empty:
+        q95 = float(serie_valid.quantile(0.95))
+        med = float(serie_valid.median())
+        # Se praticamente toda a distribuição está abaixo de 3%,
+        # assume erro de dupla divisão e corrige para base decimal correta.
+        if q95 < 0.03 and med < 0.02:
+            serie = serie * 100
+            print(f"[DIAG][SCATTER][BASILEIA] Reescala aplicada (dupla divisão detectada): med={med:.6f}, q95={q95:.6f}")
+
+    # mantém somente valores positivos plausíveis (sem truncar extremos altos)
+    df_out["Índice de Basileia"] = serie
+    return df_out
+
 def _log_diagnostico_basileia_scatter(
     df_base: pd.DataFrame,
     eixo_variavel: str,
@@ -1914,7 +1955,7 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     out["_tri_tmp"] = pd.to_numeric(periodo_split[0], errors="coerce")
     out["_ano_tmp"] = pd.to_numeric(periodo_split[1], errors="coerce")
 
-    for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False).groups.items():
+    for (_, _), idx in out.groupby(["Instituição", "_ano_tmp"], dropna=False, observed=False).groups.items():
         g = out.loc[idx].copy().sort_values("_tri_tmp")
         raw_map = g.set_index("_tri_tmp")[col_ll].to_dict()
 
@@ -1949,13 +1990,50 @@ def _normalizar_lucro_liquido(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _build_peers_lookup(df: Optional[pd.DataFrame]) -> dict:
+    """Cria índice rápido (Instituição, Período) -> linha para lookups repetidos.
+
+    Esta função evita filtros booleanos O(n) em cada célula da tabela de peers.
+    O lookup é armazenado em ``df.attrs`` e reutilizado enquanto o DataFrame
+    não muda (mesmo shape e mesmas colunas).
+    """
+    if df is None or df.empty:
+        return {}
+    if "Instituição" not in df.columns or "Período" not in df.columns:
+        return {}
+
+    meta_nova = (len(df), tuple(df.columns))
+    meta_existente = df.attrs.get("_peers_lookup_meta")
+    lookup_existente = df.attrs.get("_peers_lookup")
+    if meta_existente == meta_nova and isinstance(lookup_existente, dict):
+        return lookup_existente
+
+    lookup = {}
+    # Evita iterrows(): converte para registros e preserva 1ª ocorrência por chave.
+    inst_vals = df["Instituição"].tolist()
+    per_vals = df["Período"].tolist()
+    registros = df.to_dict("records")
+
+    for inst, per, row in zip(inst_vals, per_vals, registros):
+        chave = (inst, per)
+        if chave not in lookup:
+            lookup[chave] = row
+
+    df.attrs["_peers_lookup"] = lookup
+    df.attrs["_peers_lookup_meta"] = meta_nova
+    return lookup
+
+
 def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optional[str]):
     if coluna is None or df is None or df.empty:
         return None
-    df_cell = df[(df["Instituição"] == banco) & (df["Período"] == periodo)]
-    if df_cell.empty:
+    lookup = _build_peers_lookup(df)
+    if not lookup:
         return None
-    return df_cell.iloc[0].get(coluna)
+    row = lookup.get((banco, periodo))
+    if row is None:
+        return None
+    return row.get(coluna)
 
 
 def _coerce_numeric_value(valor):
@@ -1976,6 +2054,8 @@ def _somar_valores(valores: list) -> Optional[float]:
     if not numeros:
         return None
     return float(sum(numeros))
+
+
 
 
 def _aplicar_aliases_df(df: Optional[pd.DataFrame], dict_aliases: dict) -> Optional[pd.DataFrame]:
@@ -2000,6 +2080,100 @@ def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
         return resultado.dados
     return None
 
+
+
+
+def _slice_cache_for_peers(
+    df: Optional[pd.DataFrame],
+    bancos: Optional[list] = None,
+    periodos: Optional[list] = None,
+) -> Optional[pd.DataFrame]:
+    """Compat shim para versões que ainda chamam este helper.
+
+    Mantido para evitar NameError em deployments com código parcialmente atualizado.
+    """
+    if df is None or df.empty:
+        return df
+    if "Instituição" not in df.columns or "Período" not in df.columns:
+        return df
+
+    mask = pd.Series(True, index=df.index)
+    if bancos:
+        mask &= df["Instituição"].isin(bancos)
+    if periodos:
+        mask &= df["Período"].isin(periodos)
+    return df.loc[mask].copy()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_cache_relatorio_slice(
+    tipo_cache: str,
+    cache_token: str,
+    periodos: tuple = (),
+    instituicoes: tuple = (),
+) -> Optional[pd.DataFrame]:
+    """Carrega recorte de cache por período/instituição para reduzir I/O e RAM."""
+    manager = get_cache_manager()
+    if manager is None:
+        return None
+
+    cache = manager.get_cache(tipo_cache)
+    if cache is None:
+        return None
+
+    periodos = tuple(periodos or ())
+    instituicoes = tuple(instituicoes or ())
+
+    # Caminho rápido: parquet com filtro no reader
+    if cache.arquivo_dados.exists():
+        try:
+            import pyarrow.dataset as ds
+            dataset = ds.dataset(cache.arquivo_dados)
+            filtro = None
+            if periodos:
+                f = ds.field("Período").isin(list(periodos))
+                filtro = f if filtro is None else filtro & f
+            if instituicoes:
+                f = ds.field("Instituição").isin(list(instituicoes))
+                filtro = f if filtro is None else filtro & f
+            tabela = dataset.to_table(filter=filtro) if filtro is not None else dataset.to_table()
+            return tabela.to_pandas()
+        except Exception:
+            pass
+
+    # Fallback: carregar e filtrar em pandas
+    resultado = manager.carregar(tipo_cache)
+    if not resultado.sucesso or resultado.dados is None:
+        return None
+
+    df = resultado.dados
+    if periodos and "Período" in df.columns:
+        df = df[df["Período"].isin(periodos)]
+    if instituicoes and "Instituição" in df.columns:
+        df = df[df["Instituição"].isin(instituicoes)]
+    return df
+
+
+
+
+def _get_slice_cache_for_peers_fn():
+    """Retorna função de recorte para peers com fallback defensivo."""
+    fn = globals().get("_slice_cache_for_peers")
+    if callable(fn):
+        return fn
+
+    def _fallback(df: Optional[pd.DataFrame], bancos: Optional[list] = None, periodos: Optional[list] = None):
+        if df is None or df.empty:
+            return df
+        if "Instituição" not in df.columns or "Período" not in df.columns:
+            return df
+        mask = pd.Series(True, index=df.index)
+        if bancos:
+            mask &= df["Instituição"].isin(bancos)
+        if periodos:
+            mask &= df["Período"].isin(periodos)
+        return df.loc[mask].copy()
+
+    return _fallback
 
 def _preparar_metricas_extra_peers(
     bancos: list,
@@ -3208,6 +3382,17 @@ def _carregar_logo_base64(logo_path: str, target_width: int = 200) -> str:
 
 
 @st.cache_data(show_spinner=False)
+def _plotly_fig_to_png_bytes(fig, width: int = 1600, height: int = 900, scale: int = 2) -> Optional[bytes]:
+    """Converte figura Plotly para PNG (retorna None se dependência indisponível)."""
+    if fig is None:
+        return None
+    try:
+        import plotly.io as pio
+        return pio.to_image(fig, format="png", width=width, height=height, scale=scale)
+    except Exception:
+        return None
+
+
 def _get_dados_concatenados(periodos_hash: str, dados_keys: tuple) -> pd.DataFrame:
     """Concatena todos os DataFrames de períodos uma única vez.
 
@@ -3623,6 +3808,56 @@ def carregar_dados_periodos():
         st.session_state['dados_periodos_fonte'] = 'desconhecida'
     print(_perf_log("init_dados_periodos"))
 
+
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_rankings_base_df(
+    principal_token: str,
+    capital_token: str,
+    capital_mesclado: bool,
+    alias_sig: tuple,
+) -> pd.DataFrame:
+    """Pré-processa DataFrame base de Rankings uma única vez por versão de cache.
+
+    Evita recomputar, a cada interação do multiselect, etapas pesadas como:
+    - normalização de lucro líquido no dataframe completo
+    - enriquecimento CET1/merge de capital
+    """
+    _ = (principal_token, capital_token, capital_mesclado, alias_sig)
+    df = get_dados_concatenados()
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = _normalizar_lucro_liquido(df.copy())
+    df = adicionar_indice_cet1(df)
+
+    precisa_enriquecer_cet1 = (
+        "Índice de CET1" not in df.columns
+        or df["Índice de CET1"].isna().any()
+    )
+
+    if precisa_enriquecer_cet1:
+        df_cet1 = construir_cet1_capital(
+            st.session_state.get("dados_capital", {}),
+            st.session_state.get("dict_aliases", {}),
+            st.session_state.get("df_aliases"),
+            st.session_state.get("dados_periodos"),
+        )
+        if not df_cet1.empty:
+            df = df.merge(
+                df_cet1,
+                on=["Período", "Instituição"],
+                how="left",
+                suffixes=("", "_cet1"),
+            )
+            if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
+                df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
+            elif "Índice de CET1_cet1" in df.columns:
+                df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
+                df = df.drop(columns=["Índice de CET1_cet1"])
+
+    return df
 
 def carregar_dados_capital():
     if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
@@ -4642,6 +4877,7 @@ elif False and menu == "Painel":
 elif menu == "Peers (Tabela)":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()
+        df = _normalizar_lucro_liquido(df)
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -4689,13 +4925,18 @@ elif menu == "Peers (Tabela)":
 
                 if bancos_selecionados and periodos_selecionados:
                     periodos_selecionados = ordenar_periodos(periodos_selecionados, reverso=True)
-                    cache_ativo = _carregar_cache_relatorio("ativo")
-                    cache_passivo = _carregar_cache_relatorio("passivo")
-                    cache_carteira_pf = _carregar_cache_relatorio("carteira_pf")
-                    cache_carteira_pj = _carregar_cache_relatorio("carteira_pj")
-                    cache_carteira_instr = _carregar_cache_relatorio("carteira_instrumentos")
-                    cache_dre = _carregar_cache_relatorio("dre")
-                    cache_capital = _carregar_cache_relatorio("capital")
+                    periodos_base_peers = {_periodo_ano_anterior(p) for p in periodos_selecionados}
+                    periodos_ext_peers = tuple(sorted({p for p in (periodos_selecionados + sorted(periodos_base_peers)) if p}))
+                    bancos_tuple = tuple(bancos_selecionados)
+
+                    # Carregamento já recortado no nível do cache (evita ler dataset inteiro)
+                    cache_ativo = _carregar_cache_relatorio_slice("ativo", _cache_version_token("ativo"), periodos_ext_peers, bancos_tuple)
+                    cache_passivo = _carregar_cache_relatorio_slice("passivo", _cache_version_token("passivo"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_pf = _carregar_cache_relatorio_slice("carteira_pf", _cache_version_token("carteira_pf"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_pj = _carregar_cache_relatorio_slice("carteira_pj", _cache_version_token("carteira_pj"), periodos_ext_peers, bancos_tuple)
+                    cache_carteira_instr = _carregar_cache_relatorio_slice("carteira_instrumentos", _cache_version_token("carteira_instrumentos"), periodos_ext_peers, bancos_tuple)
+                    cache_dre = _carregar_cache_relatorio_slice("dre", _cache_version_token("dre"), periodos_ext_peers, bancos_tuple)
+                    cache_capital = _carregar_cache_relatorio_slice("capital", _cache_version_token("capital"), periodos_ext_peers, bancos_tuple)
 
                     cache_ativo = _aplicar_aliases_df(cache_ativo, dict_aliases)
                     cache_passivo = _aplicar_aliases_df(cache_passivo, dict_aliases)
@@ -4704,6 +4945,16 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
+
+                    # Fallback defensivo: garante ausência de NameError em deploy parcial.
+                    slice_fn = _get_slice_cache_for_peers_fn()
+                    cache_ativo = slice_fn(cache_ativo, bancos_selecionados, periodos_ext_peers)
+                    cache_passivo = slice_fn(cache_passivo, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pf = slice_fn(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_pj = slice_fn(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
+                    cache_carteira_instr = slice_fn(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
+                    cache_dre = slice_fn(cache_dre, bancos_selecionados, periodos_ext_peers)
+                    cache_capital = slice_fn(cache_capital, bancos_selecionados, periodos_ext_peers)
 
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
@@ -4813,6 +5064,7 @@ elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = _garantir_indice_basileia_coluna(df)
+        df = _ajustar_basileia_para_scatter(df)
 
         colunas_base = [
             col for col in df.columns
@@ -5205,36 +5457,14 @@ elif menu == "Rankings":
                 )
                 st.session_state['_dados_capital_mesclados'] = True
 
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-        df = _normalizar_lucro_liquido(df)
-        df = adicionar_indice_cet1(df)
-
-        # Evita merge custoso de CET1 quando a coluna já está preenchida no dataset base.
-        precisa_enriquecer_cet1 = (
-            "Índice de CET1" not in df.columns
-            or df["Índice de CET1"].isna().any()
+        _perf_start("rankings_base_df")
+        df = _get_rankings_base_df(
+            _cache_version_token("principal"),
+            _cache_version_token("capital"),
+            bool(st.session_state.get('_dados_capital_mesclados', False)),
+            _alias_signature(),
         )
-        if precisa_enriquecer_cet1:
-            _perf_start("rankings_merge_cet1")
-            df_cet1 = construir_cet1_capital(
-                st.session_state.get("dados_capital", {}),
-                st.session_state.get("dict_aliases", {}),
-                st.session_state.get("df_aliases"),
-                st.session_state.get("dados_periodos"),
-            )
-            if not df_cet1.empty:
-                df = df.merge(
-                    df_cet1,
-                    on=["Período", "Instituição"],
-                    how="left",
-                    suffixes=("", "_cet1"),
-                )
-                if "Índice de CET1" not in df.columns and "Índice de CET1_cet1" in df.columns:
-                    df = df.rename(columns={"Índice de CET1_cet1": "Índice de CET1"})
-                elif "Índice de CET1_cet1" in df.columns:
-                    df["Índice de CET1"] = df["Índice de CET1"].fillna(df["Índice de CET1_cet1"])
-                    df = df.drop(columns=["Índice de CET1_cet1"])
-            print(_perf_log("rankings_merge_cet1"))
+        print(_perf_log("rankings_base_df"))
 
         periodos_disponiveis = ordenar_periodos(df['Período'].dropna().unique())
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
@@ -5549,6 +5779,18 @@ elif menu == "Rankings":
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key="exportar_resumo_excel_basileia"
                                 )
+
+                                png_bytes = _plotly_fig_to_png_bytes(fig_basileia)
+                                if png_bytes:
+                                    st.download_button(
+                                        label="exportar gráfico PNG",
+                                        data=png_bytes,
+                                        file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.png",
+                                        mime="image/png",
+                                        key="exportar_grafico_png_basileia"
+                                    )
+                                else:
+                                    st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
                 else:
                     if df_selecionado.empty:
                         st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
@@ -5692,6 +5934,18 @@ elif menu == "Rankings":
                                 key="exportar_resumo_excel"
                             )
 
+                            png_bytes = _plotly_fig_to_png_bytes(fig_resumo)
+                            if png_bytes:
+                                st.download_button(
+                                    label="exportar gráfico PNG",
+                                    data=png_bytes,
+                                    file_name=f"ranking_{periodo_resumo.replace('/', '-')}.png",
+                                    mime="image/png",
+                                    key="exportar_grafico_png_ranking"
+                                )
+                            else:
+                                st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
+
             if grafico_base == "Deltas (antes e depois)":
                 st.markdown("---")
 
@@ -5797,7 +6051,7 @@ elif menu == "Rankings":
                             st.warning(f"variável '{variavel}' não encontrada nos dados")
                             continue
 
-                        format_info = get_axis_format(variavel)
+                        format_info = get_axis_format(coluna_variavel)
 
                         dados_grafico = []
                         for instituicao in bancos_selecionados_delta:
@@ -5813,9 +6067,9 @@ elif menu == "Rankings":
 
                                 delta_absoluto = v_sub - v_ini
 
-                                if variavel in VARS_PERCENTUAL:
-                                    delta_texto = f"{delta_absoluto * 100:+.2f}pp"
-                                elif variavel in VARS_MOEDAS:
+                                if _is_variavel_percentual(coluna_variavel):
+                                    delta_texto = f"{delta_absoluto * 100:+.2f}%"
+                                elif coluna_variavel in VARS_MOEDAS:
                                     delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
                                 else:
                                     delta_texto = f"{delta_absoluto:+.2f}"
@@ -5992,7 +6246,12 @@ elif menu == "Rankings":
 
                             eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
                             eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
-                            eixo_titulo = "Δ %" if tipo_variacao == "Δ %" else "Δ absoluto"
+                            if tipo_variacao == "Δ %":
+                                eixo_titulo = "Δ %"
+                            elif _is_variavel_percentual(coluna_variavel):
+                                eixo_titulo = "Δ absoluto (%)"
+                            else:
+                                eixo_titulo = "Δ absoluto"
 
                             fig_barras = go.Figure()
                             fig_barras.add_trace(go.Bar(
@@ -6490,51 +6749,132 @@ elif menu == "DRE":
                 return ano, mes
         return None, None
 
+    def extrair_ano_mes_periodo(serie_periodo: pd.Series) -> pd.DataFrame:
+        """Extrai ano/mês de períodos em formatos `T/AAAA`, `AAAAMM` e `AAAAMMDD`."""
+        texto = serie_periodo.astype(str).str.strip()
+        ano = pd.Series(pd.NA, index=serie_periodo.index, dtype="Float64")
+        mes = pd.Series(pd.NA, index=serie_periodo.index, dtype="Float64")
+
+        mask_slash = texto.str.contains("/", na=False)
+        if mask_slash.any():
+            partes = texto[mask_slash].str.split("/", expand=True)
+            p1 = pd.to_numeric(partes[0], errors="coerce")
+            p2 = pd.to_numeric(partes[1], errors="coerce")
+            ano.loc[mask_slash] = p2
+            mes_calc = p1.copy()
+            tri_mask = p1.between(1, 4, inclusive="both")
+            mes_calc.loc[tri_mask] = p1.loc[tri_mask].map({1: 3, 2: 6, 3: 9, 4: 12})
+            mes.loc[mask_slash] = mes_calc
+
+        mask_num = ~mask_slash & texto.str.match(r"^\d{6,8}$", na=False)
+        if mask_num.any():
+            nums = texto[mask_num]
+            ano_num = pd.to_numeric(nums.str.slice(0, 4), errors="coerce")
+            mes_num = pd.to_numeric(nums.str.slice(4, 6), errors="coerce")
+            ano.loc[mask_num] = ano_num
+            mes.loc[mask_num] = mes_num
+
+        return pd.DataFrame({"ano": ano.astype("Int64"), "mes": mes.astype("Int64")})
+
     def compute_ytd_irregular(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df[["ano", "mes"]] = df["Periodo"].apply(
-            lambda x: pd.Series(parse_periodo(x))
+        df[["ano", "mes"]] = extrair_ano_mes_periodo(df["Periodo"])
+        df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+
+        keys = ["Instituicao", "Label", "ano"]
+        jun = (
+            df[df["mes"] == 6][keys + ["valor"]]
+            .rename(columns={"valor": "valor_jun"})
+            .drop_duplicates(subset=keys)
         )
-        df["ytd"] = pd.NA
-        for (instituicao, label, ano), grupo in df.groupby(["Instituicao", "Label", "ano"]):
-            valores_mes = {row["mes"]: row["valor"] for _, row in grupo.iterrows()}
-            for idx, row in grupo.iterrows():
-                mes = row["mes"]
-                valor = row["valor"]
-                ytd_val = pd.NA
-                if pd.isna(valor):
-                    ytd_val = pd.NA
-                elif mes in (3, 6):
-                    ytd_val = valor
-                elif mes in (9, 12):
-                    valor_jun = valores_mes.get(6)
-                    if valor_jun is None or pd.isna(valor_jun):
-                        ytd_val = pd.NA
-                    else:
-                        ytd_val = valor + valor_jun
-                else:
-                    ytd_val = valor
-                df.at[idx, "ytd"] = ytd_val
-        return df
+        df = df.merge(jun, on=keys, how="left")
+
+        mask_set_dez = df["mes"].isin([9, 12])
+        df["ytd"] = df["valor"]
+        df.loc[mask_set_dez, "ytd"] = df.loc[mask_set_dez, "valor"] + df.loc[mask_set_dez, "valor_jun"]
+        df.loc[mask_set_dez & df["valor_jun"].isna(), "ytd"] = np.nan
+        return df.drop(columns=["valor_jun"])
 
     def compute_yoy(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df["yoy"] = pd.NA
-        for (instituicao, label, mes), grupo in df.groupby(["Instituicao", "Label", "mes"]):
-            valores_ano = {
-                row["ano"]: row["ytd"]
-                for _, row in grupo.iterrows()
-                if row["ano"] is not None
-            }
-            for idx, row in grupo.iterrows():
-                ano = row["ano"]
-                if ano is None or pd.isna(row["ytd"]):
+        df["ytd"] = pd.to_numeric(df["ytd"], errors="coerce")
+
+        prev = df[["Instituicao", "Label", "mes", "ano", "ytd"]].copy()
+        prev["ano"] = prev["ano"] + 1
+        prev = prev.rename(columns={"ytd": "ytd_prev"})
+
+        df = df.merge(prev, on=["Instituicao", "Label", "mes", "ano"], how="left")
+        df["yoy"] = (df["ytd"] / df["ytd_prev"]) - 1
+        df.loc[df["ytd_prev"].isna() | (df["ytd_prev"] == 0), "yoy"] = np.nan
+        return df.drop(columns=["ytd_prev"])
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _build_dre_base(cache_token: str) -> tuple[pd.DataFrame, str, pd.DataFrame, pd.DataFrame]:
+        """Pré-processa a base DRE uma vez por versão de cache para acelerar a aba."""
+        _ = cache_token
+        df_dre, dre_msg = load_dre_data()
+        if df_dre is None or df_dre.empty:
+            return pd.DataFrame(), dre_msg, pd.DataFrame(), pd.DataFrame()
+
+        col_periodo, col_inst = detectar_colunas_basicas(df_dre)
+        if col_periodo is None:
+            return pd.DataFrame(), "Coluna de período não encontrada nos dados DRE.", pd.DataFrame(), pd.DataFrame()
+
+        mapping_entries = load_dre_mapping()
+        if not mapping_entries:
+            return pd.DataFrame(), "Mapeamento DRE não encontrado ou vazio.", pd.DataFrame(), pd.DataFrame()
+
+        colunas_necessarias = {col_periodo}
+        if col_inst:
+            colunas_necessarias.add(col_inst)
+
+        fonte_para_coluna = {}
+        for entry in mapping_entries:
+            for fonte in entry.get("sources", []):
+                if fonte in fonte_para_coluna:
                     continue
-                anterior = valores_ano.get(ano - 1)
-                if anterior is None or pd.isna(anterior) or anterior == 0:
-                    continue
-                df.at[idx, "yoy"] = (row["ytd"] / anterior) - 1
-        return df
+                col_encontrada = find_column(df_dre, fonte)
+                if col_encontrada:
+                    fonte_para_coluna[fonte] = col_encontrada
+                    colunas_necessarias.add(col_encontrada)
+
+        colunas_necessarias = [c for c in df_dre.columns if c in colunas_necessarias]
+        df_base = df_dre[colunas_necessarias].copy() if colunas_necessarias else df_dre.copy()
+        if col_inst is None:
+            df_base["Instituicao"] = df_base.get("CodInst", "Instituição")
+        else:
+            df_base = df_base.rename(columns={col_inst: "Instituicao"})
+        df_base = df_base.rename(columns={col_periodo: "Periodo"})
+
+        df_base[["ano", "mes"]] = extrair_ano_mes_periodo(df_base["Periodo"])
+        df_new = df_base[
+            (df_base["ano"].fillna(0) > 2025)
+            | ((df_base["ano"] == 2025) & (df_base["mes"].fillna(0) >= 3))
+        ].copy()
+
+        numericas = {col: coerce_numeric(df_new[col]) for col in set(fonte_para_coluna.values())}
+        df_values = []
+        for entry in mapping_entries:
+            if entry.get("derived_metric"):
+                continue
+            fontes = normalize_sources(entry.get("sources", []))
+            colunas = [fonte_para_coluna[f] for f in fontes if f in fonte_para_coluna]
+            if not colunas:
+                continue
+            valores = pd.concat([numericas[col] for col in colunas], axis=1).sum(axis=1, min_count=1)
+            df_entry = df_new[["Instituicao", "Periodo"]].copy()
+            df_entry["Label"] = entry["label"]
+            df_entry["valor"] = valores
+            df_values.append(df_entry)
+
+        if not df_values:
+            return pd.DataFrame(), "Nenhuma linha DRE foi encontrada com o mapeamento atual.", df_base, pd.DataFrame()
+
+        df_valores = pd.concat(df_values, ignore_index=True)
+        df_ytd = compute_ytd_irregular(df_valores)
+        df_ytd = compute_yoy(df_ytd)
+        df_ytd["PeriodoExib"] = df_ytd["Periodo"].apply(periodo_para_exibicao)
+        return df_ytd, dre_msg, df_base, df_valores
 
     def compute_line_values(df_base: pd.DataFrame, entry: dict) -> pd.DataFrame:
         if entry.get("derived_metric"):
@@ -6667,8 +7007,10 @@ elif menu == "DRE":
         html_tabela += "</tbody></table></div>"
         st.markdown(html_tabela, unsafe_allow_html=True)
 
-    df_dre, dre_msg = load_dre_data()
-    if df_dre is None or df_dre.empty:
+    dre_cache_token = _cache_version_token("dre")
+    df_ytd_base, dre_msg, df_base, df_valores = _build_dre_base(dre_cache_token)
+
+    if df_ytd_base.empty:
         detalhe = f" ({dre_msg})" if dre_msg else ""
         st.warning(f"Dados DRE não disponíveis no cache. Atualize a base no menu 'Atualizar Base'.{detalhe}")
         with st.expander("Limites de recursos do Streamlit Community Cloud"):
@@ -6688,225 +7030,171 @@ elif menu == "DRE":
                 """
             )
     else:
-        col_periodo, col_inst = detectar_colunas_basicas(df_dre)
-        if col_periodo is None:
-            st.warning("Coluna de período não encontrada nos dados DRE.")
-        else:
-            mapping_entries = load_dre_mapping()
+        mapping_entries = load_dre_mapping()
+        instit_col = "Instituicao"
+        _dict_aliases_dre = st.session_state.get('dict_aliases', {})
+        instituicoes = ordenar_bancos_com_alias(
+            df_base[instit_col].dropna().unique().tolist(), _dict_aliases_dre
+        )
+        anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
 
-            if not mapping_entries:
-                st.warning("Mapeamento DRE não encontrado ou vazio.")
-            else:
-                colunas_necessarias = {col_periodo}
-                if col_inst:
-                    colunas_necessarias.add(col_inst)
-                for entry in mapping_entries:
-                    for fonte in entry.get("sources", []):
-                        col_encontrada = find_column(df_dre, fonte)
-                        if col_encontrada:
-                            colunas_necessarias.add(col_encontrada)
-                colunas_necessarias = [c for c in df_dre.columns if c in colunas_necessarias]
-                if colunas_necessarias:
-                    df_dre = df_dre[colunas_necessarias].copy()
+        if not instituicoes or not anos_disponiveis:
+            st.warning("Dados DRE sem instituições ou períodos válidos.")
+            st.stop()
 
-                df_base = df_dre.copy()
-                if col_inst is None:
-                    df_base["Instituicao"] = df_base.get("CodInst", "Instituição")
+        _default_dre = _encontrar_bancos_default(instituicoes, [("itau", "itaú")])
+        _idx_dre = instituicoes.index(_default_dre[0]) if _default_dre else 0
+
+        col_inst, col_ano = st.columns([1, 1])
+        with col_inst:
+            instituicao_selecionada = st.selectbox(
+                "Instituição",
+                instituicoes,
+                index=_idx_dre,
+                key="dre_instituicao"
+            )
+        with col_ano:
+            ano_selecionado = st.selectbox(
+                "Ano",
+                anos_disponiveis[::-1],
+                index=0,
+                key="dre_ano"
+            )
+
+        formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries}
+        tooltip_por_label = {}
+        entradas_com_label = []
+        for entry in mapping_entries:
+            fonte_original = entry.get("original_label")
+            fontes = [fonte_original] if fonte_original else entry.get("sources", [])
+            fontes_fmt = ", ".join([f for f in fontes if f])
+            tooltip_parts = []
+            if entry.get("concept"):
+                tooltip_parts.append(entry["concept"])
+            if entry.get("derived_metric"):
+                formula = DERIVED_METRICS_FORMULAS.get(entry["label"])
+                if formula:
+                    tooltip_parts.append(f"Fórmula: {formula}")
+            if fontes_fmt:
+                tooltip_parts.append(f"Fontes: {fontes_fmt}")
+            if entry.get("ytd_note"):
+                tooltip_parts.append("Nota YTD: no BC o DRE é semestral acumulado; aqui exibimos acumulado do ano (YTD).")
+            tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
+
+            label_exib = entry["label"]
+            entrada_copy = entry.copy()
+            entrada_copy["label_exib"] = label_exib
+            entradas_com_label.append(entrada_copy)
+
+        df_filtrado = df_ytd_base[
+            (df_ytd_base["Instituicao"] == instituicao_selecionada)
+            & (df_ytd_base["ano"] == int(ano_selecionado))
+        ].copy()
+
+        diag_info = {}
+        if st.session_state.get("modo_diagnostico"):
+            diag_info["df_base_mb"] = _df_mem_mb(df_base)
+            diag_info["df_valores_mb"] = _df_mem_mb(df_valores)
+            diag_info["df_ytd_mb"] = _df_mem_mb(df_ytd_base)
+
+        _perf_start("dre_derived_load")
+        df_derived_slice = carregar_metricas_derivadas_slice(
+            instituicoes=[instituicao_selecionada],
+            metricas=DERIVED_METRICS,
+        )
+        tempo_derived = _perf_end("dre_derived_load")
+
+        if not df_derived_slice.empty:
+            df_derived_slice = df_derived_slice.rename(
+                columns={"Métrica": "Label", "Valor": "valor", "Instituição": "Instituicao", "Período": "Periodo"}
+            )
+            df_derived_slice["Periodo"] = df_derived_slice["Periodo"].astype(str)
+            df_derived_slice = compute_ytd_irregular(df_derived_slice)
+            df_derived_slice = compute_yoy(df_derived_slice)
+            df_derived_slice["PeriodoExib"] = df_derived_slice["Periodo"].apply(periodo_para_exibicao)
+            df_derived_filtrado = df_derived_slice[
+                (df_derived_slice["Instituicao"] == instituicao_selecionada)
+                & (df_derived_slice["ano"] == int(ano_selecionado))
+            ].copy()
+            df_filtrado = pd.concat([df_filtrado, df_derived_filtrado], ignore_index=True)
+
+        if st.session_state.get("modo_diagnostico"):
+            diag_info["derived_slice_mb"] = _df_mem_mb(df_derived_slice)
+            diag_info["derived_slice_rows"] = len(df_derived_slice)
+            diag_info["derived_load_s"] = round(tempo_derived, 3)
+
+        periodos_disponiveis = [
+            periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}")
+            for mes in [9, 6, 3, 12]
+        ]
+
+        render_table_like_carteira_4966(
+            df_filtrado,
+            entradas_com_label,
+            periodos_disponiveis,
+            formato_por_label,
+            tooltip_por_label
+        )
+
+        st.markdown(
+            """
+            <div style="font-size: 12px; color: #666; margin-top: 12px;">
+                <strong>mini-glossário DRE:</strong><br>
+                <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
+                <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
+                <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
+                <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.session_state.get("modo_diagnostico"):
+            with st.expander("diagnóstico DRE"):
+                st.caption(f"Memória df_base: {diag_info.get('df_base_mb', 0):.2f} MB")
+                st.caption(f"Memória df_valores: {diag_info.get('df_valores_mb', 0):.2f} MB")
+                st.caption(f"Memória df_ytd: {diag_info.get('df_ytd_mb', 0):.2f} MB")
+                st.caption(f"Memória recorte derivado: {diag_info.get('derived_slice_mb', 0):.2f} MB")
+                st.caption(f"Linhas recorte derivado: {diag_info.get('derived_slice_rows', 0)}")
+                st.caption(f"Tempo recorte derivado: {diag_info.get('derived_load_s', 0):.3f}s")
+
+        st.markdown("#### Exportar DRE (formato simples)")
+        df_export = []
+        for entry in entradas_com_label:
+            label = entry["label"]
+            linha = {"Item": label}
+            for periodo in periodos_disponiveis:
+                cell = df_filtrado[
+                    (df_filtrado["Label"] == label)
+                    & (df_filtrado["PeriodoExib"] == periodo)
+                ]
+                if not cell.empty:
+                    ytd_val = cell["ytd"].iloc[0]
                 else:
-                    df_base = df_base.rename(columns={col_inst: "Instituicao"})
-                df_base = df_base.rename(columns={col_periodo: "Periodo"})
+                    ytd_val = pd.NA
+                linha[f"{periodo} YTD"] = ytd_val
+            df_export.append(linha)
 
-                df_base[["ano", "mes"]] = df_base["Periodo"].apply(
-                    lambda x: pd.Series(parse_periodo(x))
+        df_export = pd.DataFrame(df_export)
+        buffer_excel = BytesIO()
+        with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
+            df_export.to_excel(writer, index=False, sheet_name="DRE")
+            worksheet = writer.sheets["DRE"]
+            for idx, col in enumerate(df_export.columns):
+                max_len = max(
+                    len(str(col)),
+                    df_export[col].astype(str).map(len).max()
                 )
-                df_new = df_base[
-                    (df_base["ano"].fillna(0) > 2025)
-                    | ((df_base["ano"] == 2025) & (df_base["mes"].fillna(0) >= 3))
-                ].copy()
+                worksheet.set_column(idx, idx, min(max_len + 2, 40))
+        buffer_excel.seek(0)
 
-                instit_col = "Instituicao"
-                _dict_aliases_dre = st.session_state.get('dict_aliases', {})
-                instituicoes = ordenar_bancos_com_alias(
-                    df_base[instit_col].dropna().unique().tolist(), _dict_aliases_dre
-                )
-                anos_disponiveis = sorted(df_base["ano"].dropna().unique().astype(int).tolist())
-
-                if not instituicoes or not anos_disponiveis:
-                    st.warning("Dados DRE sem instituições ou períodos válidos.")
-                    st.stop()
-
-                _default_dre = _encontrar_bancos_default(instituicoes, [("itau", "itaú")])
-                _idx_dre = instituicoes.index(_default_dre[0]) if _default_dre else 0
-
-                col_inst, col_ano = st.columns([1, 1])
-                with col_inst:
-                    instituicao_selecionada = st.selectbox(
-                        "Instituição",
-                        instituicoes,
-                        index=_idx_dre,
-                        key="dre_instituicao"
-                    )
-                with col_ano:
-                    ano_selecionado = st.selectbox(
-                        "Ano",
-                        anos_disponiveis[::-1],
-                        index=0,
-                        key="dre_ano"
-                    )
-
-                df_values = []
-                for entry in mapping_entries:
-                    df_entry = compute_line_values(df_new, entry)
-                    if not df_entry.empty:
-                        df_values.append(df_entry)
-
-                if not df_values:
-                    st.warning("Nenhuma linha DRE foi encontrada com o mapeamento atual.")
-                else:
-                    df_valores = pd.concat(df_values, ignore_index=True)
-                    df_ytd = compute_ytd_irregular(df_valores)
-                    df_ytd = compute_yoy(df_ytd)
-
-                    df_ytd["PeriodoExib"] = df_ytd["Periodo"].apply(periodo_para_exibicao)
-
-                    formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries}
-                    tooltip_por_label = {}
-                    entradas_com_label = []
-                    for entry in mapping_entries:
-                        fonte_original = entry.get("original_label")
-                        fontes = [fonte_original] if fonte_original else entry.get("sources", [])
-                        fontes_fmt = ", ".join([f for f in fontes if f])
-                        tooltip_parts = []
-                        if entry.get("concept"):
-                            tooltip_parts.append(entry["concept"])
-                        if entry.get("derived_metric"):
-                            formula = DERIVED_METRICS_FORMULAS.get(entry["label"])
-                            if formula:
-                                tooltip_parts.append(f"Fórmula: {formula}")
-                        if fontes_fmt:
-                            tooltip_parts.append(f"Fontes: {fontes_fmt}")
-                        if entry.get("ytd_note"):
-                            tooltip_parts.append("Nota YTD: no BC o DRE é semestral acumulado; aqui exibimos acumulado do ano (YTD).")
-                        tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
-
-                        label_exib = entry["label"]
-                        entrada_copy = entry.copy()
-                        entrada_copy["label_exib"] = label_exib
-                        entradas_com_label.append(entrada_copy)
-
-                    df_filtrado = df_ytd[
-                        (df_ytd["Instituicao"] == instituicao_selecionada)
-                        & (df_ytd["ano"] == int(ano_selecionado))
-                    ].copy()
-
-                    diag_info = {}
-                    if st.session_state.get("modo_diagnostico"):
-                        diag_info["df_base_mb"] = _df_mem_mb(df_base)
-                        diag_info["df_valores_mb"] = _df_mem_mb(df_valores)
-                        diag_info["df_ytd_mb"] = _df_mem_mb(df_ytd)
-
-                    _perf_start("dre_derived_load")
-                    df_derived_slice = carregar_metricas_derivadas_slice(
-                        instituicoes=[instituicao_selecionada],
-                        metricas=DERIVED_METRICS,
-                    )
-                    tempo_derived = _perf_end("dre_derived_load")
-
-                    if not df_derived_slice.empty:
-                        df_derived_slice = df_derived_slice.rename(
-                            columns={"Métrica": "Label", "Valor": "valor", "Instituição": "Instituicao", "Período": "Periodo"}
-                        )
-                        df_derived_slice["Periodo"] = df_derived_slice["Periodo"].astype(str)
-                        df_derived_slice[["ano", "mes"]] = df_derived_slice["Periodo"].apply(
-                            lambda x: pd.Series(parse_periodo(x))
-                        )
-                        df_derived_slice = compute_ytd_irregular(df_derived_slice)
-                        df_derived_slice = compute_yoy(df_derived_slice)
-                        df_derived_slice["PeriodoExib"] = df_derived_slice["Periodo"].apply(periodo_para_exibicao)
-                        df_derived_filtrado = df_derived_slice[
-                            (df_derived_slice["Instituicao"] == instituicao_selecionada)
-                            & (df_derived_slice["ano"] == int(ano_selecionado))
-                        ].copy()
-                        df_filtrado = pd.concat([df_filtrado, df_derived_filtrado], ignore_index=True)
-
-                    if st.session_state.get("modo_diagnostico"):
-                        diag_info["derived_slice_mb"] = _df_mem_mb(df_derived_slice)
-                        diag_info["derived_slice_rows"] = len(df_derived_slice)
-                        diag_info["derived_load_s"] = round(tempo_derived, 3)
-
-                    periodos_ordem = ["Set", "Jun", "Mar", "Dez"]
-                    periodos_disponiveis = []
-                    for mes in [9, 6, 3, 12]:
-                        periodo_texto = periodo_para_exibicao(f"{int(mes/3)}/{ano_selecionado}")
-                        periodos_disponiveis.append(periodo_texto)
-
-                    render_table_like_carteira_4966(
-                        df_filtrado,
-                        entradas_com_label,
-                        periodos_disponiveis,
-                        formato_por_label,
-                        tooltip_por_label
-                    )
-
-                    st.markdown(
-                        """
-                        <div style="font-size: 12px; color: #666; margin-top: 12px;">
-                            <strong>mini-glossário DRE:</strong><br>
-                            <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
-                            <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
-                            <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
-                            <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    if st.session_state.get("modo_diagnostico"):
-                        with st.expander("diagnóstico DRE"):
-                            st.caption(f"Memória df_base: {diag_info.get('df_base_mb', 0):.2f} MB")
-                            st.caption(f"Memória df_valores: {diag_info.get('df_valores_mb', 0):.2f} MB")
-                            st.caption(f"Memória df_ytd: {diag_info.get('df_ytd_mb', 0):.2f} MB")
-                            st.caption(f"Memória recorte derivado: {diag_info.get('derived_slice_mb', 0):.2f} MB")
-                            st.caption(f"Linhas recorte derivado: {diag_info.get('derived_slice_rows', 0)}")
-                            st.caption(f"Tempo recorte derivado: {diag_info.get('derived_load_s', 0):.3f}s")
-
-                    st.markdown("#### Exportar DRE (formato simples)")
-                    df_export = []
-                    for entry in entradas_com_label:
-                        label = entry["label"]
-                        linha = {"Item": label}
-                        for periodo in periodos_disponiveis:
-                            cell = df_filtrado[
-                                (df_filtrado["Label"] == label)
-                                & (df_filtrado["PeriodoExib"] == periodo)
-                            ]
-                            if not cell.empty:
-                                ytd_val = cell["ytd"].iloc[0]
-                            else:
-                                ytd_val = pd.NA
-                            linha[f"{periodo} YTD"] = ytd_val
-                        df_export.append(linha)
-
-                    df_export = pd.DataFrame(df_export)
-                    buffer_excel = BytesIO()
-                    with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
-                        df_export.to_excel(writer, index=False, sheet_name="DRE")
-                        worksheet = writer.sheets["DRE"]
-                        for idx, col in enumerate(df_export.columns):
-                            max_len = max(
-                                len(str(col)),
-                                df_export[col].astype(str).map(len).max()
-                            )
-                            worksheet.set_column(idx, idx, min(max_len + 2, 40))
-                    buffer_excel.seek(0)
-
-                    st.download_button(
-                        label="Baixar Excel (DRE)",
-                        data=buffer_excel,
-                        file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="dre_download_excel"
-                    )
+        st.download_button(
+            label="Baixar Excel (DRE)",
+            data=buffer_excel,
+            file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dre_download_excel"
+        )
 
 
 elif menu == "DRE (Balancetes)":
@@ -7628,7 +7916,7 @@ elif menu == "Taxas de Juros por Produto":
             df['AnoMes'] = df['Fim Período'].dt.to_period('M')
 
             # Para cada combinação (Segmento, Produto, Instituição, AnoMes), pegar a última data
-            idx = df.groupby(['Segmento', 'Produto', 'Instituição Financeira', 'AnoMes'])['Fim Período'].idxmax()
+            idx = df.groupby(['Segmento', 'Produto', 'Instituição Financeira', 'AnoMes'], observed=False)['Fim Período'].idxmax()
             df_mensal = df.loc[idx].copy()
 
             # Criar coluna de data formatada para o gráfico
