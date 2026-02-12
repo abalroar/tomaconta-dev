@@ -3692,10 +3692,14 @@ def get_df_periodo_brincar(periodo: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _get_analise_base_df(periodos_hash: str, dados_keys: tuple, capital_mesclado: bool) -> pd.DataFrame:
-    """Base unificada para abas analíticas que reutilizam principal concatenado."""
-    _ = (periodos_hash, dados_keys, capital_mesclado)
-    df = get_dados_concatenados()
+def _get_analise_base_df(principal_token: str, alias_sig: tuple, capital_mesclado: bool) -> pd.DataFrame:
+    """Base unificada para abas analíticas com dependências explícitas para cache."""
+    _ = (principal_token, capital_mesclado)
+    dados_periodos = _carregar_dados_periodos_preparados(principal_token, alias_sig)
+    if not dados_periodos:
+        return pd.DataFrame()
+
+    df = pd.concat(dados_periodos.values(), ignore_index=True)
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -3706,16 +3710,10 @@ def _get_analise_base_df(periodos_hash: str, dados_keys: tuple, capital_mesclado
 
 def get_analise_base_df() -> pd.DataFrame:
     """Retorna base memoizada para Peers e Scatter."""
-    if 'dados_periodos' not in st.session_state or not st.session_state['dados_periodos']:
-        return pd.DataFrame()
-
-    periodos_keys = tuple(sorted(st.session_state['dados_periodos'].keys()))
-    primeiro_periodo = next(iter(st.session_state['dados_periodos'].values()))
-    colunas_hash = tuple(sorted(primeiro_periodo.columns.tolist()))
+    principal_token = _cache_version_token("principal")
+    alias_sig = _alias_signature()
     capital_mesclado = bool(st.session_state.get('_dados_capital_mesclados', False))
-    periodos_hash = str(hash((periodos_keys, colunas_hash, capital_mesclado)))
-
-    return _get_analise_base_df(periodos_hash, periodos_keys, capital_mesclado)
+    return _get_analise_base_df(principal_token, alias_sig, capital_mesclado)
 
 
 def _get_cache_data_mtime(cache_obj) -> Optional[float]:
@@ -3837,10 +3835,10 @@ def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def get_scatter_periodo_df(periodo: str, principal_token: str, derived_token: str, capital_mesclado: bool):
+def get_scatter_periodo_df(periodo: str, principal_token: str, derived_token: str, alias_sig: tuple, capital_mesclado: bool):
     """Carrega dataframe de um período do Scatter já com métricas derivadas anexadas."""
-    _ = (principal_token, derived_token, capital_mesclado)
-    df_base = get_analise_base_df()
+    _ = derived_token
+    df_base = _get_analise_base_df(principal_token, alias_sig, capital_mesclado)
     if df_base is None or df_base.empty or 'Período' not in df_base.columns:
         return pd.DataFrame(), {"tempo_s": 0.0, "linhas": 0, "mem_mb": 0.0}
 
@@ -5397,6 +5395,7 @@ elif menu == "Scatter Plot":
             periodo_scatter,
             _cache_version_token("principal"),
             _cache_version_token("derived_metrics"),
+            _alias_signature(),
             bool(st.session_state.get('_dados_capital_mesclados', False)),
         )
 
@@ -5561,12 +5560,14 @@ elif menu == "Scatter Plot":
                 periodo_inicial,
                 _cache_version_token("principal"),
                 _cache_version_token("derived_metrics"),
+                _alias_signature(),
                 bool(st.session_state.get('_dados_capital_mesclados', False)),
             )
             df_p2, diag_scatter_derived_p2 = get_scatter_periodo_df(
                 periodo_subseq,
                 _cache_version_token("principal"),
                 _cache_version_token("derived_metrics"),
+                _alias_signature(),
                 bool(st.session_state.get('_dados_capital_mesclados', False)),
             )
 
