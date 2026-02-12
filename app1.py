@@ -436,9 +436,24 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Perda Esperada / (Carteira C4 + C5)",
             },
             {
-                "label": "Desp PDD Anualizada / Carteira Bruta",
+                "label": "Saldo PDD Crédito (1490000004)",
                 "data_keys": [],
-                "format_key": "Desp PDD Anualizada / Carteira Bruta",
+                "format_key": "Saldo PDD Crédito (1490000004)",
+            },
+            {
+                "label": "Saldo PDD Outros Créditos (1890000006)",
+                "data_keys": [],
+                "format_key": "Saldo PDD Outros Créditos (1890000006)",
+            },
+            {
+                "label": "PDD Total 4060",
+                "data_keys": [],
+                "format_key": "PDD Total 4060",
+            },
+            {
+                "label": "Carteira Estágio 1 (3311000002)",
+                "data_keys": [],
+                "format_key": "Carteira Estágio 1 (3311000002)",
             },
         ],
     },
