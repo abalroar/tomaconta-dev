@@ -1381,6 +1381,7 @@ def _preparar_cores_para_cache(df_aliases):
     cores = tuple(df_aliases[coluna_cor].tolist())
     return content_hash, (instituicoes, aliases, cores)
 
+@st.cache_data(ttl=300, show_spinner=False)
 def verificar_caches_github() -> dict:
     """Verifica quais caches existem no GitHub Releases.
 
@@ -3688,6 +3689,35 @@ def get_df_periodo_brincar(periodo: str) -> pd.DataFrame:
     return df_periodo
 
 
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _get_analise_base_df(periodos_hash: str, dados_keys: tuple, capital_mesclado: bool) -> pd.DataFrame:
+    """Base unificada para abas analíticas que reutilizam principal concatenado."""
+    _ = (periodos_hash, dados_keys, capital_mesclado)
+    df = get_dados_concatenados()
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = _normalizar_lucro_liquido(df.copy())
+    df = _recalcular_roe_anualizado_df(df)
+    return df
+
+
+def get_analise_base_df() -> pd.DataFrame:
+    """Retorna base memoizada para Peers e Scatter."""
+    if 'dados_periodos' not in st.session_state or not st.session_state['dados_periodos']:
+        return pd.DataFrame()
+
+    periodos_keys = tuple(sorted(st.session_state['dados_periodos'].keys()))
+    primeiro_periodo = next(iter(st.session_state['dados_periodos'].values()))
+    colunas_hash = tuple(sorted(primeiro_periodo.columns.tolist()))
+    capital_mesclado = bool(st.session_state.get('_dados_capital_mesclados', False))
+    periodos_hash = str(hash((periodos_keys, colunas_hash, capital_mesclado)))
+
+    return _get_analise_base_df(periodos_hash, periodos_keys, capital_mesclado)
+
+
 def _get_cache_data_mtime(cache_obj) -> Optional[float]:
     if cache_obj is None:
         return None
@@ -5095,9 +5125,7 @@ elif menu == "Peers (Tabela)":
         peers_perf = {}
 
         t_dados = time.perf_counter()
-        df = get_dados_concatenados()
-        df = _normalizar_lucro_liquido(df)
-        df = _recalcular_roe_anualizado_df(df)
+        df = get_analise_base_df()
         _perf_peers_stage(peers_perf, "a_leitura_dados_brutos", t_dados)
         _log_roe_trace(df, "peers_df_base")
 
@@ -5303,9 +5331,7 @@ elif menu == "Peers (Tabela)":
 
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-        df = _normalizar_lucro_liquido(df)
-        df = _recalcular_roe_anualizado_df(df)
+        df = get_analise_base_df()
         _log_roe_trace(df, "scatter_df_base")
         df = _garantir_indice_basileia_coluna(df)
         df = _ajustar_basileia_para_scatter(df)
@@ -7805,8 +7831,10 @@ elif menu == "DRE (Balancetes)":
         txt = " ".join(txt.split())
         return txt
 
-    def _balancetes_obter_cnpj_por_instituicao(instituicoes_ref: list) -> dict:
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _balancetes_obter_cnpj_por_instituicao(instituicoes_ref: tuple, principal_token: str) -> dict:
         """Obtém mapeamento de instituições para CNPJs."""
+        _ = principal_token
         mapa = {}
 
         # 1) Varrer caches já existentes
@@ -7870,7 +7898,7 @@ elif menu == "DRE (Balancetes)":
         )
 
         # Mapear CNPJs
-        cnpj_map = _balancetes_obter_cnpj_por_instituicao(instituicoes_bal)
+        cnpj_map = _balancetes_obter_cnpj_por_instituicao(tuple(instituicoes_bal), _cache_version_token("principal"))
         instituicoes_com_cnpj = [i for i in instituicoes_bal if cnpj_map.get(i)]
 
         # Status do cache
