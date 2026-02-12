@@ -5711,46 +5711,56 @@ elif menu == "Evolução":
         for k, c in graf_cols.items():
             df_graph[k] = pd.to_numeric(df_ano.get(c), errors="coerce")
 
+        ano_labels = [str(int(ano)) for ano in df_graph["Ano"].tolist()]
+
         fig_ev = go.Figure()
         fig_ev.add_trace(
             go.Bar(
-                x=df_graph["Ano"],
+                x=ano_labels,
                 y=df_graph["Lucro Líquido"],
                 name="Lucro Líquido",
                 marker_color="#9B9B9B",
+                yaxis="y",
             )
         )
         fig_ev.add_trace(
             go.Bar(
-                x=df_graph["Ano"],
+                x=ano_labels,
                 y=df_graph["Patrimônio Líquido"],
                 name="Patrimônio Líquido",
                 marker_color="#102A83",
+                yaxis="y",
             )
         )
         fig_ev.add_trace(
             go.Scatter(
-                x=df_graph["Ano"],
+                x=ano_labels,
                 y=df_graph["Carteira Classificada"],
-                mode="lines+markers",
+                mode="lines",
                 name="Carteira Classificada",
-                line=dict(color="#FF6B35", width=2),
+                line=dict(color="#FF6B35", width=2, shape="spline", smoothing=1.15),
+                connectgaps=True,
+                yaxis="y2",
             )
         )
         fig_ev.add_trace(
             go.Scatter(
-                x=df_graph["Ano"],
+                x=ano_labels,
                 y=df_graph["Core Funding"],
-                mode="lines+markers",
+                mode="lines",
                 name="Core Funding",
-                line=dict(color="#1F1F1F", width=2),
+                line=dict(color="#1F1F1F", width=2, shape="spline", smoothing=1.15),
+                connectgaps=True,
+                yaxis="y2",
             )
         )
         fig_ev.update_layout(
             barmode="group",
             height=420,
-            yaxis_title="Em R$ mm",
+            yaxis=dict(title="Lucro/PL (R$ mm)", rangemode="tozero"),
+            yaxis2=dict(title="Carteira/Core Funding (R$ mm)", overlaying="y", side="right", rangemode="tozero"),
             xaxis_title="Ano",
+            xaxis=dict(type="category", categoryorder="array", categoryarray=ano_labels),
             legend=dict(orientation="h", y=1.08),
         )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
@@ -5800,10 +5810,12 @@ elif menu == "Evolução":
                 df_graph.to_excel(writer, index=False, sheet_name='grafico_dados')
                 df_metric.to_excel(writer, index=False, sheet_name='tabela_metricas')
             buffer_excel.seek(0)
+            instituicao_arquivo = re.sub(r"[^\w\-.]+", "_", str(instituicao), flags=re.UNICODE).strip("_") or "instituicao"
+
             st.download_button(
                 label="Baixar Excel",
-                data=buffer_excel,
-                file_name=f"evolucao_{instituicao}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                data=buffer_excel.getvalue(),
+                file_name=f"evolucao_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="evolucao_excel",
             )
@@ -5811,7 +5823,7 @@ elif menu == "Evolução":
             st.download_button(
                 label="Baixar gráfico (HTML)",
                 data=fig_ev.to_html(include_plotlyjs='cdn').encode('utf-8'),
-                file_name=f"evolucao_grafico_{instituicao}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                file_name=f"evolucao_grafico_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
                 mime="text/html",
                 key="evolucao_grafico_html",
             )
