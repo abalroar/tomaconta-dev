@@ -90,6 +90,13 @@ CACHES_INFO = {
         "relatorio": None,
         "todas_variaveis": False,
     },
+    "balancetes": {
+        "nome_exibicao": "Balancetes COSIF (4060, 4066)",
+        "descricao": "Demonstrações Contábeis - Balancetes do BCB",
+        "relatorio": None,  # API REST diferente do IFData
+        "todas_variaveis": True,
+        "periodicidade": "trimestral",
+    },
 }
 
 
@@ -124,6 +131,7 @@ class CacheManager:
         )
         from .taxas_juros import TaxasJurosCache
         from .derived_metrics import DerivedMetricsCache
+        from .balancetes import BalancetesCache
 
         # Caches principais (variáveis selecionadas)
         self.registrar(PrincipalCache(self.base_dir))
@@ -141,6 +149,8 @@ class CacheManager:
         self.registrar(TaxasJurosCache(self.base_dir))
         # Cache de métricas derivadas (DRE + Resumo)
         self.registrar(DerivedMetricsCache(self.base_dir))
+        # Cache de balancetes COSIF (API REST BCB)
+        self.registrar(BalancetesCache(self.base_dir))
 
     def registrar(self, cache: BaseCache):
         """Registra um novo tipo de cache.
