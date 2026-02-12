@@ -5756,12 +5756,12 @@ elif menu == "Evolução":
             pd.to_numeric(df_ano["Carteira Classificada"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
             np.nan,
         )
-        basileia_fonte = pd.to_numeric(df_ano.get("Índice de Basileia"), errors="coerce")
+        basileia_fonte = _numeric_series(df_ano, "Índice de Basileia")
         df_ano["Índice de Basileia (%)"] = _normalizar_basileia_display(basileia_fonte)
 
-        cet1_fonte = pd.to_numeric(df_ano.get("Índice de Capital Principal (CET1)"), errors="coerce")
+        cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal (CET1)")
         if cet1_fonte.isna().all():
-            cet1_fonte = pd.to_numeric(df_ano.get("Índice de Capital Principal"), errors="coerce")
+            cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal")
         df_ano["Índice de Capital Principal (CET1) (%)"] = _normalizar_percentual_display(cet1_fonte)
 
         if "Lucro Líquido" in df_ano.columns:
