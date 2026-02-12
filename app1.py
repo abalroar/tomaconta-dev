@@ -5639,36 +5639,81 @@ elif menu == "Evolução":
             st.warning("dados indisponíveis para a aba Evolução.")
             st.stop()
 
-        col_ano = st.columns([1, 2])
-        with col_ano[0]:
-            qtd_anos = st.selectbox("janela histórica (anos)", [3, 5, 7, 10], index=1)
-
         df_ev = df_ev.copy()
         parsed = df_ev["Período"].astype(str).apply(_parse_periodo)
         df_ev["Ano"] = parsed.apply(lambda x: x[1] if x else None)
         df_ev["Tri"] = parsed.apply(lambda x: _parte_periodo_para_trimestre_idx(x[0]) if x else None)
         df_ev = df_ev.dropna(subset=["Ano", "Tri"]).copy()
         df_ev["Ano"] = df_ev["Ano"].astype(int)
+        df_ev["Tri"] = df_ev["Tri"].astype(int)
 
         anos_disp = sorted(df_ev["Ano"].unique().tolist())
         if not anos_disp:
             st.warning("não há anos válidos para montar a evolução.")
             st.stop()
 
-        anos_sel = anos_disp[-qtd_anos:]
+        periodos_validos = (
+            df_ev[["Período", "Ano", "Tri"]]
+            .drop_duplicates()
+            .sort_values(["Ano", "Tri"])
+            .reset_index(drop=True)
+        )
+        periodos_dez = periodos_validos[periodos_validos["Tri"] == 4]["Período"].tolist()
+        if not periodos_dez:
+            st.warning("não há períodos de dezembro para definir o início da janela histórica.")
+            st.stop()
+
         insts = ordenar_bancos_com_alias(df_ev["Instituição"].dropna().unique().tolist(), st.session_state.get("dict_aliases", {}))
         inst_padrao = [i for i in insts if "itau" in str(i).lower() or "itaú" in str(i).lower()][:1]
         if not inst_padrao and insts:
             inst_padrao = [insts[0]]
 
         instituicao = st.selectbox("instituição", insts, index=insts.index(inst_padrao[0]) if inst_padrao else 0)
-        df_inst = df_ev[(df_ev["Instituição"] == instituicao) & (df_ev["Ano"].isin(anos_sel))].copy()
+        periodo_final_padrao = periodos_validos.iloc[-1]["Período"]
+        idx_inicio_padrao = max(0, len(periodos_dez) - 5)
+
+        col_inicio, col_fim = st.columns(2)
+        with col_inicio:
+            periodo_inicio = st.selectbox(
+                "período inicial (dezembro)",
+                periodos_dez,
+                index=idx_inicio_padrao,
+                format_func=periodo_para_exibicao,
+            )
+
+        idx_inicio_ordenado = periodos_validos.index[periodos_validos["Período"] == periodo_inicio][0]
+        periodos_finais_validos = periodos_validos.loc[idx_inicio_ordenado:, "Período"].tolist()
+        idx_fim_padrao = periodos_finais_validos.index(periodo_final_padrao) if periodo_final_padrao in periodos_finais_validos else len(periodos_finais_validos) - 1
+
+        with col_fim:
+            periodo_final = st.selectbox(
+                "período final",
+                periodos_finais_validos,
+                index=idx_fim_padrao,
+                format_func=periodo_para_exibicao,
+            )
+
+        info_inicio = periodos_validos[periodos_validos["Período"] == periodo_inicio].iloc[0]
+        info_final = periodos_validos[periodos_validos["Período"] == periodo_final].iloc[0]
+        ano_inicio, ano_final = int(info_inicio["Ano"]), int(info_final["Ano"])
+        tri_final = int(info_final["Tri"])
+
+        periodos_janela = [(ano, 4) for ano in range(ano_inicio, ano_final)]
+        periodos_janela.append((ano_final, tri_final))
+        periodos_janela = list(dict.fromkeys(periodos_janela))
+
+        df_inst = df_ev[
+            (df_ev["Instituição"] == instituicao)
+            & (df_ev[["Ano", "Tri"]].apply(tuple, axis=1).isin(periodos_janela))
+        ].copy()
         if df_inst.empty:
             st.info("sem dados para a instituição na janela selecionada.")
             st.stop()
 
-        idx_tri = df_inst.groupby("Ano", observed=False)["Tri"].idxmax()
-        df_ano = df_inst.loc[idx_tri].sort_values("Ano").copy()
+        idx_tri = df_inst.groupby(["Ano", "Tri"], observed=False).tail(1).index
+        df_ano = df_inst.loc[idx_tri].sort_values(["Ano", "Tri"]).copy()
+        map_mes = {1: "mar", 2: "jun", 3: "set", 4: "dez"}
+        df_ano["LabelPeriodo"] = df_ano.apply(lambda r: f"{map_mes.get(int(r['Tri']), str(r['Tri']))}-{str(int(r['Ano']))[-2:]}", axis=1)
 
         def _calc_roe_anualizado(row):
             ll = pd.to_numeric(row.get("Lucro Líquido Acumulado YTD"), errors="coerce")
@@ -5679,9 +5724,14 @@ elif menu == "Evolução":
             meses = {1: 3, 2: 6, 3: 9, 4: 12}.get(int(tri), 12)
             return float(ll) * (12 / meses) / float(pl)
 
-        df_ano["Core Funding"] = pd.to_numeric(df_ano.get("Captações"), errors="coerce")
-        carteira_classificada_base = pd.to_numeric(df_ano.get("Carteira Classificada"), errors="coerce")
-        carteira_credito_base = pd.to_numeric(df_ano.get("Carteira de Crédito"), errors="coerce")
+        def _numeric_series(dataframe, coluna):
+            if coluna in dataframe.columns:
+                return pd.to_numeric(dataframe[coluna], errors="coerce")
+            return pd.Series(np.nan, index=dataframe.index, dtype="float64")
+
+        df_ano["Core Funding"] = _numeric_series(df_ano, "Captações")
+        carteira_classificada_base = _numeric_series(df_ano, "Carteira Classificada")
+        carteira_credito_base = _numeric_series(df_ano, "Carteira de Crédito")
         df_ano["Carteira Classificada"] = carteira_classificada_base.combine_first(carteira_credito_base)
         df_ano["ROE anualizado"] = df_ano.apply(_calc_roe_anualizado, axis=1)
         df_ano["Crédito 2.682 / PL"] = np.where(
@@ -5713,7 +5763,7 @@ elif menu == "Evolução":
         for k, c in graf_cols.items():
             df_graph[k] = pd.to_numeric(df_ano.get(c), errors="coerce")
 
-        ano_labels = [f"dez-{str(int(ano))[-2:]}" for ano in df_graph["Ano"].tolist()]
+        ano_labels = df_ano["LabelPeriodo"].tolist()
 
         def _fmt_mm_plot(v):
             if pd.isna(v):
@@ -5801,8 +5851,8 @@ elif menu == "Evolução":
             ]
         })
         for _, row in df_ano.iterrows():
-            ano = int(row["Ano"])
-            df_metric[str(ano)] = [
+            periodo_label = row.get("LabelPeriodo", str(int(row["Ano"])))
+            df_metric[periodo_label] = [
                 row.get("ROE anualizado"),
                 np.nan,
                 np.nan,
