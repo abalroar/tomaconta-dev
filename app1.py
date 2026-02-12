@@ -291,6 +291,7 @@ VARS_PERCENTUAL = [
     'Perda Esperada / (Carteira C4 + C5)',
     'Carteira de Créd. Class. C4+C5 / Carteira Bruta',
     'PDD / Estágio 3',
+    'Perda Esperada / Estágio 3',
     # Variáveis de Capital (Relatório 5)
     'Índice de Capital Principal',
     'Índice de Capital Principal (CET1)',
@@ -404,6 +405,11 @@ PEERS_TABELA_LAYOUT = [
                 "data_keys": [],
                 "format_key": "PDD / Estágio 3",
             },
+            {
+                "label": "Perda Esperada / Estágio 3",
+                "data_keys": [],
+                "format_key": "Perda Esperada / Estágio 3",
+            },
         ],
     },
     {
@@ -433,16 +439,6 @@ PEERS_TABELA_LAYOUT = [
                 "label": "Perda Esperada / (Carteira C4 + C5)",
                 "data_keys": [],
                 "format_key": "Perda Esperada / (Carteira C4 + C5)",
-            },
-            {
-                "label": "Saldo PDD Crédito (1490000004)",
-                "data_keys": [],
-                "format_key": "Saldo PDD Crédito (1490000004)",
-            },
-            {
-                "label": "Saldo PDD Outros Créditos (1890000006)",
-                "data_keys": [],
-                "format_key": "Saldo PDD Outros Créditos (1890000006)",
             },
             {
                 "label": "PDD Total 4060",
@@ -2514,6 +2510,7 @@ def _preparar_metricas_extra_peers(
         "Carteira Estágio 2": {},
         "Carteira Estágio 3": {},
         "PDD / Estágio 3": {},
+        "Perda Esperada / Estágio 3": {},
         "Índice de Capital Principal (CET1)": {},
         "Índice de Basileia Total": {},
     }
@@ -2887,6 +2884,7 @@ def _preparar_metricas_extra_peers(
             extra["Carteira Estágio 2"][chave] = estagio2_mes
             extra["Carteira Estágio 3"][chave] = estagio3_mes
             extra["PDD / Estágio 3"][chave] = _calcular_ratio_peers(pdd_total_4060, estagio3_mes)
+            extra["Perda Esperada / Estágio 3"][chave] = _calcular_ratio_peers(perda_esperada, estagio3_mes)
 
             # Capital: Índice de Capital Principal e Índice de Basileia Total
             # Prioridade: calcular da composição (Capital Principal / RWA);
@@ -3113,6 +3111,7 @@ def _montar_tabela_peers(
                         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Bruta"),
                         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "Carteira de Créd. Class. C4+C5"),
                         "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3"),
+                        "Perda Esperada / Estágio 3": ("Perda Esperada", "Carteira Estágio 3"),
                     }
                     if label in extra_values and label in _RATIO_COMPONENTS:
                         valor = extra_values[label].get((banco, periodo))
@@ -5603,6 +5602,7 @@ elif menu == "Peers (Tabela)":
                             <strong>Carteira Estágio 2</strong> = Saldo da conta 3312000001 no mês/período selecionado.<br>
                             <strong>Carteira Estágio 3</strong> = Saldo da conta 3313000000 no mês/período selecionado.<br>
                             <strong>PDD / Estágio 3</strong> = PDD Total 4060 ÷ Carteira Estágio 3 do mesmo mês/período.<br>
+                            <strong>Perda Esperada / Estágio 3</strong> = Perda Esperada (Rel. 2) ÷ Carteira Estágio 3 (Cadoc 4060) do mesmo mês/período.<br>
                             <br>
                             <em>Alavancagem</em><br>
                             <strong>Ativo / PL</strong> = Ativo Total ÷ Patrimônio Líquido.<br>
@@ -7865,6 +7865,15 @@ elif menu == "DRE":
             nome_norm = normalizar_nome_instituicao(nome_str)
             return _dict_aliases_dre.get(nome_str, _dict_aliases_dre.get(nome_norm, nome_str))
 
+        def _chave_instituicao_dre(nome):
+            if pd.isna(nome):
+                return ""
+            txt = normalizar_nome_instituicao(str(nome).strip()).upper().strip()
+            for sufixo in [" - PRUDENCIAL", " PRUDENCIAL", " S.A.", " SA", " S A"]:
+                if txt.endswith(sufixo):
+                    txt = txt[: -len(sufixo)].strip()
+            return " ".join(txt.split())
+
         df_base = df_base.copy()
         df_ytd_base = df_ytd_base.copy()
         df_base[instit_col] = df_base[instit_col].astype(str).str.strip()
@@ -7873,20 +7882,22 @@ elif menu == "DRE":
         df_ytd_base["InstituicaoRaw"] = df_ytd_base[instit_col]
         df_base["InstituicaoExib"] = df_base[instit_col].apply(_alias_instituicao_dre)
         df_ytd_base["InstituicaoExib"] = df_ytd_base[instit_col].apply(_alias_instituicao_dre)
+        df_base["InstituicaoKey"] = df_base[instit_col].apply(_chave_instituicao_dre)
+        df_ytd_base["InstituicaoKey"] = df_ytd_base[instit_col].apply(_chave_instituicao_dre)
 
         # Combinar instituições do DRE (Rel. 4) com as do principal (Rel. 1)
         # para que IFs presentes no dados principal (ex.: DOCK IP) apareçam no dropdown
         # mesmo quando não possuem dados no Relatório 4.
         _instituicoes_dre_raw = set(df_base["InstituicaoRaw"].dropna().unique().tolist())
         _instituicoes_principal = set()
-        _dados_periodos_dre = st.session_state.get('dados_periodos', {})
-        for _df_p in _dados_periodos_dre.values():
-            if _df_p is None:
-                continue
+        _manager_dre_inst = get_cache_manager()
+        _principal_result = _manager_dre_inst.carregar("principal") if _manager_dre_inst else None
+        _df_principal_inst = _principal_result.dados if (_principal_result and _principal_result.sucesso) else None
+        if _df_principal_inst is not None and not _df_principal_inst.empty:
             for _col_inst in ["Instituição", "Instituicao", "Instituição Financeira", "IF"]:
-                if _col_inst in _df_p.columns:
+                if _col_inst in _df_principal_inst.columns:
                     _instituicoes_principal.update(
-                        _df_p[_col_inst].dropna().astype(str).str.strip().tolist()
+                        _df_principal_inst[_col_inst].dropna().astype(str).str.strip().tolist()
                     )
         _instituicoes_combinadas = {
             str(_inst).strip() for _inst in (_instituicoes_dre_raw | _instituicoes_principal) if str(_inst).strip()
@@ -7977,10 +7988,20 @@ elif menu == "DRE":
             entrada_copy["label_exib"] = label_exib
             entradas_com_label.append(entrada_copy)
 
+        _ano_sel = int(ano_selecionado)
+        _inst_key_sel = _chave_instituicao_dre(instituicao_selecionada_raw)
+        _filtro_ano_ytd = df_ytd_base["ano"] == _ano_sel
         df_filtrado = df_ytd_base[
-            (df_ytd_base["InstituicaoRaw"] == instituicao_selecionada_raw)
-            & (df_ytd_base["ano"] == int(ano_selecionado))
+            _filtro_ano_ytd & (df_ytd_base["InstituicaoRaw"] == instituicao_selecionada_raw)
         ].copy()
+        if df_filtrado.empty and instituicao_alias_selecionada:
+            df_filtrado = df_ytd_base[
+                _filtro_ano_ytd & (df_ytd_base["InstituicaoExib"] == instituicao_alias_selecionada)
+            ].copy()
+        if df_filtrado.empty and _inst_key_sel:
+            df_filtrado = df_ytd_base[
+                _filtro_ano_ytd & (df_ytd_base["InstituicaoKey"] == _inst_key_sel)
+            ].copy()
         df_filtrado_base = df_filtrado.copy()
 
         diag_info = {}
@@ -8006,6 +8027,7 @@ elif menu == "DRE":
             df_derived_slice["Instituicao"] = df_derived_slice["Instituicao"].astype(str).str.strip()
             df_derived_slice["InstituicaoRaw"] = df_derived_slice["Instituicao"]
             df_derived_slice["InstituicaoExib"] = df_derived_slice["Instituicao"].apply(_alias_instituicao_dre)
+            df_derived_slice["InstituicaoKey"] = df_derived_slice["Instituicao"].apply(_chave_instituicao_dre)
             df_derived_slice["Periodo"] = df_derived_slice["Periodo"].astype(str)
             # Métricas derivadas já são gravadas no cache em base anualizada/YTD.
             # Reaplicar a regra semestral (somar jun em set/dez) aqui duplica
@@ -8083,6 +8105,12 @@ elif menu == "DRE":
                                 (df_principal_capt["Instituicao"] == instituicao_alias_selecionada)
                                 & (df_principal_capt["Periodo"] == _per)
                             ]
+                        if _m_cap.empty and _inst_key_sel:
+                            _chaves_cap = df_principal_capt["Instituicao"].astype(str).apply(_chave_instituicao_dre)
+                            _m_cap = df_principal_capt[
+                                (_chaves_cap == _inst_key_sel)
+                                & (df_principal_capt["Periodo"] == _per)
+                            ]
                         if not _m_cap.empty:
                             _cap = _m_cap["Captacoes"].iloc[0]
 
@@ -8116,6 +8144,10 @@ elif menu == "DRE":
                 df_derived_filtrado = df_derived_slice[
                     _filtro_ano & (df_derived_slice["InstituicaoExib"] == instituicao_alias_selecionada)
                 ].copy()
+                if df_derived_filtrado.empty and _inst_key_sel:
+                    df_derived_filtrado = df_derived_slice[
+                        _filtro_ano & (df_derived_slice["InstituicaoKey"] == _inst_key_sel)
+                    ].copy()
             df_derived_filtrado = (
                 df_derived_filtrado
                 .sort_values(["Label", "ano", "mes", "Periodo"], na_position="last")
@@ -10842,6 +10874,8 @@ elif menu == "Glossário":
     **Carteira Estágio 3:** Saldo da conta 3313000000 no mês/período selecionado (Cadoc 4060).
 
     **PDD / Estágio 3 (%):** Relação entre PDD Total 4060 e Carteira Estágio 3 do mesmo mês/período.
+
+    **Perda Esperada / Estágio 3 (%):** Relação entre Perda Esperada (Rel. 2) e Carteira Estágio 3 (Cadoc 4060) do mesmo mês/período.
 
     **Desp Captação / Captação (%):** Desp. Captação anualizada dividida por Captações. Fórmula: (Desp. Captação * (12 / meses_do_período)) / Captações.
     """)
