@@ -1139,9 +1139,19 @@ def preparar_download_cache_local(cache_manager: CacheManager, tipo_cache: str) 
         "mime": "application/octet-stream",
     }
 
+def _aliases_file_token() -> str:
+    """Token de versão do arquivo de aliases para invalidação de cache."""
+    path = Path(ALIASES_PATH)
+    if not path.exists():
+        return "aliases:missing"
+    stat = path.stat()
+    return f"aliases:{int(stat.st_mtime)}:{stat.st_size}"
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def carregar_aliases():
-    """Carrega aliases do Excel com cache de 1 hora."""
+def carregar_aliases(alias_file_token: str):
+    """Carrega aliases do Excel com cache de 1 hora e invalidação por arquivo."""
+    _ = alias_file_token
     _perf_start("carregar_aliases")
     if os.path.exists(ALIASES_PATH):
         df = pd.read_excel(ALIASES_PATH)
@@ -1149,6 +1159,35 @@ def carregar_aliases():
         return df
     print(_perf_log("carregar_aliases"))
     return None
+
+
+ALIAS_OVERRIDES = {
+    # Conglomerados novos no BLOPRUDENCIAL podem ainda não constar no XLS.
+    # Mantemos fallback explícito para não sumirem dos seletores.
+    "DOCK IP - PRUDENCIAL": "Dock",
+}
+
+
+def aplicar_alias_overrides(df_aliases: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Garante aliases mínimos para instituições ausentes no arquivo principal."""
+    if df_aliases is None or df_aliases.empty:
+        return pd.DataFrame(
+            [{"Instituição": inst, "Alias Banco": alias} for inst, alias in ALIAS_OVERRIDES.items()]
+        )
+
+    if "Instituição" not in df_aliases.columns or "Alias Banco" not in df_aliases.columns:
+        return df_aliases
+
+    df_out = df_aliases.copy()
+    existentes = set(df_out["Instituição"].dropna().astype(str).tolist())
+    faltantes = [
+        {"Instituição": inst, "Alias Banco": alias}
+        for inst, alias in ALIAS_OVERRIDES.items()
+        if inst not in existentes
+    ]
+    if faltantes:
+        df_out = pd.concat([df_out, pd.DataFrame(faltantes)], ignore_index=True)
+    return df_out
 
 # FIX PROBLEMA 3: Normalização de nomes de instituições
 def normalizar_nome_instituicao(nome):
@@ -4187,13 +4226,18 @@ _perf_start("init_total")
 
 if 'df_aliases' not in st.session_state:
     _perf_start("init_aliases")
-    df_aliases = carregar_aliases()
+    alias_file_token = _aliases_file_token()
+    df_aliases = carregar_aliases(alias_file_token)
     if df_aliases is not None:
+        df_aliases = aplicar_alias_overrides(df_aliases)
         st.session_state['df_aliases'] = df_aliases
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
         # Usar funções cacheadas com dados preparados
         alias_hash, alias_data = _preparar_aliases_para_cache(df_aliases)
-        st.session_state['dict_aliases_norm'] = construir_dict_aliases_normalizado(alias_hash, alias_data)
+        dict_aliases_norm = construir_dict_aliases_normalizado(alias_hash, alias_data)
+        st.session_state['dict_aliases_norm'] = dict_aliases_norm
+        # Usa lookup robusto como dicionário principal para cobrir variações de nome entre bases.
+        st.session_state['dict_aliases'] = dict_aliases_norm
         cores_hash, cores_data = _preparar_cores_para_cache(df_aliases)
         st.session_state['dict_cores_personalizadas'] = carregar_cores_aliases_local(cores_hash, cores_data)
         st.session_state['colunas_classificacao'] = [c for c in df_aliases.columns if c not in ['Instituição','Alias Banco','Cor','Código Cor']]
