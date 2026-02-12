@@ -3836,6 +3836,18 @@ def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
     return df_out, diag
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def get_scatter_periodo_df(periodo: str, principal_token: str, derived_token: str, capital_mesclado: bool):
+    """Carrega dataframe de um período do Scatter já com métricas derivadas anexadas."""
+    _ = (principal_token, derived_token, capital_mesclado)
+    df_base = get_analise_base_df()
+    if df_base is None or df_base.empty or 'Período' not in df_base.columns:
+        return pd.DataFrame(), {"tempo_s": 0.0, "linhas": 0, "mem_mb": 0.0}
+
+    df_periodo = df_base[df_base['Período'] == periodo].copy()
+    return anexar_metricas_derivadas_periodo(df_periodo, periodo)
+
+
 # FIX PROBLEMA 3: Busca de cor com normalização
 def obter_cor_banco(instituicao):
     if 'dict_cores_personalizadas' in st.session_state:
@@ -5380,9 +5392,13 @@ elif menu == "Scatter Plot":
                 key="bancos_multiselect"
             )
 
-        # Aplica filtros ao dataframe
-        df_periodo = df[df['Período'] == periodo_scatter]
-        df_periodo, diag_scatter_derived = anexar_metricas_derivadas_periodo(df_periodo, periodo_scatter)
+        # Aplica filtros ao dataframe (já com métricas derivadas cacheadas por período)
+        df_periodo, diag_scatter_derived = get_scatter_periodo_df(
+            periodo_scatter,
+            _cache_version_token("principal"),
+            _cache_version_token("derived_metrics"),
+            bool(st.session_state.get('_dados_capital_mesclados', False)),
+        )
 
         if bancos_selecionados:
             # Usa os bancos selecionados no multiselect
@@ -5540,9 +5556,19 @@ elif menu == "Scatter Plot":
         if periodo_inicial == periodo_subseq:
             st.warning("Selecione dois períodos diferentes para visualizar a movimentação.")
         else:
-            # Filtra dados para os dois períodos
-            df_p1 = df[df['Período'] == periodo_inicial].copy()
-            df_p2 = df[df['Período'] == periodo_subseq].copy()
+            # Filtra dados para os dois períodos (com métricas derivadas cacheadas)
+            df_p1, diag_scatter_derived_p1 = get_scatter_periodo_df(
+                periodo_inicial,
+                _cache_version_token("principal"),
+                _cache_version_token("derived_metrics"),
+                bool(st.session_state.get('_dados_capital_mesclados', False)),
+            )
+            df_p2, diag_scatter_derived_p2 = get_scatter_periodo_df(
+                periodo_subseq,
+                _cache_version_token("principal"),
+                _cache_version_token("derived_metrics"),
+                bool(st.session_state.get('_dados_capital_mesclados', False)),
+            )
 
             # Aplica seleção de bancos ou top N
             if bancos_selecionados_n2:
