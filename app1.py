@@ -291,6 +291,7 @@ VARS_PERCENTUAL = [
     'Perda Esperada / (Carteira C4 + C5)',
     'Desp PDD Anualizada / Carteira Bruta',
     'Carteira de Créd. Class. C4+C5 / Carteira Bruta',
+    'PDD / Estágio 3',
     # Variáveis de Capital (Relatório 5)
     'Índice de Capital Principal',
     'Índice de Capital Principal (CET1)',
@@ -326,6 +327,12 @@ VARS_MOEDAS = [
     'RWA Operacional',
     'Exposição Total',
     'Adicional de Capital Principal',
+    'Saldo PDD Crédito',
+    'Saldo PDD Outros Créditos',
+    'PDD Total 4060',
+    'Carteira Estágio 1',
+    'Carteira Estágio 2',
+    'Carteira Estágio 3',
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
@@ -361,7 +368,47 @@ PEERS_TABELA_LAYOUT = [
         ],
     },
     {
-        "section": "Qualidade Carteira",
+        "section": "Qualidade Carteira 4060",
+        "rows": [
+            {
+                "label": "Saldo PDD Crédito",
+                "data_keys": [],
+                "format_key": "Saldo PDD Crédito",
+            },
+            {
+                "label": "Saldo PDD Outros Créditos",
+                "data_keys": [],
+                "format_key": "Saldo PDD Outros Créditos",
+            },
+            {
+                "label": "PDD Total 4060",
+                "data_keys": [],
+                "format_key": "PDD Total 4060",
+            },
+            {
+                "label": "Carteira Estágio 1",
+                "data_keys": [],
+                "format_key": "Carteira Estágio 1",
+            },
+            {
+                "label": "Carteira Estágio 2",
+                "data_keys": [],
+                "format_key": "Carteira Estágio 2",
+            },
+            {
+                "label": "Carteira Estágio 3",
+                "data_keys": [],
+                "format_key": "Carteira Estágio 3",
+            },
+            {
+                "label": "PDD / Estágio 3",
+                "data_keys": [],
+                "format_key": "PDD / Estágio 3",
+            },
+        ],
+    },
+    {
+        "section": "Qualidade Carteira IFData",
         "rows": [
             {
                 "label": "Perda Esperada",
@@ -392,12 +439,6 @@ PEERS_TABELA_LAYOUT = [
                 "label": "Desp PDD Anualizada / Carteira Bruta",
                 "data_keys": [],
                 "format_key": "Desp PDD Anualizada / Carteira Bruta",
-            },
-            {
-                "label": "Desp PDD / NII (ref: período acumulado)",
-                "data_keys": [],
-                "format_key": "Desp PDD / NII",
-                "todo": "TODO: Integrar despesa PDD/NII (período acumulado) a partir das fontes do projeto.",
             },
         ],
     },
@@ -2396,8 +2437,20 @@ def _carregar_cache_relatorio_slice(
         return None
 
     df = resultado.dados
-    if periodos and "Período" in df.columns:
-        df = df[df["Período"].isin(periodos)]
+    if periodos:
+        if "Período" in df.columns:
+            df = df[df["Período"].isin(periodos)]
+        elif tipo_cache == "bloprudencial":
+            col_data_base = next((c for c in ["DATA_BASE", "Data_Base", "data_base"] if c in df.columns), None)
+            if col_data_base:
+                periodos_yyyymm = {
+                    str(p).split("/")[1] + str(p).split("/")[0].zfill(2)
+                    for p in periodos
+                    if isinstance(p, str) and "/" in p
+                }
+                if periodos_yyyymm:
+                    base_txt = df[col_data_base].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+                    df = df[base_txt.isin(periodos_yyyymm)]
     if instituicoes and "Instituição" in df.columns:
         df = df[df["Instituição"].isin(instituicoes)]
     return df
@@ -2435,6 +2488,7 @@ def _preparar_metricas_extra_peers(
     cache_carteira_instr: Optional[pd.DataFrame],
     cache_dre: Optional[pd.DataFrame],
     cache_capital: Optional[pd.DataFrame] = None,
+    cache_bloprudencial: Optional[pd.DataFrame] = None,
 ) -> dict:
     extra = {
         "Carteira de Crédito Bruta": {},
@@ -2447,11 +2501,187 @@ def _preparar_metricas_extra_peers(
         "Perda Esperada / (Carteira C4 + C5)": {},
         "Desp PDD Anualizada": {},
         "Desp PDD Anualizada / Carteira Bruta": {},
+        "Saldo PDD Crédito": {},
+        "Saldo PDD Outros Créditos": {},
+        "PDD Total 4060": {},
+        "Carteira Estágio 1": {},
+        "Carteira Estágio 2": {},
+        "Carteira Estágio 3": {},
+        "PDD / Estágio 3": {},
         "Índice de Capital Principal (CET1)": {},
         "Índice de Basileia Total": {},
     }
     periodos_base = {_periodo_ano_anterior(periodo) for periodo in periodos}
     periodos_ext = [p for p in periodos + sorted(periodos_base) if p]
+
+    def _periodo_to_yyyymm(periodo: str) -> Optional[str]:
+        parsed = _parse_periodo(periodo)
+        if not parsed:
+            return None
+        parte, ano, _ = parsed
+        tri_idx = _parte_periodo_para_trimestre_idx(parte)
+        if tri_idx is None:
+            return None
+        mes_map = {1: "03", 2: "06", 3: "09", 4: "12"}
+        mes = mes_map.get(tri_idx)
+        if mes is None:
+            return None
+        return f"{ano:04d}{mes}"
+
+    def _bloprud_norm_name(valor: str) -> str:
+        if valor is None:
+            return ""
+        txt = str(valor).strip().upper()
+        txt = txt.replace("Á", "A").replace("À", "A").replace("Ã", "A").replace("Â", "A")
+        txt = txt.replace("É", "E").replace("Ê", "E")
+        txt = txt.replace("Í", "I")
+        txt = txt.replace("Ó", "O").replace("Õ", "O").replace("Ô", "O")
+        txt = txt.replace("Ú", "U").replace("Ç", "C")
+        txt = " ".join(txt.split())
+        return txt
+
+    def _bloprud_pick_col(df_src: Optional[pd.DataFrame], candidates: list[str]) -> Optional[str]:
+        if df_src is None or df_src.empty:
+            return None
+        cols = list(df_src.columns)
+        if not cols:
+            return None
+        lower_map = {str(c).strip().lower(): c for c in cols}
+        for cand in candidates:
+            key = str(cand).strip().lower()
+            if key in lower_map:
+                return lower_map[key]
+        for cand in candidates:
+            key = str(cand).strip().lower()
+            for col in cols:
+                col_l = str(col).strip().lower()
+                if key in col_l or col_l in key:
+                    return col
+        return None
+
+    # Fallback: quando o cache manager "bloprudencial" estiver vazio/ausente,
+    # carregar competências necessárias direto do loader mensal em disco/rede.
+    if cache_bloprudencial is None or cache_bloprudencial.empty:
+        try:
+            from utils.ifdata_cache import load_bloprudencial_df_cached
+
+            yyyymm_needed = sorted({
+                ym for ym in (_periodo_to_yyyymm(p) for p in periodos)
+                if ym
+            })
+            dfs_blop = []
+            for ym in yyyymm_needed:
+                df_ym = load_bloprudencial_df_cached(
+                    yyyymm=ym,
+                    cache_dir="data/cache/bcb_bloprudencial",
+                    force_refresh=False,
+                )
+                if df_ym is None or df_ym.empty:
+                    continue
+                tmp = df_ym.copy()
+                if "DATA_BASE" not in tmp.columns:
+                    tmp["DATA_BASE"] = ym
+                if "Período" not in tmp.columns:
+                    tmp["Período"] = f"{ym[4:6]}/{ym[:4]}"
+                dfs_blop.append(tmp)
+            if dfs_blop:
+                cache_bloprudencial = pd.concat(dfs_blop, ignore_index=True)
+        except Exception:
+            pass
+
+    col_blop_nome_inst = _bloprud_pick_col(cache_bloprudencial, ["NOME_INSTITUICAO", "Instituição", "Instituicao"])
+    col_blop_nome_congl = _bloprud_pick_col(cache_bloprudencial, ["NOME_CONGL", "Nome_Congl", "nome_congl"])
+    col_blop_conta = _bloprud_pick_col(cache_bloprudencial, ["CONTA", "Conta", "codigo_conta", "COD_CONTA"])
+    col_blop_saldo = _bloprud_pick_col(cache_bloprudencial, ["SALDO", "Saldo", "VALOR", "Valor"])
+
+    blop_lookup: dict[tuple[str, str, str], float] = {}
+    if (
+        cache_bloprudencial is not None
+        and not cache_bloprudencial.empty
+        and (col_blop_nome_inst or col_blop_nome_congl)
+        and col_blop_conta
+        and col_blop_saldo
+    ):
+        df_blop = cache_bloprudencial.copy()
+
+        # Em alguns casos o cache vem sem coluna Período e o slice por período retorna vazio.
+        # Reidratar Período a partir de DATA_BASE (YYYYMM -> MM/YYYY) para compatibilizar filtros da aba Peers.
+        if "Período" not in df_blop.columns:
+            col_data_base = _bloprud_pick_col(df_blop, ["DATA_BASE", "Data_Base", "data_base"])
+            if col_data_base:
+                base_txt = df_blop[col_data_base].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+                df_blop["Período"] = base_txt.str[4:6] + "/" + base_txt.str[:4]
+        if col_blop_nome_inst:
+            df_blop["_inst_norm"] = df_blop[col_blop_nome_inst].map(_bloprud_norm_name)
+        else:
+            df_blop["_inst_norm"] = ""
+        if col_blop_nome_congl:
+            df_blop["_congl_norm"] = df_blop[col_blop_nome_congl].map(_bloprud_norm_name)
+        else:
+            df_blop["_congl_norm"] = ""
+        df_blop["_conta"] = df_blop[col_blop_conta].astype(str).str.replace(r"\D", "", regex=True)
+        df_blop["_saldo"] = pd.to_numeric(df_blop[col_blop_saldo], errors="coerce")
+
+        col_data_base = _bloprud_pick_col(df_blop, ["DATA_BASE", "Data_Base", "data_base"])
+        if col_data_base:
+            df_blop["_yyyymm"] = df_blop[col_data_base].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+        else:
+            df_blop["_yyyymm"] = None
+
+        ag_inst = (
+            df_blop.groupby(["_yyyymm", "_inst_norm", "_conta"], dropna=False)["_saldo"]
+            .sum(min_count=1)
+            .reset_index()
+        )
+        for _, row in ag_inst.iterrows():
+            yyyymm = str(row["_yyyymm"])
+            inst_norm = str(row["_inst_norm"])
+            conta = str(row["_conta"])
+            val = row["_saldo"]
+            if not yyyymm or yyyymm == "None" or len(yyyymm) != 6:
+                continue
+            if inst_norm and inst_norm != "None" and pd.notna(val):
+                blop_lookup[(yyyymm, inst_norm, conta)] = float(val)
+
+        ag_congl = (
+            df_blop.groupby(["_yyyymm", "_congl_norm", "_conta"], dropna=False)["_saldo"]
+            .sum(min_count=1)
+            .reset_index()
+        )
+        for _, row in ag_congl.iterrows():
+            yyyymm = str(row["_yyyymm"])
+            congl_norm = str(row["_congl_norm"])
+            conta = str(row["_conta"])
+            val = row["_saldo"]
+            if not yyyymm or yyyymm == "None" or len(yyyymm) != 6:
+                continue
+            if congl_norm and congl_norm != "None" and pd.notna(val):
+                blop_lookup[(yyyymm, congl_norm, conta)] = float(val)
+
+    def _blop_get_sum_periodo_conta(banco: str, periodo: str, conta: str) -> Optional[float]:
+        if not blop_lookup:
+            return None
+        yyyymm = _periodo_to_yyyymm(periodo)
+        if not yyyymm:
+            return None
+        inst_norm = _bloprud_norm_name(banco)
+        val = blop_lookup.get((yyyymm, inst_norm, conta))
+        if val is not None and not pd.isna(val):
+            return float(val)
+
+        # fallback: compatibilizar nome do banco com NOME_CONGL (ex.: "ITAÚ" vs "ITAU - PRUDENCIAL")
+        val_fallback = None
+        for (ym_key, inst_key, conta_key), saldo in blop_lookup.items():
+            if ym_key != yyyymm or conta_key != conta:
+                continue
+            if inst_norm and (inst_norm in inst_key or inst_key in inst_norm):
+                if saldo is None or pd.isna(saldo):
+                    continue
+                val_fallback = float(saldo)
+                break
+
+        val = val_fallback
+        return None if val is None or pd.isna(val) else float(val)
 
     col_pf_total = _resolver_coluna_peers(
         cache_carteira_pf,
@@ -2628,6 +2858,21 @@ def _preparar_metricas_extra_peers(
                 desp_pdd_anual,
                 carteira_bruta,
             )
+
+            pdd_credito = _blop_get_sum_periodo_conta(banco, periodo, "1490000004")
+            pdd_outros = _blop_get_sum_periodo_conta(banco, periodo, "1890000006")
+            pdd_total_4060 = _somar_valores([pdd_credito, pdd_outros])
+            estagio1_mes = _blop_get_sum_periodo_conta(banco, periodo, "3311000002")
+            estagio2_mes = _blop_get_sum_periodo_conta(banco, periodo, "3312000001")
+            estagio3_mes = _blop_get_sum_periodo_conta(banco, periodo, "3313000000")
+
+            extra["Saldo PDD Crédito"][chave] = pdd_credito
+            extra["Saldo PDD Outros Créditos"][chave] = pdd_outros
+            extra["PDD Total 4060"][chave] = pdd_total_4060
+            extra["Carteira Estágio 1"][chave] = estagio1_mes
+            extra["Carteira Estágio 2"][chave] = estagio2_mes
+            extra["Carteira Estágio 3"][chave] = estagio3_mes
+            extra["PDD / Estágio 3"][chave] = _calcular_ratio_peers(pdd_total_4060, estagio3_mes)
 
             # Capital: Índice de Capital Principal e Índice de Basileia Total
             # Prioridade: calcular da composição (Capital Principal / RWA);
@@ -2825,6 +3070,7 @@ def _montar_tabela_peers(
         (caches_extras or {}).get("carteira_instrumentos"),
         (caches_extras or {}).get("dre"),
         (caches_extras or {}).get("capital"),
+        (caches_extras or {}).get("bloprudencial"),
     )
     _perf_peers_stage(perf, "c_joins_mapeamentos_metricas_extra", t_extra)
 
@@ -2853,6 +3099,7 @@ def _montar_tabela_peers(
                         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Bruta"),
                         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "Carteira de Créd. Class. C4+C5"),
                         "Desp PDD Anualizada / Carteira Bruta": ("Desp PDD Anualizada", "Carteira de Crédito Bruta"),
+                        "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3"),
                     }
                     if label in extra_values and label in _RATIO_COMPONENTS:
                         valor = extra_values[label].get((banco, periodo))
@@ -5218,6 +5465,7 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_instr = _carregar_cache_relatorio_slice("carteira_instrumentos", _cache_version_token("carteira_instrumentos"), periodos_ext_peers, bancos_tuple)
                     cache_dre = _carregar_cache_relatorio_slice("dre", _cache_version_token("dre"), periodos_ext_peers, bancos_tuple)
                     cache_capital = _carregar_cache_relatorio_slice("capital", _cache_version_token("capital"), periodos_ext_peers, bancos_tuple)
+                    cache_bloprudencial = _carregar_cache_relatorio_slice("bloprudencial", _cache_version_token("bloprudencial"), periodos_ext_peers, bancos_tuple)
                     _perf_peers_stage(peers_perf, "a_leitura_cache_slices", t_slice)
 
                     t_filtros = time.perf_counter()
@@ -5228,6 +5476,7 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_instr = _aplicar_aliases_df(cache_carteira_instr, dict_aliases)
                     cache_dre = _aplicar_aliases_df(cache_dre, dict_aliases)
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
+                    cache_bloprudencial = _aplicar_aliases_df(cache_bloprudencial, dict_aliases)
 
                     # Fallback defensivo: garante ausência de NameError em deploy parcial.
                     # Quando o recorte foi feito no carregamento, evitar novo slice para não duplicar custo.
@@ -5240,6 +5489,7 @@ elif menu == "Peers (Tabela)":
                         cache_carteira_instr = slice_fn(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
                         cache_dre = slice_fn(cache_dre, bancos_selecionados, periodos_ext_peers)
                         cache_capital = slice_fn(cache_capital, bancos_selecionados, periodos_ext_peers)
+                        cache_bloprudencial = slice_fn(cache_bloprudencial, bancos_selecionados, periodos_ext_peers)
                     _perf_peers_stage(peers_perf, "b_filtros_alias_periodo_banco", t_filtros)
 
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
@@ -5254,6 +5504,7 @@ elif menu == "Peers (Tabela)":
                             "carteira_instrumentos": cache_carteira_instr,
                             "dre": cache_dre,
                             "capital": cache_capital,
+                            "bloprudencial": cache_bloprudencial,
                         },
                         perf=peers_perf,
                     )
@@ -5331,8 +5582,14 @@ elif menu == "Peers (Tabela)":
                             <strong>Carteira de Créd. Class. C4+C5</strong> = Soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
                             <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.<br>
                             <strong>Perda Esperada / (Carteira C4 + C5)</strong> = Perda Esperada ÷ (C4 + C5).<br>
+                            <strong>Saldo PDD Crédito</strong> = Saldo da conta COSIF 1490000004 (Cadoc 4060) para o período selecionado.<br>
+                            <strong>Saldo PDD Outros Créditos</strong> = Saldo da conta COSIF 1890000006 (Cadoc 4060) para o período selecionado.<br>
+                            <strong>PDD Total 4060</strong> = 1490000004 + 1890000006.<br>
+                            <strong>Carteira Estágio 1</strong> = Saldo da conta 3311000002 no mês/período selecionado.<br>
+                            <strong>Carteira Estágio 2</strong> = Saldo da conta 3312000001 no mês/período selecionado.<br>
+                            <strong>Carteira Estágio 3</strong> = Saldo da conta 3313000000 no mês/período selecionado.<br>
+                            <strong>PDD / Estágio 3</strong> = PDD Total 4060 ÷ Carteira Estágio 3 do mesmo mês/período.<br>
                             <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Resultado com Perda Esperada anualizado) ÷ Carteira de Crédito Bruta. Anualização: valor acumulado YTD × (12 / meses do período).<br>
-                            <strong>Desp PDD / NII (ref: período acumulado)</strong> = Desp. PDD acumulada ÷ NII (resultado de intermediação financeira) acumulado.<br>
                             <br>
                             <em>Alavancagem</em><br>
                             <strong>Ativo / PL</strong> = Ativo Total ÷ Patrimônio Líquido.<br>
@@ -10441,6 +10698,20 @@ elif menu == "Glossário":
     **Desp PDD / NIM bruta (%):** Desp. PDD dividido pela NIM bruta (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito). Fórmula: Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito).
 
     **Desp PDD / Resultado Intermediação Fin. Bruto (%):** Desp. PDD dividido pelo Resultado de Intermediação Financeira Bruto. Fórmula: Desp. PDD / Resultado de Intermediação Financeira Bruto.
+
+    **Saldo PDD Crédito:** Saldo da conta COSIF 1490000004 (Cadoc 4060) no período.
+
+    **Saldo PDD Outros Créditos:** Saldo da conta COSIF 1890000006 (Cadoc 4060) no período.
+
+    **PDD Total 4060:** Soma dos saldos das contas 1490000004 e 1890000006 no período.
+
+    **Carteira Estágio 1:** Saldo da conta 3311000002 no mês/período selecionado (Cadoc 4060).
+
+    **Carteira Estágio 2:** Saldo da conta 3312000001 no mês/período selecionado (Cadoc 4060).
+
+    **Carteira Estágio 3:** Saldo da conta 3313000000 no mês/período selecionado (Cadoc 4060).
+
+    **PDD / Estágio 3 (%):** Relação entre PDD Total 4060 e Carteira Estágio 3 do mesmo mês/período.
 
     **Desp Captação / Captação (%):** Desp. Captação anualizada dividida por Captações. Fórmula: (Desp. Captação * (12 / meses_do_período)) / Captações.
     """)
