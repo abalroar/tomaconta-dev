@@ -8,7 +8,7 @@ import re
 import time
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import requests
@@ -18,12 +18,9 @@ logger = logging.getLogger("ifdata_cache.bloprudencial")
 BASE_URL = "https://www.bcb.gov.br/content/estabilidadefinanceira/cosif/Conglomerados-prudenciais"
 FILE_SUFFIX = "BLOPRUDENCIAL.csv.zip"
 DEFAULT_CACHE_DIR = Path("data/cache/bcb_bloprudencial")
-LOADER_VERSION = "v1"
+LOADER_VERSION = "v2"
 
 
-# -----------------------------------------------------------------------------
-# Utilitários base
-# -----------------------------------------------------------------------------
 def _validate_yyyymm(yyyymm: str) -> str:
     yyyymm = str(yyyymm).strip()
     if not re.fullmatch(r"\d{6}", yyyymm):
@@ -67,9 +64,50 @@ def _guess_encoding(sample: bytes) -> str:
 
 
 def _guess_delimiter(header_text: str) -> str:
-    count_semicolon = header_text.count(";")
-    count_comma = header_text.count(",")
-    return ";" if count_semicolon >= count_comma else ","
+    delimiters = [";", ",", "|", "\t"]
+    scores = {d: header_text.count(d) for d in delimiters}
+    return max(scores, key=scores.get) if any(scores.values()) else ";"
+
+
+def _candidate_encodings(encoding_guess: str) -> List[str]:
+    base = [encoding_guess, "utf-8", "latin-1", "utf-8-sig", "cp1252"]
+    return list(dict.fromkeys(base))
+
+
+def _candidate_delimiters(delimiter_guess: str) -> List[str]:
+    base = [delimiter_guess, ";", ",", "|", "\t"]
+    return list(dict.fromkeys(base))
+
+
+def _read_csv_probe(
+    csv_path: Path,
+    encodings: List[str],
+    delimiters: List[str],
+    nrows: Optional[int] = None,
+) -> Tuple[pd.DataFrame, str, str]:
+    """Tenta ler CSV com matriz encoding x delimiter e retorna primeiro parse válido."""
+    last_exc: Optional[Exception] = None
+    for enc in encodings:
+        for sep in delimiters:
+            try:
+                df = pd.read_csv(
+                    csv_path,
+                    sep=sep,
+                    encoding=enc,
+                    nrows=nrows,
+                    engine="python",
+                    on_bad_lines="skip",
+                )
+                if df.empty:
+                    continue
+                # parse ruim típico: única coluna gigante com delimitador errado
+                if len(df.columns) == 1 and any(d in str(df.columns[0]) for d in [";", ",", "|", "\t"]):
+                    continue
+                return df, enc, sep
+            except Exception as exc:
+                last_exc = exc
+                continue
+    raise ValueError(f"Falha ao ler CSV com combinações de encoding/delimiter. Último erro: {last_exc}")
 
 
 def _coerce_numeric_columns(df: pd.DataFrame) -> List[str]:
@@ -101,11 +139,7 @@ def _coerce_numeric_columns(df: pd.DataFrame) -> List[str]:
     return converted
 
 
-# -----------------------------------------------------------------------------
-# API pública
-# -----------------------------------------------------------------------------
 def build_bloprudencial_url(yyyymm: str) -> str:
-    """Retorna a URL BLOPRUDENCIAL para uma competência YYYYMM."""
     yyyymm = _validate_yyyymm(yyyymm)
     return f"{BASE_URL}/{yyyymm}{FILE_SUFFIX}"
 
@@ -116,7 +150,6 @@ def download_bloprudencial_zip(
     force_refresh: bool = False,
     timeout: int = 120,
 ) -> Path:
-    """Baixa o ZIP BLOPRUDENCIAL para cache local (ou reutiliza cache hit)."""
     yyyymm = _validate_yyyymm(yyyymm)
     dirs = _ensure_dirs(Path(cache_dir))
     url = build_bloprudencial_url(yyyymm)
@@ -132,17 +165,11 @@ def download_bloprudencial_zip(
     resp.raise_for_status()
     zip_path.write_bytes(resp.content)
     dt = time.perf_counter() - t0
-    logger.info(
-        "[BLOPRUDENCIAL] download concluído %s (%d bytes) em %.2fs",
-        zip_path.name,
-        zip_path.stat().st_size,
-        dt,
-    )
+    logger.info("[BLOPRUDENCIAL] download concluído %s (%d bytes) em %.2fs", zip_path.name, zip_path.stat().st_size, dt)
     return zip_path
 
 
 def extract_bloprudencial_csv(zip_path: Path, extracted_dir: str | Path) -> Path:
-    """Extrai CSV interno do ZIP para diretório local, reutilizando se ZIP não mudou."""
     if not zip_path.exists():
         raise FileNotFoundError(f"ZIP não encontrado: {zip_path}")
 
@@ -185,12 +212,11 @@ def extract_bloprudencial_csv(zip_path: Path, extracted_dir: str | Path) -> Path
 
 
 def inspect_bloprudencial_csv(csv_path: Path) -> Dict[str, Any]:
-    """Inspeciona rapidamente CSV BLOPRUDENCIAL (header/delimiter/encoding/linhas/dtypes)."""
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV não encontrado: {csv_path}")
 
     with csv_path.open("rb") as f:
-        sample = f.read(16384)
+        sample = f.read(65536)
 
     encoding_guess = _guess_encoding(sample)
     text_sample = sample.decode(encoding_guess, errors="replace")
@@ -202,24 +228,20 @@ def inspect_bloprudencial_csv(csv_path: Path) -> Dict[str, Any]:
         for _ in f:
             line_count += 1
 
-    encodings_try = [encoding_guess] + [e for e in ("utf-8", "latin-1", "utf-8-sig") if e != encoding_guess]
-    sample_df: Optional[pd.DataFrame] = None
-    used_encoding = encoding_guess
-    for enc in encodings_try:
-        try:
-            sample_df = pd.read_csv(csv_path, sep=delimiter_guess, encoding=enc, nrows=200)
-            used_encoding = enc
-            break
-        except Exception:
-            continue
-
-    if sample_df is None:
-        raise ValueError(f"Falha ao inspecionar CSV: {csv_path}")
+    encodings_try = _candidate_encodings(encoding_guess)
+    delimiters_try = _candidate_delimiters(delimiter_guess)
+    sample_df, used_encoding, used_delimiter = _read_csv_probe(
+        csv_path,
+        encodings=encodings_try,
+        delimiters=delimiters_try,
+        nrows=200,
+    )
 
     info = {
         "path": str(csv_path),
         "first_line": first_line,
         "delimiter_guess": delimiter_guess,
+        "delimiter_used": used_delimiter,
         "encoding_guess": encoding_guess,
         "encoding_used": used_encoding,
         "line_count": line_count,
@@ -231,7 +253,7 @@ def inspect_bloprudencial_csv(csv_path: Path) -> Dict[str, Any]:
         "[BLOPRUDENCIAL] inspect csv=%s encoding=%s delimiter=%s linhas=%d colunas=%d",
         csv_path.name,
         info["encoding_used"],
-        info["delimiter_guess"],
+        info["delimiter_used"],
         info["line_count"],
         len(info["columns"]),
     )
@@ -243,7 +265,6 @@ def load_bloprudencial_df(
     cache_dir: str | Path = DEFAULT_CACHE_DIR,
     force_refresh: bool = False,
 ) -> pd.DataFrame:
-    """Orquestra download->extração->inspeção->load DataFrame numérico."""
     yyyymm = _validate_yyyymm(yyyymm)
     dirs = _ensure_dirs(Path(cache_dir))
 
@@ -251,23 +272,15 @@ def load_bloprudencial_df(
     csv_path = extract_bloprudencial_csv(zip_path, extracted_dir=dirs["csv"])
     inspect = inspect_bloprudencial_csv(csv_path)
 
-    delimiter = inspect["delimiter_guess"]
-    encodings_try = [inspect["encoding_used"], "utf-8", "latin-1", "utf-8-sig"]
-    encodings_try = list(dict.fromkeys(encodings_try))
-
-    df: Optional[pd.DataFrame] = None
-    last_exc: Optional[Exception] = None
-    for enc in encodings_try:
-        try:
-            df = pd.read_csv(csv_path, sep=delimiter, encoding=enc)
-            logger.info("[BLOPRUDENCIAL] read_csv ok encoding=%s linhas=%d", enc, len(df))
-            break
-        except Exception as exc:
-            last_exc = exc
-            continue
-
-    if df is None:
-        raise ValueError(f"Falha ao carregar CSV com encodings tentados {encodings_try}: {last_exc}")
+    encodings_try = _candidate_encodings(inspect["encoding_used"])
+    delimiters_try = _candidate_delimiters(inspect.get("delimiter_used", inspect["delimiter_guess"]))
+    df, used_encoding, used_delimiter = _read_csv_probe(
+        csv_path,
+        encodings=encodings_try,
+        delimiters=delimiters_try,
+        nrows=None,
+    )
+    logger.info("[BLOPRUDENCIAL] read_csv ok encoding=%s sep=%s linhas=%d", used_encoding, used_delimiter, len(df))
 
     converted_cols = _coerce_numeric_columns(df)
     logger.info("[BLOPRUDENCIAL] colunas convertidas para numérico: %d", len(converted_cols))
@@ -279,6 +292,7 @@ def load_bloprudencial_df(
         "zip_path": str(zip_path),
         "csv_path": str(csv_path),
         "inspect": inspect,
+        "read_csv": {"encoding": used_encoding, "delimiter": used_delimiter},
         "converted_numeric_columns": converted_cols,
         "loader_version": LOADER_VERSION,
     }
@@ -290,7 +304,6 @@ def preload_bloprudencial(
     cache_dir: str | Path = DEFAULT_CACHE_DIR,
     force_refresh: bool = False,
 ) -> Dict[str, pd.DataFrame]:
-    """Pré-carrega lista de competências BLOPRUDENCIAL com log por competência."""
     result: Dict[str, pd.DataFrame] = {}
     total = len(yyyymm_list)
     for i, ym in enumerate(yyyymm_list, start=1):
@@ -309,7 +322,6 @@ try:
         force_refresh: bool = False,
         loader_version: str = LOADER_VERSION,
     ) -> pd.DataFrame:
-        """Wrapper cacheado para uso no Streamlit (chaveado por competência/versão)."""
         _ = loader_version
         return load_bloprudencial_df(yyyymm=yyyymm, cache_dir=cache_dir, force_refresh=force_refresh)
 
