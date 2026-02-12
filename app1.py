@@ -1150,6 +1150,35 @@ def carregar_aliases():
     print(_perf_log("carregar_aliases"))
     return None
 
+
+ALIAS_OVERRIDES = {
+    # Conglomerados novos no BLOPRUDENCIAL podem ainda não constar no XLS.
+    # Mantemos fallback explícito para não sumirem dos seletores.
+    "DOCK IP - PRUDENCIAL": "Dock",
+}
+
+
+def aplicar_alias_overrides(df_aliases: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Garante aliases mínimos para instituições ausentes no arquivo principal."""
+    if df_aliases is None or df_aliases.empty:
+        return pd.DataFrame(
+            [{"Instituição": inst, "Alias Banco": alias} for inst, alias in ALIAS_OVERRIDES.items()]
+        )
+
+    if "Instituição" not in df_aliases.columns or "Alias Banco" not in df_aliases.columns:
+        return df_aliases
+
+    df_out = df_aliases.copy()
+    existentes = set(df_out["Instituição"].dropna().astype(str).tolist())
+    faltantes = [
+        {"Instituição": inst, "Alias Banco": alias}
+        for inst, alias in ALIAS_OVERRIDES.items()
+        if inst not in existentes
+    ]
+    if faltantes:
+        df_out = pd.concat([df_out, pd.DataFrame(faltantes)], ignore_index=True)
+    return df_out
+
 # FIX PROBLEMA 3: Normalização de nomes de instituições
 def normalizar_nome_instituicao(nome):
     """Normaliza nome removendo espaços extras e convertendo para uppercase"""
@@ -4189,6 +4218,7 @@ if 'df_aliases' not in st.session_state:
     _perf_start("init_aliases")
     df_aliases = carregar_aliases()
     if df_aliases is not None:
+        df_aliases = aplicar_alias_overrides(df_aliases)
         st.session_state['df_aliases'] = df_aliases
         st.session_state['dict_aliases'] = dict(zip(df_aliases['Instituição'], df_aliases['Alias Banco']))
         # Usar funções cacheadas com dados preparados
