@@ -7845,15 +7845,14 @@ elif menu == "DRE (Balancetes)":
                     progress_bar = st.progress(0)
                     status_text = st.empty()
 
-                    total_periodos = len(periodos_extrair)
-                    periodos_processados = 0
+                    # Usar dicionário mutável para contadores (evita problemas com nonlocal em Streamlit)
+                    contadores = {"total": len(periodos_extrair), "processados": 0}
 
                     def callback_progresso(periodo, df):
-                        nonlocal periodos_processados
-                        periodos_processados += 1
-                        progresso = periodos_processados / total_periodos
+                        contadores["processados"] += 1
+                        progresso = contadores["processados"] / contadores["total"]
                         progress_bar.progress(progresso)
-                        status_text.text(f"Processando {periodo} ({periodos_processados}/{total_periodos})...")
+                        status_text.text(f"Processando {periodo} ({contadores['processados']}/{contadores['total']})...")
 
                     try:
                         # Obter cache de balancetes
