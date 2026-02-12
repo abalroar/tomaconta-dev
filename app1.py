@@ -760,7 +760,13 @@ def recalcular_metricas_derivadas(dados_periodos):
         # Normalizar índices percentuais para base decimal (0-1).
         # O cache (parquet/pickle) pode conter valores em 0-100 (API bruta)
         # ou em 0-1 (extrator normalizado). Forçar sempre 0-1.
-        for _col_pct in ("Índice de Basileia", "Índice de Imobilização"):
+        for _col_pct in (
+            "Índice de Basileia",
+            "Índice de Basileia Total",
+            "Índice de Imobilização",
+            "Índice de Capital Principal",
+            "Índice de Capital Principal (CET1)",
+        ):
             if _col_pct in df_atualizado.columns:
                 df_atualizado[_col_pct] = _normalizar_indice_para_decimal(df_atualizado[_col_pct])
 
@@ -4241,7 +4247,13 @@ def _precisa_recalcular_metricas_rapido(dados_periodos: dict) -> bool:
         if {"Carteira de Crédito", "Ativo Total"}.issubset(cols) and "Crédito/Ativo (%)" not in cols:
             return True
 
-        for col_pct in ("Índice de Basileia", "Índice de Imobilização"):
+        for col_pct in (
+            "Índice de Basileia",
+            "Índice de Basileia Total",
+            "Índice de Imobilização",
+            "Índice de Capital Principal",
+            "Índice de Capital Principal (CET1)",
+        ):
             if col_pct in cols:
                 serie = pd.to_numeric(df[col_pct], errors='coerce')
                 if (serie.abs() > 1).any():
@@ -5744,10 +5756,13 @@ elif menu == "Evolução":
             pd.to_numeric(df_ano["Carteira Classificada"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
             np.nan,
         )
-        df_ano["Basileia"] = pd.to_numeric(df_ano.get("Índice de Basileia"), errors="coerce")
-        df_ano["Índice de Capital Principal (CET1)"] = pd.to_numeric(
-            df_ano.get("Índice de Capital Principal (CET1)"), errors="coerce"
-        )
+        basileia_fonte = pd.to_numeric(df_ano.get("Índice de Basileia"), errors="coerce")
+        df_ano["Índice de Basileia (%)"] = _normalizar_basileia_display(basileia_fonte)
+
+        cet1_fonte = pd.to_numeric(df_ano.get("Índice de Capital Principal (CET1)"), errors="coerce")
+        if cet1_fonte.isna().all():
+            cet1_fonte = pd.to_numeric(df_ano.get("Índice de Capital Principal"), errors="coerce")
+        df_ano["Índice de Capital Principal (CET1) (%)"] = _normalizar_percentual_display(cet1_fonte)
 
         if "Lucro Líquido" in df_ano.columns:
             serie_ll_ytd = pd.to_numeric(df_ano["Lucro Líquido Acumulado YTD"], errors="coerce")
@@ -5790,7 +5805,7 @@ elif menu == "Evolução":
                 marker_color="#9B9B9B",
                 text=[_fmt_mm_plot(v) for v in df_graph["Lucro Líquido"]],
                 textposition="outside",
-                textfont=dict(size=14),
+                textfont=dict(size=16),
                 yaxis="y",
             )
         )
@@ -5802,7 +5817,7 @@ elif menu == "Evolução":
                 marker_color="#102A83",
                 text=[_fmt_mm_plot(v) for v in df_graph["Patrimônio Líquido"]],
                 textposition="outside",
-                textfont=dict(size=14),
+                textfont=dict(size=16),
                 yaxis="y",
             )
         )
@@ -5816,7 +5831,7 @@ elif menu == "Evolução":
                 marker=dict(size=8, color="#FF6B35"),
                 text=[_fmt_mm_plot(v) for v in df_graph["Carteira Classificada"]],
                 textposition="top center",
-                textfont=dict(size=14),
+                textfont=dict(size=16),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -5831,7 +5846,7 @@ elif menu == "Evolução":
                 marker=dict(size=8, color="#1F1F1F"),
                 text=[_fmt_mm_plot(v) for v in df_graph["Core Funding"]],
                 textposition="bottom center",
-                textfont=dict(size=14),
+                textfont=dict(size=16),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -5856,8 +5871,8 @@ elif menu == "Evolução":
             "Métrica": [
                 "ROE anualizado",
                 "Carteira Classificada / PL",
-                "Basileia",
-                "Índice de Capital Principal (CET1)",
+                "Índice de Basileia (%)",
+                "Índice de Capital Principal (CET1) (%)",
             ]
         })
         for _, row in df_ano.iterrows():
@@ -5865,8 +5880,8 @@ elif menu == "Evolução":
             df_metric[periodo_label] = [
                 row.get("ROE anualizado"),
                 row.get("Crédito 2.682 / PL"),
-                row.get("Basileia"),
-                row.get("Índice de Capital Principal (CET1)"),
+                row.get("Índice de Basileia (%)"),
+                row.get("Índice de Capital Principal (CET1) (%)"),
             ]
 
         def _fmt_valor_br(v):
@@ -5888,7 +5903,7 @@ elif menu == "Evolução":
         def _fmt_evol(v, m):
             if pd.isna(v):
                 return "-"
-            if m in ("ROE anualizado", "Basileia", "Índice de Capital Principal (CET1)"):
+            if m in ("ROE anualizado", "Índice de Basileia (%)", "Índice de Capital Principal (CET1) (%)"):
                 return _fmt_pct(v)
             if m == "Carteira Classificada / PL":
                 return f"{float(v):.1f}x".replace(".", ",")
@@ -5897,31 +5912,50 @@ elif menu == "Evolução":
         df_show = df_metric.copy()
         for c in df_show.columns[1:]:
             df_show[c] = [ _fmt_evol(v, m) for v,m in zip(df_metric[c], df_metric["Métrica"]) ]
-        st.table(df_show.set_index("Métrica"))
+        st.dataframe(df_show.set_index("Métrica"), width='stretch')
 
-        with st.expander("📥 exportar"):
-            buffer_excel = io.BytesIO()
-            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                df_graph.to_excel(writer, index=False, sheet_name='grafico_dados')
-                df_metric.to_excel(writer, index=False, sheet_name='tabela_metricas')
-            buffer_excel.seek(0)
-            instituicao_arquivo = re.sub(r"[^\w\-.]+", "_", str(instituicao), flags=re.UNICODE).strip("_") or "instituicao"
+        col_export1, col_export2, col_export3 = st.columns(3)
+        buffer_excel = io.BytesIO()
+        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+            df_graph.to_excel(writer, index=False, sheet_name='grafico_dados')
+            df_metric.to_excel(writer, index=False, sheet_name='tabela_metricas')
+        buffer_excel.seek(0)
+        instituicao_arquivo = re.sub(r"[^\w\-.]+", "_", str(instituicao), flags=re.UNICODE).strip("_") or "instituicao"
 
+        with col_export1:
             st.download_button(
-                label="Baixar Excel",
+                label="exportar excel",
                 data=buffer_excel.getvalue(),
                 file_name=f"evolucao_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="evolucao_excel",
+                use_container_width=True,
             )
 
+        with col_export2:
+            csv_metric = df_metric.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Baixar gráfico (HTML)",
-                data=fig_ev.to_html(include_plotlyjs='cdn').encode('utf-8'),
-                file_name=f"evolucao_grafico_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-                mime="text/html",
-                key="evolucao_grafico_html",
+                label="exportar csv",
+                data=csv_metric,
+                file_name=f"evolucao_tabela_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="evolucao_csv",
+                use_container_width=True,
             )
+
+        with col_export3:
+            png_bytes = _plotly_fig_to_png_bytes(fig_ev)
+            if png_bytes:
+                st.download_button(
+                    label="exportar gráfico PNG",
+                    data=png_bytes,
+                    file_name=f"evolucao_grafico_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                    mime="image/png",
+                    key="evolucao_grafico_png",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
@@ -6381,7 +6415,7 @@ elif menu == "Rankings":
             'Captações': ['Captações'],
             'Patrimônio Líquido': ['Patrimônio Líquido'],
             'Índice de Capital Principal (CET1)': ['Índice de Capital Principal (CET1)', 'Índice de Capital Principal'],
-            'Índice de Basileia': ['Índice de Basileia'],
+            'Índice de Basileia (%)': ['Índice de Basileia'],
             'Lucro Líquido Acumulado YTD': ['Lucro Líquido Acumulado YTD'],
             'Lucro Líquido Trimestral': ['Lucro Líquido Trimestral'],
             'ROE Ac. Anualizado (%)': ['ROE Ac. Anualizado (%)', 'ROE Ac. YTD an. (%)'],
@@ -6403,7 +6437,7 @@ elif menu == "Rankings":
                 'Captações',
                 'Patrimônio Líquido',
                 'Índice de Capital Principal (CET1)',
-                'Índice de Basileia',
+                'Índice de Basileia (%)',
                 'Lucro Líquido Acumulado YTD',
                 'Lucro Líquido Trimestral',
                 'ROE Ac. Anualizado (%)',
@@ -6499,7 +6533,7 @@ elif menu == "Rankings":
                 df_selecionado = pd.DataFrame()
 
             if grafico_base == "Ranking":
-                if indicador_label == "Índice de Basileia":
+                if indicador_label == "Índice de Basileia (%)":
                     df_capital_base = _preparar_df_capital_base()
                     if df_capital_base.empty:
                         st.info("dados de capital não disponíveis para o ranking.")
@@ -6621,7 +6655,7 @@ elif menu == "Rankings":
                             ))
 
                             fig_basileia.update_layout(
-                                title=f"Índice de Basileia Total - {periodo_resumo} ({n_bancos} instituições)",
+                                title=f"Índice de Basileia (%) - {periodo_resumo} ({n_bancos} instituições)",
                                 xaxis_title="instituições",
                                 yaxis_title="índice (%)",
                                 plot_bgcolor='#f8f9fa',
