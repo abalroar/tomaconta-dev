@@ -327,12 +327,12 @@ VARS_MOEDAS = [
     'RWA Operacional',
     'Exposição Total',
     'Adicional de Capital Principal',
-    'Saldo PDD Crédito (1490000004)',
-    'Saldo PDD Outros Créditos (1890000006)',
+    'Saldo PDD Crédito',
+    'Saldo PDD Outros Créditos',
     'PDD Total 4060',
-    'Carteira Estágio 1 (3311000002)',
-    'Carteira Estágio 2 (3312000001)',
-    'Carteira Estágio 3 (3313000000)',
+    'Carteira Estágio 1',
+    'Carteira Estágio 2',
+    'Carteira Estágio 3',
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
@@ -371,14 +371,14 @@ PEERS_TABELA_LAYOUT = [
         "section": "Qualidade Carteira 4060",
         "rows": [
             {
-                "label": "Saldo PDD Crédito (1490000004)",
+                "label": "Saldo PDD Crédito",
                 "data_keys": [],
-                "format_key": "Saldo PDD Crédito (1490000004)",
+                "format_key": "Saldo PDD Crédito",
             },
             {
-                "label": "Saldo PDD Outros Créditos (1890000006)",
+                "label": "Saldo PDD Outros Créditos",
                 "data_keys": [],
-                "format_key": "Saldo PDD Outros Créditos (1890000006)",
+                "format_key": "Saldo PDD Outros Créditos",
             },
             {
                 "label": "PDD Total 4060",
@@ -386,19 +386,19 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "PDD Total 4060",
             },
             {
-                "label": "Carteira Estágio 1 (3311000002)",
+                "label": "Carteira Estágio 1",
                 "data_keys": [],
-                "format_key": "Carteira Estágio 1 (3311000002)",
+                "format_key": "Carteira Estágio 1",
             },
             {
-                "label": "Carteira Estágio 2 (3312000001)",
+                "label": "Carteira Estágio 2",
                 "data_keys": [],
-                "format_key": "Carteira Estágio 2 (3312000001)",
+                "format_key": "Carteira Estágio 2",
             },
             {
-                "label": "Carteira Estágio 3 (3313000000)",
+                "label": "Carteira Estágio 3",
                 "data_keys": [],
-                "format_key": "Carteira Estágio 3 (3313000000)",
+                "format_key": "Carteira Estágio 3",
             },
             {
                 "label": "PDD / Estágio 3",
@@ -454,26 +454,6 @@ PEERS_TABELA_LAYOUT = [
                 "label": "Carteira Estágio 1 (3311000002)",
                 "data_keys": [],
                 "format_key": "Carteira Estágio 1 (3311000002)",
-            },
-            {
-                "label": "Carteira Estágio 2 (3312000001)",
-                "data_keys": [],
-                "format_key": "Carteira Estágio 2 (3312000001)",
-            },
-            {
-                "label": "Carteira Estágio 3 (3313000000)",
-                "data_keys": [],
-                "format_key": "Carteira Estágio 3 (3313000000)",
-            },
-            {
-                "label": "PDD / Estágio 3",
-                "data_keys": [],
-                "format_key": "PDD / Estágio 3",
-            },
-            {
-                "label": "Desp PDD Anualizada / Carteira Bruta",
-                "data_keys": [],
-                "format_key": "Desp PDD Anualizada / Carteira Bruta",
             },
         ],
     },
@@ -2472,8 +2452,20 @@ def _carregar_cache_relatorio_slice(
         return None
 
     df = resultado.dados
-    if periodos and "Período" in df.columns:
-        df = df[df["Período"].isin(periodos)]
+    if periodos:
+        if "Período" in df.columns:
+            df = df[df["Período"].isin(periodos)]
+        elif tipo_cache == "bloprudencial":
+            col_data_base = next((c for c in ["DATA_BASE", "Data_Base", "data_base"] if c in df.columns), None)
+            if col_data_base:
+                periodos_yyyymm = {
+                    str(p).split("/")[1] + str(p).split("/")[0].zfill(2)
+                    for p in periodos
+                    if isinstance(p, str) and "/" in p
+                }
+                if periodos_yyyymm:
+                    base_txt = df[col_data_base].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+                    df = df[base_txt.isin(periodos_yyyymm)]
     if instituicoes and "Instituição" in df.columns:
         df = df[df["Instituição"].isin(instituicoes)]
     return df
@@ -2524,12 +2516,12 @@ def _preparar_metricas_extra_peers(
         "Perda Esperada / (Carteira C4 + C5)": {},
         "Desp PDD Anualizada": {},
         "Desp PDD Anualizada / Carteira Bruta": {},
-        "Saldo PDD Crédito (1490000004)": {},
-        "Saldo PDD Outros Créditos (1890000006)": {},
+        "Saldo PDD Crédito": {},
+        "Saldo PDD Outros Créditos": {},
         "PDD Total 4060": {},
-        "Carteira Estágio 1 (3311000002)": {},
-        "Carteira Estágio 2 (3312000001)": {},
-        "Carteira Estágio 3 (3313000000)": {},
+        "Carteira Estágio 1": {},
+        "Carteira Estágio 2": {},
+        "Carteira Estágio 3": {},
         "PDD / Estágio 3": {},
         "Índice de Capital Principal (CET1)": {},
         "Índice de Basileia Total": {},
@@ -2596,6 +2588,14 @@ def _preparar_metricas_extra_peers(
         and col_blop_saldo
     ):
         df_blop = cache_bloprudencial.copy()
+
+        # Em alguns casos o cache vem sem coluna Período e o slice por período retorna vazio.
+        # Reidratar Período a partir de DATA_BASE (YYYYMM -> MM/YYYY) para compatibilizar filtros da aba Peers.
+        if "Período" not in df_blop.columns:
+            col_data_base = _bloprud_pick_col(df_blop, ["DATA_BASE", "Data_Base", "data_base"])
+            if col_data_base:
+                base_txt = df_blop[col_data_base].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+                df_blop["Período"] = base_txt.str[4:6] + "/" + base_txt.str[:4]
         if col_blop_nome_inst:
             df_blop["_inst_norm"] = df_blop[col_blop_nome_inst].map(_bloprud_norm_name)
         else:
@@ -2851,12 +2851,12 @@ def _preparar_metricas_extra_peers(
             estagio2_mes = _blop_get_sum_periodo_conta(banco, periodo, "3312000001")
             estagio3_mes = _blop_get_sum_periodo_conta(banco, periodo, "3313000000")
 
-            extra["Saldo PDD Crédito (1490000004)"][chave] = pdd_credito
-            extra["Saldo PDD Outros Créditos (1890000006)"][chave] = pdd_outros
+            extra["Saldo PDD Crédito"][chave] = pdd_credito
+            extra["Saldo PDD Outros Créditos"][chave] = pdd_outros
             extra["PDD Total 4060"][chave] = pdd_total_4060
-            extra["Carteira Estágio 1 (3311000002)"][chave] = estagio1_mes
-            extra["Carteira Estágio 2 (3312000001)"][chave] = estagio2_mes
-            extra["Carteira Estágio 3 (3313000000)"][chave] = estagio3_mes
+            extra["Carteira Estágio 1"][chave] = estagio1_mes
+            extra["Carteira Estágio 2"][chave] = estagio2_mes
+            extra["Carteira Estágio 3"][chave] = estagio3_mes
             extra["PDD / Estágio 3"][chave] = _calcular_ratio_peers(pdd_total_4060, estagio3_mes)
 
             # Capital: Índice de Capital Principal e Índice de Basileia Total
@@ -3084,7 +3084,7 @@ def _montar_tabela_peers(
                         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Bruta"),
                         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "Carteira de Créd. Class. C4+C5"),
                         "Desp PDD Anualizada / Carteira Bruta": ("Desp PDD Anualizada", "Carteira de Crédito Bruta"),
-                        "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3 (3313000000)"),
+                        "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3"),
                     }
                     if label in extra_values and label in _RATIO_COMPONENTS:
                         valor = extra_values[label].get((banco, periodo))
@@ -5567,12 +5567,12 @@ elif menu == "Peers (Tabela)":
                             <strong>Carteira de Créd. Class. C4+C5</strong> = Soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
                             <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.<br>
                             <strong>Perda Esperada / (Carteira C4 + C5)</strong> = Perda Esperada ÷ (C4 + C5).<br>
-                            <strong>Saldo PDD Crédito (1490000004)</strong> = Saldo da conta COSIF 1490000004 (Cadoc 4060) para o período selecionado.<br>
-                            <strong>Saldo PDD Outros Créditos (1890000006)</strong> = Saldo da conta COSIF 1890000006 (Cadoc 4060) para o período selecionado.<br>
+                            <strong>Saldo PDD Crédito</strong> = Saldo da conta COSIF 1490000004 (Cadoc 4060) para o período selecionado.<br>
+                            <strong>Saldo PDD Outros Créditos</strong> = Saldo da conta COSIF 1890000006 (Cadoc 4060) para o período selecionado.<br>
                             <strong>PDD Total 4060</strong> = 1490000004 + 1890000006.<br>
-                            <strong>Carteira Estágio 1 (3311000002)</strong> = Saldo da conta 3311000002 no mês/período selecionado.<br>
-                            <strong>Carteira Estágio 2 (3312000001)</strong> = Saldo da conta 3312000001 no mês/período selecionado.<br>
-                            <strong>Carteira Estágio 3 (3313000000)</strong> = Saldo da conta 3313000000 no mês/período selecionado.<br>
+                            <strong>Carteira Estágio 1</strong> = Saldo da conta 3311000002 no mês/período selecionado.<br>
+                            <strong>Carteira Estágio 2</strong> = Saldo da conta 3312000001 no mês/período selecionado.<br>
+                            <strong>Carteira Estágio 3</strong> = Saldo da conta 3313000000 no mês/período selecionado.<br>
                             <strong>PDD / Estágio 3</strong> = PDD Total 4060 ÷ Carteira Estágio 3 do mesmo mês/período.<br>
                             <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Resultado com Perda Esperada anualizado) ÷ Carteira de Crédito Bruta. Anualização: valor acumulado YTD × (12 / meses do período).<br>
                             <br>
@@ -10684,17 +10684,17 @@ elif menu == "Glossário":
 
     **Desp PDD / Resultado Intermediação Fin. Bruto (%):** Desp. PDD dividido pelo Resultado de Intermediação Financeira Bruto. Fórmula: Desp. PDD / Resultado de Intermediação Financeira Bruto.
 
-    **Saldo PDD Crédito (1490000004):** Saldo da conta COSIF 1490000004 (Cadoc 4060) no período.
+    **Saldo PDD Crédito:** Saldo da conta COSIF 1490000004 (Cadoc 4060) no período.
 
-    **Saldo PDD Outros Créditos (1890000006):** Saldo da conta COSIF 1890000006 (Cadoc 4060) no período.
+    **Saldo PDD Outros Créditos:** Saldo da conta COSIF 1890000006 (Cadoc 4060) no período.
 
     **PDD Total 4060:** Soma dos saldos das contas 1490000004 e 1890000006 no período.
 
-    **Carteira Estágio 1 (3311000002):** Saldo da conta 3311000002 no mês/período selecionado (Cadoc 4060).
+    **Carteira Estágio 1:** Saldo da conta 3311000002 no mês/período selecionado (Cadoc 4060).
 
-    **Carteira Estágio 2 (3312000001):** Saldo da conta 3312000001 no mês/período selecionado (Cadoc 4060).
+    **Carteira Estágio 2:** Saldo da conta 3312000001 no mês/período selecionado (Cadoc 4060).
 
-    **Carteira Estágio 3 (3313000000):** Saldo da conta 3313000000 no mês/período selecionado (Cadoc 4060).
+    **Carteira Estágio 3:** Saldo da conta 3313000000 no mês/período selecionado (Cadoc 4060).
 
     **PDD / Estágio 3 (%):** Relação entre PDD Total 4060 e Carteira Estágio 3 do mesmo mês/período.
 
