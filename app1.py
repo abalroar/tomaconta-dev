@@ -450,11 +450,6 @@ PEERS_TABELA_LAYOUT = [
                 "data_keys": [],
                 "format_key": "PDD Total 4060",
             },
-            {
-                "label": "Carteira Estágio 1 (3311000002)",
-                "data_keys": [],
-                "format_key": "Carteira Estágio 1 (3311000002)",
-            },
         ],
     },
     {
@@ -2555,6 +2550,32 @@ def _preparar_metricas_extra_peers(
         txt = " ".join(txt.split())
         return txt
 
+    def _bloprud_strip_suffixes(valor_norm: str) -> str:
+        txt = str(valor_norm or "").strip()
+        if not txt:
+            return ""
+        for suffix in [" - PRUDENCIAL", " PRUDENCIAL", " S.A.", " S A", " SA"]:
+            if txt.endswith(suffix):
+                txt = txt[: -len(suffix)].strip()
+        return " ".join(txt.split())
+
+    def _bloprud_name_variants(valor: str) -> set[str]:
+        base = _bloprud_norm_name(valor)
+        if not base:
+            return set()
+        variants = {base}
+        stripped = _bloprud_strip_suffixes(base)
+        if stripped:
+            variants.add(stripped)
+        if " - " in base:
+            left = base.split(" - ", 1)[0].strip()
+            if left:
+                variants.add(left)
+        for v in list(variants):
+            v2 = v.replace("BANCO", "BCO").replace("BCO", "BANCO")
+            variants.add(" ".join(v2.split()))
+        return {v for v in variants if v}
+
     def _bloprud_pick_col(df_src: Optional[pd.DataFrame], candidates: list[str]) -> Optional[str]:
         if df_src is None or df_src.empty:
             return None
@@ -2573,6 +2594,36 @@ def _preparar_metricas_extra_peers(
                 if key in col_l or col_l in key:
                     return col
         return None
+
+    # Fallback: quando o cache manager "bloprudencial" estiver vazio/ausente,
+    # carregar competências necessárias direto do loader mensal em disco/rede.
+    if cache_bloprudencial is None or cache_bloprudencial.empty:
+        try:
+            from utils.ifdata_cache import load_bloprudencial_df_cached
+
+            yyyymm_needed = sorted({
+                ym for ym in (_periodo_to_yyyymm(p) for p in periodos)
+                if ym
+            })
+            dfs_blop = []
+            for ym in yyyymm_needed:
+                df_ym = load_bloprudencial_df_cached(
+                    yyyymm=ym,
+                    cache_dir="data/cache/bcb_bloprudencial",
+                    force_refresh=False,
+                )
+                if df_ym is None or df_ym.empty:
+                    continue
+                tmp = df_ym.copy()
+                if "DATA_BASE" not in tmp.columns:
+                    tmp["DATA_BASE"] = ym
+                if "Período" not in tmp.columns:
+                    tmp["Período"] = f"{ym[4:6]}/{ym[:4]}"
+                dfs_blop.append(tmp)
+            if dfs_blop:
+                cache_bloprudencial = pd.concat(dfs_blop, ignore_index=True)
+        except Exception:
+            pass
 
     col_blop_nome_inst = _bloprud_pick_col(cache_bloprudencial, ["NOME_INSTITUICAO", "Instituição", "Instituicao"])
     col_blop_nome_congl = _bloprud_pick_col(cache_bloprudencial, ["NOME_CONGL", "Nome_Congl", "nome_congl"])
@@ -2649,17 +2700,18 @@ def _preparar_metricas_extra_peers(
         yyyymm = _periodo_to_yyyymm(periodo)
         if not yyyymm:
             return None
-        inst_norm = _bloprud_norm_name(banco)
-        val = blop_lookup.get((yyyymm, inst_norm, conta))
-        if val is not None and not pd.isna(val):
-            return float(val)
+        banco_variants = _bloprud_name_variants(banco)
+        for variant in banco_variants:
+            val = blop_lookup.get((yyyymm, variant, conta))
+            if val is not None and not pd.isna(val):
+                return float(val)
 
-        # fallback: compatibilizar nome do banco com NOME_CONGL (ex.: "ITAÚ" vs "ITAU - PRUDENCIAL")
+        # fallback: compatibilizar por inclusão textual entre variantes e chaves do lookup
         val_fallback = None
         for (ym_key, inst_key, conta_key), saldo in blop_lookup.items():
             if ym_key != yyyymm or conta_key != conta:
                 continue
-            if inst_norm and (inst_norm in inst_key or inst_key in inst_norm):
+            if any(v and (v in inst_key or inst_key in v) for v in banco_variants):
                 if saldo is None or pd.isna(saldo):
                     continue
                 val_fallback = float(saldo)
