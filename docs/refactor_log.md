@@ -83,3 +83,27 @@
 
 - Na aba **Peers (Tabela)**, aplicado `_normalizar_lucro_liquido(df)` antes da montagem para garantir `Lucro Líquido Acumulado YTD` consistente (mesma lógica da aba Rankings).
 - Na aba **Rankings > Deltas**, o formato de eixo e rótulo para variáveis percentuais agora usa a coluna base (`coluna_variavel`) e exibe `%` em `Δ absoluto` (ex.: `6.23%` em vez de `0.06`).
+
+## Mensuração de usabilidade — Peers (Tabela)
+
+Para responder objetivamente se ainda há tarefas pendentes e se houve ganho real de tempo, o fluxo recomendado é:
+
+1. Rodar o app e capturar logs (stdout) contendo `[PEERS_PERF]` e `[ROE_TRACE]`.
+2. Executar pelo menos 3 trocas de banco (com os mesmos períodos) para reduzir ruído.
+3. Agregar os logs com o script:
+
+```bash
+python tools/measure_peers_usability.py --log-file streamlit.log --sla-seconds 3.0
+```
+
+O relatório (`docs/peers_usability_report.json`) traz:
+- `interactive_total` com min/p50/p95/média (sem export);
+- `stages` com tempos por etapa;
+- `top_bottlenecks` (maiores médias);
+- `sla_pass` (meta p95 <= 3s por interação);
+- `roe_consistency` comparando último trace de peers vs scatter para o mesmo alvo.
+
+### Critério prático de aceite de UX
+- **Meta principal:** `interactive_total.p95_s <= 3.0`.
+- **Meta ideal:** p50 próximo de 2s.
+- Se `sla_pass = false`, priorizar otimização dos 2 primeiros itens em `top_bottlenecks`.
