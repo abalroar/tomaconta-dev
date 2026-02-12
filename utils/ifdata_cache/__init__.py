@@ -79,6 +79,16 @@ from .taxas_juros import (
     MODALIDADES_CONHECIDAS,
 )
 
+from .bloprudencial import (
+    build_bloprudencial_url,
+    download_bloprudencial_zip,
+    extract_bloprudencial_csv,
+    inspect_bloprudencial_csv,
+    load_bloprudencial_df,
+    load_bloprudencial_df_cached,
+    preload_bloprudencial,
+)
+
 from .metric_registry import (
     MetricDefinition,
     DatasetContract,
@@ -230,6 +240,14 @@ __all__ = [
     "buscar_instituicoes_taxas_juros",
     "formatar_nome_modalidade",
     "MODALIDADES_CONHECIDAS",
+    # Implementacoes - BLOPRUDENCIAL
+    "build_bloprudencial_url",
+    "download_bloprudencial_zip",
+    "extract_bloprudencial_csv",
+    "inspect_bloprudencial_csv",
+    "load_bloprudencial_df",
+    "load_bloprudencial_df_cached",
+    "preload_bloprudencial",
     # Derived metrics
     # Metric registry / contracts
     "MetricDefinition",

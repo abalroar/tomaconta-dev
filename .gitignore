@@ -26,3 +26,6 @@ env/
 
 # Sistema
 .DS_Store
+
+# Cache BLOPRUDENCIAL (arquivos brutos BCB)
+data/cache/bcb_bloprudencial/
