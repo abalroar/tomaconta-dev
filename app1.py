@@ -450,11 +450,6 @@ PEERS_TABELA_LAYOUT = [
                 "data_keys": [],
                 "format_key": "PDD Total 4060",
             },
-            {
-                "label": "Carteira Estágio 1 (3311000002)",
-                "data_keys": [],
-                "format_key": "Carteira Estágio 1 (3311000002)",
-            },
         ],
     },
     {
@@ -2573,6 +2568,36 @@ def _preparar_metricas_extra_peers(
                 if key in col_l or col_l in key:
                     return col
         return None
+
+    # Fallback: quando o cache manager "bloprudencial" estiver vazio/ausente,
+    # carregar competências necessárias direto do loader mensal em disco/rede.
+    if cache_bloprudencial is None or cache_bloprudencial.empty:
+        try:
+            from utils.ifdata_cache import load_bloprudencial_df_cached
+
+            yyyymm_needed = sorted({
+                ym for ym in (_periodo_to_yyyymm(p) for p in periodos)
+                if ym
+            })
+            dfs_blop = []
+            for ym in yyyymm_needed:
+                df_ym = load_bloprudencial_df_cached(
+                    yyyymm=ym,
+                    cache_dir="data/cache/bcb_bloprudencial",
+                    force_refresh=False,
+                )
+                if df_ym is None or df_ym.empty:
+                    continue
+                tmp = df_ym.copy()
+                if "DATA_BASE" not in tmp.columns:
+                    tmp["DATA_BASE"] = ym
+                if "Período" not in tmp.columns:
+                    tmp["Período"] = f"{ym[4:6]}/{ym[:4]}"
+                dfs_blop.append(tmp)
+            if dfs_blop:
+                cache_bloprudencial = pd.concat(dfs_blop, ignore_index=True)
+        except Exception:
+            pass
 
     col_blop_nome_inst = _bloprud_pick_col(cache_bloprudencial, ["NOME_INSTITUICAO", "Instituição", "Instituicao"])
     col_blop_nome_congl = _bloprud_pick_col(cache_bloprudencial, ["NOME_CONGL", "Nome_Congl", "nome_congl"])
