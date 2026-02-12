@@ -5730,9 +5730,14 @@ elif menu == "Evolução":
             return pd.Series(np.nan, index=dataframe.index, dtype="float64")
 
         df_ano["Core Funding"] = _numeric_series(df_ano, "Captações")
-        carteira_classificada_base = _numeric_series(df_ano, "Carteira Classificada")
+        carteira_classificada_2025 = _numeric_series(df_ano, "Carteira Classificada")
+        carteira_classificada_historica = _numeric_series(df_ano, "Carteira de Crédito Classificada")
         carteira_credito_base = _numeric_series(df_ano, "Carteira de Crédito")
-        df_ano["Carteira Classificada"] = carteira_classificada_base.combine_first(carteira_credito_base)
+        df_ano["Carteira Classificada"] = (
+            carteira_classificada_historica
+            .combine_first(carteira_classificada_2025)
+            .combine_first(carteira_credito_base)
+        )
         df_ano["ROE anualizado"] = df_ano.apply(_calc_roe_anualizado, axis=1)
         df_ano["Crédito 2.682 / PL"] = np.where(
             pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce") != 0,
@@ -5740,7 +5745,9 @@ elif menu == "Evolução":
             np.nan,
         )
         df_ano["Basileia"] = pd.to_numeric(df_ano.get("Índice de Basileia"), errors="coerce")
-        df_ano["CET1"] = pd.to_numeric(df_ano.get("Índice de Capital Principal (CET1)"), errors="coerce")
+        df_ano["Índice de Capital Principal (CET1)"] = pd.to_numeric(
+            df_ano.get("Índice de Capital Principal (CET1)"), errors="coerce"
+        )
 
         if "Lucro Líquido" in df_ano.columns:
             serie_ll_ytd = pd.to_numeric(df_ano["Lucro Líquido Acumulado YTD"], errors="coerce")
@@ -5769,7 +5776,8 @@ elif menu == "Evolução":
             if pd.isna(v):
                 return ""
             try:
-                return f"{float(v):,.0f}".replace(",", ".")
+                valor_mm = float(v) / 1e6
+                return f"R$ {valor_mm:,.0f} MM".replace(",", ".")
             except Exception:
                 return ""
 
@@ -5782,6 +5790,7 @@ elif menu == "Evolução":
                 marker_color="#9B9B9B",
                 text=[_fmt_mm_plot(v) for v in df_graph["Lucro Líquido"]],
                 textposition="outside",
+                textfont=dict(size=14),
                 yaxis="y",
             )
         )
@@ -5793,6 +5802,7 @@ elif menu == "Evolução":
                 marker_color="#102A83",
                 text=[_fmt_mm_plot(v) for v in df_graph["Patrimônio Líquido"]],
                 textposition="outside",
+                textfont=dict(size=14),
                 yaxis="y",
             )
         )
@@ -5806,6 +5816,7 @@ elif menu == "Evolução":
                 marker=dict(size=8, color="#FF6B35"),
                 text=[_fmt_mm_plot(v) for v in df_graph["Carteira Classificada"]],
                 textposition="top center",
+                textfont=dict(size=14),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -5820,6 +5831,7 @@ elif menu == "Evolução":
                 marker=dict(size=8, color="#1F1F1F"),
                 text=[_fmt_mm_plot(v) for v in df_graph["Core Funding"]],
                 textposition="bottom center",
+                textfont=dict(size=14),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -5843,22 +5855,18 @@ elif menu == "Evolução":
         df_metric = pd.DataFrame({
             "Métrica": [
                 "ROE anualizado",
-                "Divid./JSCP",
-                "(+/-) Capital",
                 "Carteira Classificada / PL",
                 "Basileia",
-                "CET1",
+                "Índice de Capital Principal (CET1)",
             ]
         })
         for _, row in df_ano.iterrows():
             periodo_label = row.get("LabelPeriodo", str(int(row["Ano"])))
             df_metric[periodo_label] = [
                 row.get("ROE anualizado"),
-                np.nan,
-                np.nan,
                 row.get("Crédito 2.682 / PL"),
                 row.get("Basileia"),
-                row.get("CET1"),
+                row.get("Índice de Capital Principal (CET1)"),
             ]
 
         def _fmt_valor_br(v):
@@ -5873,14 +5881,14 @@ elif menu == "Evolução":
             if pd.isna(v):
                 return "-"
             try:
-                return f"{float(v) * 100:.1f}%".replace(".", ",")
+                return f"{float(v) * 100:.2f}%".replace(".", ",")
             except Exception:
                 return "-"
 
         def _fmt_evol(v, m):
             if pd.isna(v):
                 return "-"
-            if m in ("ROE anualizado", "Basileia", "CET1"):
+            if m in ("ROE anualizado", "Basileia", "Índice de Capital Principal (CET1)"):
                 return _fmt_pct(v)
             if m == "Carteira Classificada / PL":
                 return f"{float(v):.1f}x".replace(".", ",")
