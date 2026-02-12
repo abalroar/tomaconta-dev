@@ -9687,9 +9687,9 @@ elif menu == "Atualizar Base":
         st.markdown("---")
         col_r1, col_r2, col_r3 = st.columns(3)
         with col_r1:
-            st.metric("Cache Local", f"{total_local}/8")
+            st.metric("Cache Local", f"{total_local}/{len(status_data)}")
         with col_r2:
-            st.metric("GitHub Releases", f"{total_github}/8")
+            st.metric("GitHub Releases", f"{total_github}/{len(status_data)}")
         with col_r3:
             if total_efemero > 0:
                 st.metric("⚠️ Efêmeros", f"{total_efemero}", delta="Publicar!", delta_color="inverse")
@@ -9992,16 +9992,41 @@ elif menu == "Atualizar Base":
                             for line in logs_bloprud:
                                 st.text(line)
 
+                        # Persistir também no cache manager para permitir publicação/download pelo fluxo padrão
                         if len(periodos_extrair) == 1 and "bloprudencial_df" in st.session_state:
-                            df_preview = st.session_state["bloprudencial_df"]
+                            df_preview = st.session_state["bloprudencial_df"].copy()
+                            ym_preview = st.session_state.get("bloprudencial_yyyymm", "")
+                            if ym_preview and "Período" not in df_preview.columns:
+                                df_preview["Período"] = ym_preview
+                            cache_manager.salvar(
+                                "bloprudencial",
+                                df_preview,
+                                fonte="bcb_bloprudencial",
+                                info_extra={"competencias": [ym_preview]},
+                            )
                             c1, c2, c3 = st.columns(3)
                             with c1:
-                                st.metric("Competência", st.session_state.get("bloprudencial_yyyymm", "-"))
+                                st.metric("Competência", ym_preview or "-")
                             with c2:
                                 st.metric("Linhas", f"{len(df_preview):,}")
                             with c3:
                                 st.metric("Colunas", len(df_preview.columns))
                             st.dataframe(df_preview.head(20), width="stretch")
+                        elif len(periodos_extrair) > 1 and "bloprudencial_dfs" in st.session_state:
+                            df_merge = []
+                            for ym, df_ym in st.session_state["bloprudencial_dfs"].items():
+                                tmp = df_ym.copy()
+                                if "Período" not in tmp.columns:
+                                    tmp["Período"] = ym
+                                df_merge.append(tmp)
+                            if df_merge:
+                                df_bloprud_all = pd.concat(df_merge, ignore_index=True)
+                                cache_manager.salvar(
+                                    "bloprudencial",
+                                    df_bloprud_all,
+                                    fonte="bcb_bloprudencial",
+                                    info_extra={"competencias": periodos_extrair},
+                                )
 
                     except Exception as e:
                         progress_bar.empty()

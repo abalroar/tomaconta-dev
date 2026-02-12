@@ -58,6 +58,7 @@ from .manager import (
 
 from .principal import PrincipalCache
 from .capital import CapitalCache, CAMPOS_CAPITAL
+from .bloprudencial_cache import BloprudencialCache
 
 # Novos caches de relatórios completos
 from .relatorios_completos import (
@@ -226,6 +227,7 @@ __all__ = [
     "PrincipalCache",
     "CapitalCache",
     "CAMPOS_CAPITAL",
+    "BloprudencialCache",
     # Implementacoes - relatórios completos
     "AtivoCache",
     "PassivoCache",

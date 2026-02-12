@@ -18,7 +18,7 @@ logger = logging.getLogger("ifdata_cache.bloprudencial")
 BASE_URL = "https://www.bcb.gov.br/content/estabilidadefinanceira/cosif/Conglomerados-prudenciais"
 FILE_SUFFIX = "BLOPRUDENCIAL.csv.zip"
 DEFAULT_CACHE_DIR = Path("data/cache/bcb_bloprudencial")
-LOADER_VERSION = "v2"
+LOADER_VERSION = "v3"
 
 
 def _validate_yyyymm(yyyymm: str) -> str:
@@ -79,11 +79,29 @@ def _candidate_delimiters(delimiter_guess: str) -> List[str]:
     return list(dict.fromkeys(base))
 
 
+def _detect_header_offset(text_sample: str, delimiter_guess: str) -> int:
+    """Detecta linha de cabeçalho ignorando preâmbulos textuais do BCB."""
+    lines = text_sample.splitlines()
+    for idx, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line:
+            continue
+        line_upper = line.upper()
+        delim_count = line.count(delimiter_guess)
+        has_tokens = any(tok in line_upper for tok in ("DATA_BASE", "DOCUMENTO", "CNPJ", "NOME_CONGL"))
+        if has_tokens and delim_count >= 3:
+            return idx
+        if line.startswith("#") and delim_count >= 3:
+            return idx
+    return 0
+
+
 def _read_csv_probe(
     csv_path: Path,
     encodings: List[str],
     delimiters: List[str],
     nrows: Optional[int] = None,
+    skiprows: int = 0,
 ) -> Tuple[pd.DataFrame, str, str]:
     """Tenta ler CSV com matriz encoding x delimiter e retorna primeiro parse válido."""
     last_exc: Optional[Exception] = None
@@ -95,14 +113,15 @@ def _read_csv_probe(
                     sep=sep,
                     encoding=enc,
                     nrows=nrows,
+                    skiprows=skiprows,
                     engine="python",
                     on_bad_lines="skip",
                 )
                 if df.empty:
                     continue
-                # parse ruim típico: única coluna gigante com delimitador errado
                 if len(df.columns) == 1 and any(d in str(df.columns[0]) for d in [";", ",", "|", "\t"]):
                     continue
+                df.columns = [str(c).lstrip("#").strip() for c in df.columns]
                 return df, enc, sep
             except Exception as exc:
                 last_exc = exc
@@ -216,12 +235,15 @@ def inspect_bloprudencial_csv(csv_path: Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"CSV não encontrado: {csv_path}")
 
     with csv_path.open("rb") as f:
-        sample = f.read(65536)
+        sample = f.read(262144)
 
     encoding_guess = _guess_encoding(sample)
     text_sample = sample.decode(encoding_guess, errors="replace")
     first_line = text_sample.splitlines()[0] if text_sample.splitlines() else ""
-    delimiter_guess = _guess_delimiter(first_line)
+
+    # Detecta possível linha de cabeçalho mesmo com preâmbulo textual
+    delimiter_guess = _guess_delimiter(text_sample)
+    header_offset = _detect_header_offset(text_sample, delimiter_guess)
 
     line_count = 0
     with csv_path.open("rb") as f:
@@ -235,11 +257,13 @@ def inspect_bloprudencial_csv(csv_path: Path) -> Dict[str, Any]:
         encodings=encodings_try,
         delimiters=delimiters_try,
         nrows=200,
+        skiprows=header_offset,
     )
 
     info = {
         "path": str(csv_path),
         "first_line": first_line,
+        "header_offset": header_offset,
         "delimiter_guess": delimiter_guess,
         "delimiter_used": used_delimiter,
         "encoding_guess": encoding_guess,
@@ -250,10 +274,11 @@ def inspect_bloprudencial_csv(csv_path: Path) -> Dict[str, Any]:
     }
 
     logger.info(
-        "[BLOPRUDENCIAL] inspect csv=%s encoding=%s delimiter=%s linhas=%d colunas=%d",
+        "[BLOPRUDENCIAL] inspect csv=%s encoding=%s delimiter=%s header_offset=%d linhas=%d colunas=%d",
         csv_path.name,
         info["encoding_used"],
         info["delimiter_used"],
+        info["header_offset"],
         info["line_count"],
         len(info["columns"]),
     )
@@ -279,6 +304,7 @@ def load_bloprudencial_df(
         encodings=encodings_try,
         delimiters=delimiters_try,
         nrows=None,
+        skiprows=int(inspect.get("header_offset", 0)),
     )
     logger.info("[BLOPRUDENCIAL] read_csv ok encoding=%s sep=%s linhas=%d", used_encoding, used_delimiter, len(df))
 
