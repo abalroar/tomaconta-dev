@@ -2223,6 +2223,68 @@ def _obter_valor_peers(df: pd.DataFrame, banco: str, periodo: str, coluna: Optio
     return row.get(coluna)
 
 
+def _perf_peers_stage(perf: dict, stage: str, start: float):
+    """Registra duração de uma etapa da aba Peers."""
+    perf[stage] = perf.get(stage, 0.0) + (time.perf_counter() - start)
+
+
+def _log_roe_trace(df: Optional[pd.DataFrame], contexto: str, banco_hint: str = "itau", periodo_hint: str = "3/25"):
+    """Loga insumos do ROE para diagnóstico de consistência entre abas."""
+    if df is None or df.empty or not {"Instituição", "Período"}.issubset(df.columns):
+        return
+
+    periodo_candidato = periodo_hint
+    periodos_disponiveis = set(df["Período"].dropna().astype(str).tolist())
+    if periodo_candidato not in periodos_disponiveis:
+        periodo_candidato = _encontrar_periodo(list(periodos_disponiveis), 3, 2025)
+    if not periodo_candidato:
+        return
+
+    df_periodo = df[df["Período"].astype(str) == str(periodo_candidato)]
+    if df_periodo.empty:
+        return
+
+    bancos = df_periodo["Instituição"].dropna().astype(str).tolist()
+    banco_sel = next((b for b in bancos if banco_hint in normalizar_nome_instituicao(b)), None)
+    if not banco_sel:
+        return
+
+    linha = df_periodo[df_periodo["Instituição"] == banco_sel].head(1)
+    if linha.empty:
+        return
+
+    ll = pd.to_numeric(linha.get("Lucro Líquido Acumulado YTD"), errors="coerce").iloc[0] if "Lucro Líquido Acumulado YTD" in linha.columns else np.nan
+    pl_t = pd.to_numeric(linha.get("Patrimônio Líquido"), errors="coerce").iloc[0] if "Patrimônio Líquido" in linha.columns else np.nan
+    per_dez = _periodo_dez_ano_anterior(periodo_candidato)
+    pl_dez_prev = np.nan
+    if per_dez:
+        df_dez = df[(df["Período"].astype(str) == str(per_dez)) & (df["Instituição"] == banco_sel)]
+        if not df_dez.empty and "Patrimônio Líquido" in df_dez.columns:
+            pl_dez_prev = pd.to_numeric(df_dez["Patrimônio Líquido"], errors="coerce").iloc[0]
+
+    mes = _extrair_mes_periodo(periodo_candidato, periodo_candidato) or 12
+    fator = _fator_anualizacao(mes)
+    roe_calc = _calcular_roe_anualizado(ll, pl_t, pl_dez_prev, mes)
+    roe_col = np.nan
+    if "ROE Ac. Anualizado (%)" in linha.columns:
+        roe_col = pd.to_numeric(linha["ROE Ac. Anualizado (%)"], errors="coerce").iloc[0]
+
+    print(
+        "[ROE_TRACE]",
+        {
+            "contexto": contexto,
+            "instituicao": banco_sel,
+            "periodo": periodo_candidato,
+            "ll_ytd": None if pd.isna(ll) else float(ll),
+            "pl_t": None if pd.isna(pl_t) else float(pl_t),
+            "pl_dez_prev": None if pd.isna(pl_dez_prev) else float(pl_dez_prev),
+            "fator_anualizacao": fator,
+            "roe_coluna": None if pd.isna(roe_col) else float(roe_col),
+            "roe_recalculado": None if roe_calc is None or pd.isna(roe_calc) else float(roe_calc),
+        },
+    )
+
+
 def _coerce_numeric_value(valor):
     if valor is None or pd.isna(valor):
         return None
@@ -2737,6 +2799,7 @@ def _montar_tabela_peers(
     bancos: list,
     periodos: list,
     caches_extras: Optional[dict] = None,
+    perf: Optional[dict] = None,
 ):
     """Monta estrutura da tabela peers com valores por banco/período."""
     valores = {}
@@ -2747,6 +2810,10 @@ def _montar_tabela_peers(
     coluna_ativo = _resolver_coluna_peers(df, ["Ativo Total"])
     coluna_pl = _resolver_coluna_peers(df, ["Patrimônio Líquido"])
     coluna_lucro = _resolver_coluna_peers(df, ["Lucro Líquido Acumulado YTD", "Lucro Líquido"])
+    if perf is None:
+        perf = {}
+
+    t_extra = time.perf_counter()
     extra_values = _preparar_metricas_extra_peers(
         bancos,
         periodos,
@@ -2758,7 +2825,11 @@ def _montar_tabela_peers(
         (caches_extras or {}).get("dre"),
         (caches_extras or {}).get("capital"),
     )
+    _perf_peers_stage(perf, "c_joins_mapeamentos_metricas_extra", t_extra)
 
+    coluna_credito = _resolver_coluna_peers(df, ["Carteira de Crédito"])
+
+    t_calc = time.perf_counter()
     for section in PEERS_TABELA_LAYOUT:
         for row in section["rows"]:
             label = row["label"]
@@ -2803,7 +2874,6 @@ def _montar_tabela_peers(
                         valor = _calcular_ratio_peers(valor_ativo, valor_pl)
                         tip = _tooltip_ratio_peers(label, valor_ativo, valor_pl, valor)
                     elif label == "Crédito / PL":
-                        coluna_credito = _resolver_coluna_peers(df, ["Carteira de Crédito"])
                         valor_credito = _obter_valor_peers(df, banco, periodo, coluna_credito)
                         valor_pl_v = _obter_valor_peers(df, banco, periodo, coluna_pl)
                         valor = _calcular_ratio_peers(valor_credito, valor_pl_v)
@@ -2838,8 +2908,7 @@ def _montar_tabela_peers(
                         valor_pl_base = _obter_valor_peers(df, banco, periodo_base, coluna_pl)
                         valor_base = _calcular_ratio_peers(valor_ativo_base, valor_pl_base)
                     elif periodo_base and label == "Crédito / PL":
-                        coluna_credito_b = _resolver_coluna_peers(df, ["Carteira de Crédito"])
-                        valor_credito_b = _obter_valor_peers(df, banco, periodo_base, coluna_credito_b)
+                        valor_credito_b = _obter_valor_peers(df, banco, periodo_base, coluna_credito)
                         valor_pl_b = _obter_valor_peers(df, banco, periodo_base, coluna_pl)
                         valor_base = _calcular_ratio_peers(valor_credito_b, valor_pl_b)
                     else:
@@ -2852,6 +2921,7 @@ def _montar_tabela_peers(
                             delta_flag = "down"
                     delta_flags[chave] = delta_flag
 
+    _perf_peers_stage(perf, "d_calculo_metricas_colunas_derivadas", t_calc)
     return valores, colunas_usadas, faltas, delta_flags, tooltips
 
 
@@ -5021,8 +5091,14 @@ elif False and menu == "Painel":
 
 elif menu == "Peers (Tabela)":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        peers_perf = {}
+
+        t_dados = time.perf_counter()
         df = get_dados_concatenados()
         df = _normalizar_lucro_liquido(df)
+        df = _recalcular_roe_anualizado_df(df)
+        _perf_peers_stage(peers_perf, "a_leitura_dados_brutos", t_dados)
+        _log_roe_trace(df, "peers_df_base")
 
         if len(df) > 0 and 'Instituição' in df.columns:
             bancos_todos = df['Instituição'].dropna().unique().tolist()
@@ -5075,6 +5151,7 @@ elif menu == "Peers (Tabela)":
                     bancos_tuple = tuple(bancos_selecionados)
 
                     # Carregamento já recortado no nível do cache (evita ler dataset inteiro)
+                    t_slice = time.perf_counter()
                     cache_ativo = _carregar_cache_relatorio_slice("ativo", _cache_version_token("ativo"), periodos_ext_peers, bancos_tuple)
                     cache_passivo = _carregar_cache_relatorio_slice("passivo", _cache_version_token("passivo"), periodos_ext_peers, bancos_tuple)
                     cache_carteira_pf = _carregar_cache_relatorio_slice("carteira_pf", _cache_version_token("carteira_pf"), periodos_ext_peers, bancos_tuple)
@@ -5082,7 +5159,9 @@ elif menu == "Peers (Tabela)":
                     cache_carteira_instr = _carregar_cache_relatorio_slice("carteira_instrumentos", _cache_version_token("carteira_instrumentos"), periodos_ext_peers, bancos_tuple)
                     cache_dre = _carregar_cache_relatorio_slice("dre", _cache_version_token("dre"), periodos_ext_peers, bancos_tuple)
                     cache_capital = _carregar_cache_relatorio_slice("capital", _cache_version_token("capital"), periodos_ext_peers, bancos_tuple)
+                    _perf_peers_stage(peers_perf, "a_leitura_cache_slices", t_slice)
 
+                    t_filtros = time.perf_counter()
                     cache_ativo = _aplicar_aliases_df(cache_ativo, dict_aliases)
                     cache_passivo = _aplicar_aliases_df(cache_passivo, dict_aliases)
                     cache_carteira_pf = _aplicar_aliases_df(cache_carteira_pf, dict_aliases)
@@ -5092,14 +5171,17 @@ elif menu == "Peers (Tabela)":
                     cache_capital = _aplicar_aliases_df(cache_capital, dict_aliases)
 
                     # Fallback defensivo: garante ausência de NameError em deploy parcial.
-                    slice_fn = _get_slice_cache_for_peers_fn()
-                    cache_ativo = slice_fn(cache_ativo, bancos_selecionados, periodos_ext_peers)
-                    cache_passivo = slice_fn(cache_passivo, bancos_selecionados, periodos_ext_peers)
-                    cache_carteira_pf = slice_fn(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
-                    cache_carteira_pj = slice_fn(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
-                    cache_carteira_instr = slice_fn(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
-                    cache_dre = slice_fn(cache_dre, bancos_selecionados, periodos_ext_peers)
-                    cache_capital = slice_fn(cache_capital, bancos_selecionados, periodos_ext_peers)
+                    # Quando o recorte foi feito no carregamento, evitar novo slice para não duplicar custo.
+                    if not periodos_ext_peers and not bancos_selecionados:
+                        slice_fn = _get_slice_cache_for_peers_fn()
+                        cache_ativo = slice_fn(cache_ativo, bancos_selecionados, periodos_ext_peers)
+                        cache_passivo = slice_fn(cache_passivo, bancos_selecionados, periodos_ext_peers)
+                        cache_carteira_pf = slice_fn(cache_carteira_pf, bancos_selecionados, periodos_ext_peers)
+                        cache_carteira_pj = slice_fn(cache_carteira_pj, bancos_selecionados, periodos_ext_peers)
+                        cache_carteira_instr = slice_fn(cache_carteira_instr, bancos_selecionados, periodos_ext_peers)
+                        cache_dre = slice_fn(cache_dre, bancos_selecionados, periodos_ext_peers)
+                        cache_capital = slice_fn(cache_capital, bancos_selecionados, periodos_ext_peers)
+                    _perf_peers_stage(peers_perf, "b_filtros_alias_periodo_banco", t_filtros)
 
                     valores, colunas_usadas, faltas, delta_flags, tooltips = _montar_tabela_peers(
                         df,
@@ -5114,8 +5196,10 @@ elif menu == "Peers (Tabela)":
                             "dre": cache_dre,
                             "capital": cache_capital,
                         },
+                        perf=peers_perf,
                     )
 
+                    t_format = time.perf_counter()
                     html_tabela = _render_peers_table_html(
                         bancos_selecionados,
                         periodos_selecionados,
@@ -5124,12 +5208,17 @@ elif menu == "Peers (Tabela)":
                         delta_flags,
                         tooltips,
                     )
+                    _perf_peers_stage(peers_perf, "e_formatacao", t_format)
+
+                    t_render = time.perf_counter()
                     st.markdown(html_tabela, unsafe_allow_html=True)
+                    _perf_peers_stage(peers_perf, "f_render_tabela", t_render)
 
                     with st.expander("📥 exportar"):
                         col_exp1, col_exp2 = st.columns(2)
                         with col_exp1:
                             st.caption("Tabela formatada (layout visual)")
+                            t_export_fmt = time.perf_counter()
                             excel_buffer = _gerar_excel_peers_tabela(
                                 bancos_selecionados,
                                 periodos_selecionados,
@@ -5144,8 +5233,10 @@ elif menu == "Peers (Tabela)":
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key="peers_tabela_excel",
                             )
+                            _perf_peers_stage(peers_perf, "g_preparo_export", t_export_fmt)
                         with col_exp2:
                             st.caption("Dados puros (sem formatação)")
+                            t_export_raw = time.perf_counter()
                             excel_raw = _gerar_excel_peers_dados_puros(
                                 bancos_selecionados,
                                 periodos_selecionados,
@@ -5158,6 +5249,10 @@ elif menu == "Peers (Tabela)":
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key="peers_dados_puros_excel",
                             )
+                            _perf_peers_stage(peers_perf, "g_preparo_export", t_export_raw)
+
+                    print("[PEERS_PERF]", {k: round(v, 3) for k, v in sorted(peers_perf.items())})
+                    _log_roe_trace(df, "peers_pos_render")
 
                     st.markdown(
                         """
@@ -5210,6 +5305,7 @@ elif menu == "Scatter Plot":
         df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
         df = _normalizar_lucro_liquido(df)
         df = _recalcular_roe_anualizado_df(df)
+        _log_roe_trace(df, "scatter_df_base")
         df = _garantir_indice_basileia_coluna(df)
         df = _ajustar_basileia_para_scatter(df)
 
