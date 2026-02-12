@@ -5361,7 +5361,6 @@ elif menu == "Peers (Tabela)":
 
 elif menu == "Scatter Plot":
     if _garantir_dados_principais("Scatter Plot"):
-    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_analise_base_df()
         _log_roe_trace(df, "scatter_df_base")
         df = _garantir_indice_basileia_coluna(df)
@@ -5763,8 +5762,7 @@ elif menu == "Scatter Plot":
                         st.caption(f"Tempo recorte derivado p2: {diag_scatter_derived_p2.get('tempo_s', 0):.3f}s")
 
     else:
-        st.info("carregando dados automaticamente do github...")
-        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+        st.caption("Use o botão de carregamento acima para abrir o Scatter imediatamente.")
 
 elif menu == "Rankings":
     if _garantir_dados_principais("Rankings"):
@@ -9608,8 +9606,7 @@ elif menu == "Crie sua métrica!":
             st.info("selecione instituições para comparar")
 
     else:
-        st.info("carregando dados automaticamente do github...")
-        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+        st.caption("Use o botão de carregamento acima para iniciar a aba de métricas personalizadas.")
 
 elif menu == "Atualizar Base":
     st.markdown("## Atualização Base")
