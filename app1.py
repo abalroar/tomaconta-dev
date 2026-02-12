@@ -4223,16 +4223,28 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
 
 menu_atual = st.session_state['menu_atual']
 
-# Carregamento sob demanda para reduzir uso de RAM
-menus_precisam_principal = {
-    "Peers (Tabela)",
-    "Scatter Plot",
-    "Rankings",
-    "DRE (Balancetes)",
-    "Crie sua métrica!",
-}
-if menu_atual in menus_precisam_principal:
-    carregar_dados_periodos()
+# Modo de navegação rápida: evita pré-carregamento pesado na troca de menus
+# e permite renderização imediata da tela antes de carregar datasets grandes.
+if 'modo_navegacao_rapida' not in st.session_state:
+    st.session_state['modo_navegacao_rapida'] = True
+
+
+def _garantir_dados_principais(menu_nome: str) -> bool:
+    """Garante dados principais apenas quando a aba realmente precisar processar."""
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+        return True
+
+    if not st.session_state.get('modo_navegacao_rapida', True):
+        with st.spinner("Carregando dados principais..."):
+            carregar_dados_periodos()
+        return bool(st.session_state.get('dados_periodos'))
+
+    st.info(f"⚡ Navegação rápida ativa: dados pesados ainda não carregados para '{menu_nome}'.")
+    if st.button(f"Carregar dados desta aba ({menu_nome})", key=f"carregar_{menu_nome}"):
+        with st.spinner("Carregando dados principais..."):
+            carregar_dados_periodos()
+        st.rerun()
+    return False
 
 # Callbacks para navegação entre menus (evita conflito)
 def _on_main_menu_change():
@@ -4285,6 +4297,14 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # Usar menu_atual (já atualizado pelos callbacks)
 menu = st.session_state['menu_atual']
+
+col_nav_fast, col_nav_spacer = st.columns([2, 5])
+with col_nav_fast:
+    st.toggle(
+        "⚡ Navegação rápida",
+        key="modo_navegacao_rapida",
+        help="Quando ligado, abas pesadas abrem imediatamente e carregam dados sob demanda."
+    )
 
 st.markdown("---")
 
@@ -5131,7 +5151,7 @@ elif False and menu == "Painel":
             st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Peers (Tabela)":
-    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+    if _garantir_dados_principais("Peers (Tabela)"):
         peers_perf = {}
 
         t_dados = time.perf_counter()
@@ -5340,6 +5360,7 @@ elif menu == "Peers (Tabela)":
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Scatter Plot":
+    if _garantir_dados_principais("Scatter Plot"):
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_analise_base_df()
         _log_roe_trace(df, "scatter_df_base")
@@ -5746,7 +5767,7 @@ elif menu == "Scatter Plot":
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Rankings":
-    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+    if _garantir_dados_principais("Rankings"):
         if not st.session_state.get('_dados_capital_mesclados'):
             carregar_dados_capital()
             if 'dados_capital' in st.session_state and st.session_state['dados_capital']:
@@ -7833,6 +7854,8 @@ elif menu == "DRE":
 
 
 elif menu == "DRE (Balancetes)":
+    if not _garantir_dados_principais("DRE (Balancetes)"):
+        st.stop()
     st.markdown("### DRE (Balancetes BC — Cadoc 4060)")
     st.caption("Demonstrações Contábeis do Banco Central com dados cacheados para acesso rápido e análise de múltiplos bancos.")
 
@@ -8791,7 +8814,7 @@ elif menu == "Taxas de Juros por Produto":
                         )
 
 elif menu == "Crie sua métrica!":
-    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
+    if _garantir_dados_principais("Crie sua métrica!"):
         dados_periodos_keys = tuple(sorted(st.session_state['dados_periodos'].keys()))
         primeiro_periodo = next(iter(st.session_state['dados_periodos'].values()))
         colunas_hash = tuple(sorted(primeiro_periodo.columns.tolist()))
