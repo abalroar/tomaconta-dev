@@ -330,9 +330,9 @@ VARS_MOEDAS = [
     'Saldo PDD Crédito (1490000004)',
     'Saldo PDD Outros Créditos (1890000006)',
     'PDD Total 4060',
-    'Carteira Estágio 1 (3311000002) - Acum.',
-    'Carteira Estágio 2 (3312000001) - Acum.',
-    'Carteira Estágio 3 (3313000000) - Acum.',
+    'Carteira Estágio 1 (3311000002)',
+    'Carteira Estágio 2 (3312000001)',
+    'Carteira Estágio 3 (3313000000)',
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
@@ -411,19 +411,19 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "PDD Total 4060",
             },
             {
-                "label": "Carteira Estágio 1 (3311000002) - Acum.",
+                "label": "Carteira Estágio 1 (3311000002)",
                 "data_keys": [],
-                "format_key": "Carteira Estágio 1 (3311000002) - Acum.",
+                "format_key": "Carteira Estágio 1 (3311000002)",
             },
             {
-                "label": "Carteira Estágio 2 (3312000001) - Acum.",
+                "label": "Carteira Estágio 2 (3312000001)",
                 "data_keys": [],
-                "format_key": "Carteira Estágio 2 (3312000001) - Acum.",
+                "format_key": "Carteira Estágio 2 (3312000001)",
             },
             {
-                "label": "Carteira Estágio 3 (3313000000) - Acum.",
+                "label": "Carteira Estágio 3 (3313000000)",
                 "data_keys": [],
-                "format_key": "Carteira Estágio 3 (3313000000) - Acum.",
+                "format_key": "Carteira Estágio 3 (3313000000)",
             },
             {
                 "label": "PDD / Estágio 3",
@@ -2493,9 +2493,9 @@ def _preparar_metricas_extra_peers(
         "Saldo PDD Crédito (1490000004)": {},
         "Saldo PDD Outros Créditos (1890000006)": {},
         "PDD Total 4060": {},
-        "Carteira Estágio 1 (3311000002) - Acum.": {},
-        "Carteira Estágio 2 (3312000001) - Acum.": {},
-        "Carteira Estágio 3 (3313000000) - Acum.": {},
+        "Carteira Estágio 1 (3311000002)": {},
+        "Carteira Estágio 2 (3312000001)": {},
+        "Carteira Estágio 3 (3313000000)": {},
         "PDD / Estágio 3": {},
         "Índice de Capital Principal (CET1)": {},
         "Índice de Basileia Total": {},
@@ -2548,17 +2548,8 @@ def _preparar_metricas_extra_peers(
                     return col
         return None
 
-    def _bloprud_period_match(df_src: Optional[pd.DataFrame], yyyymm: Optional[str]) -> pd.DataFrame:
-        if df_src is None or df_src.empty or not yyyymm:
-            return pd.DataFrame()
-        col_data_base = _bloprud_pick_col(df_src, ["DATA_BASE", "Data_Base", "data_base"])
-        if col_data_base is None:
-            return df_src.copy()
-        base_txt = df_src[col_data_base].astype(str).str.replace(r"\D", "", regex=True)
-        mask = base_txt.str[:6] == str(yyyymm)
-        return df_src.loc[mask].copy()
-
-    col_blop_nome_inst = _bloprud_pick_col(cache_bloprudencial, ["NOME_INSTITUICAO", "NOME_CONGL", "Instituição", "Instituicao"])
+    col_blop_nome_inst = _bloprud_pick_col(cache_bloprudencial, ["NOME_INSTITUICAO", "Instituição", "Instituicao"])
+    col_blop_nome_congl = _bloprud_pick_col(cache_bloprudencial, ["NOME_CONGL", "Nome_Congl", "nome_congl"])
     col_blop_conta = _bloprud_pick_col(cache_bloprudencial, ["CONTA", "Conta", "codigo_conta", "COD_CONTA"])
     col_blop_saldo = _bloprud_pick_col(cache_bloprudencial, ["SALDO", "Saldo", "VALOR", "Valor"])
 
@@ -2566,12 +2557,19 @@ def _preparar_metricas_extra_peers(
     if (
         cache_bloprudencial is not None
         and not cache_bloprudencial.empty
-        and col_blop_nome_inst
+        and (col_blop_nome_inst or col_blop_nome_congl)
         and col_blop_conta
         and col_blop_saldo
     ):
         df_blop = cache_bloprudencial.copy()
-        df_blop["_inst_norm"] = df_blop[col_blop_nome_inst].map(_bloprud_norm_name)
+        if col_blop_nome_inst:
+            df_blop["_inst_norm"] = df_blop[col_blop_nome_inst].map(_bloprud_norm_name)
+        else:
+            df_blop["_inst_norm"] = ""
+        if col_blop_nome_congl:
+            df_blop["_congl_norm"] = df_blop[col_blop_nome_congl].map(_bloprud_norm_name)
+        else:
+            df_blop["_congl_norm"] = ""
         df_blop["_conta"] = df_blop[col_blop_conta].astype(str).str.replace(r"\D", "", regex=True)
         df_blop["_saldo"] = pd.to_numeric(df_blop[col_blop_saldo], errors="coerce")
 
@@ -2581,20 +2579,35 @@ def _preparar_metricas_extra_peers(
         else:
             df_blop["_yyyymm"] = None
 
-        ag = (
+        ag_inst = (
             df_blop.groupby(["_yyyymm", "_inst_norm", "_conta"], dropna=False)["_saldo"]
             .sum(min_count=1)
             .reset_index()
         )
-        for _, row in ag.iterrows():
+        for _, row in ag_inst.iterrows():
             yyyymm = str(row["_yyyymm"])
             inst_norm = str(row["_inst_norm"])
             conta = str(row["_conta"])
             val = row["_saldo"]
             if not yyyymm or yyyymm == "None" or len(yyyymm) != 6:
                 continue
-            if pd.notna(val):
+            if inst_norm and inst_norm != "None" and pd.notna(val):
                 blop_lookup[(yyyymm, inst_norm, conta)] = float(val)
+
+        ag_congl = (
+            df_blop.groupby(["_yyyymm", "_congl_norm", "_conta"], dropna=False)["_saldo"]
+            .sum(min_count=1)
+            .reset_index()
+        )
+        for _, row in ag_congl.iterrows():
+            yyyymm = str(row["_yyyymm"])
+            congl_norm = str(row["_congl_norm"])
+            conta = str(row["_conta"])
+            val = row["_saldo"]
+            if not yyyymm or yyyymm == "None" or len(yyyymm) != 6:
+                continue
+            if congl_norm and congl_norm != "None" and pd.notna(val):
+                blop_lookup[(yyyymm, congl_norm, conta)] = float(val)
 
     def _blop_get_sum_periodo_conta(banco: str, periodo: str, conta: str) -> Optional[float]:
         if not blop_lookup:
@@ -2604,36 +2617,22 @@ def _preparar_metricas_extra_peers(
             return None
         inst_norm = _bloprud_norm_name(banco)
         val = blop_lookup.get((yyyymm, inst_norm, conta))
-        return None if val is None or pd.isna(val) else float(val)
+        if val is not None and not pd.isna(val):
+            return float(val)
 
-    def _blop_get_ytd_sum(banco: str, periodo: str, conta: str) -> Optional[float]:
-        parsed = _parse_periodo(periodo)
-        if not parsed:
-            return None
-        parte, ano, _ = parsed
-        tri_idx = _parte_periodo_para_trimestre_idx(parte)
-        if tri_idx is None:
-            return None
-        meses = []
-        if tri_idx == 1:
-            meses = ["03"]
-        elif tri_idx == 2:
-            meses = ["03", "06"]
-        elif tri_idx == 3:
-            meses = ["03", "06", "09"]
-        elif tri_idx == 4:
-            meses = ["03", "06", "09", "12"]
-        acumulado = 0.0
-        encontrou = False
-        for mes in meses:
-            yyyymm = f"{ano:04d}{mes}"
-            inst_norm = _bloprud_norm_name(banco)
-            val_mes = blop_lookup.get((yyyymm, inst_norm, conta))
-            if val_mes is None:
+        # fallback: compatibilizar nome do banco com NOME_CONGL (ex.: "ITAÚ" vs "ITAU - PRUDENCIAL")
+        val_fallback = None
+        for (ym_key, inst_key, conta_key), saldo in blop_lookup.items():
+            if ym_key != yyyymm or conta_key != conta:
                 continue
-            acumulado += float(val_mes)
-            encontrou = True
-        return acumulado if encontrou else None
+            if inst_norm and (inst_norm in inst_key or inst_key in inst_norm):
+                if saldo is None or pd.isna(saldo):
+                    continue
+                val_fallback = float(saldo)
+                break
+
+        val = val_fallback
+        return None if val is None or pd.isna(val) else float(val)
 
     col_pf_total = _resolver_coluna_peers(
         cache_carteira_pf,
@@ -2814,17 +2813,17 @@ def _preparar_metricas_extra_peers(
             pdd_credito = _blop_get_sum_periodo_conta(banco, periodo, "1490000004")
             pdd_outros = _blop_get_sum_periodo_conta(banco, periodo, "1890000006")
             pdd_total_4060 = _somar_valores([pdd_credito, pdd_outros])
-            estagio1_ytd = _blop_get_ytd_sum(banco, periodo, "3311000002")
-            estagio2_ytd = _blop_get_ytd_sum(banco, periodo, "3312000001")
-            estagio3_ytd = _blop_get_ytd_sum(banco, periodo, "3313000000")
+            estagio1_mes = _blop_get_sum_periodo_conta(banco, periodo, "3311000002")
+            estagio2_mes = _blop_get_sum_periodo_conta(banco, periodo, "3312000001")
+            estagio3_mes = _blop_get_sum_periodo_conta(banco, periodo, "3313000000")
 
             extra["Saldo PDD Crédito (1490000004)"][chave] = pdd_credito
             extra["Saldo PDD Outros Créditos (1890000006)"][chave] = pdd_outros
             extra["PDD Total 4060"][chave] = pdd_total_4060
-            extra["Carteira Estágio 1 (3311000002) - Acum."][chave] = estagio1_ytd
-            extra["Carteira Estágio 2 (3312000001) - Acum."][chave] = estagio2_ytd
-            extra["Carteira Estágio 3 (3313000000) - Acum."][chave] = estagio3_ytd
-            extra["PDD / Estágio 3"][chave] = _calcular_ratio_peers(pdd_total_4060, estagio3_ytd)
+            extra["Carteira Estágio 1 (3311000002)"][chave] = estagio1_mes
+            extra["Carteira Estágio 2 (3312000001)"][chave] = estagio2_mes
+            extra["Carteira Estágio 3 (3313000000)"][chave] = estagio3_mes
+            extra["PDD / Estágio 3"][chave] = _calcular_ratio_peers(pdd_total_4060, estagio3_mes)
 
             # Capital: Índice de Capital Principal e Índice de Basileia Total
             # Prioridade: calcular da composição (Capital Principal / RWA);
@@ -3051,7 +3050,7 @@ def _montar_tabela_peers(
                         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Bruta"),
                         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "Carteira de Créd. Class. C4+C5"),
                         "Desp PDD Anualizada / Carteira Bruta": ("Desp PDD Anualizada", "Carteira de Crédito Bruta"),
-                        "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3 (3313000000) - Acum."),
+                        "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3 (3313000000)"),
                     }
                     if label in extra_values and label in _RATIO_COMPONENTS:
                         valor = extra_values[label].get((banco, periodo))
@@ -5537,10 +5536,10 @@ elif menu == "Peers (Tabela)":
                             <strong>Saldo PDD Crédito (1490000004)</strong> = Saldo da conta COSIF 1490000004 (Cadoc 4060) para o período selecionado.<br>
                             <strong>Saldo PDD Outros Créditos (1890000006)</strong> = Saldo da conta COSIF 1890000006 (Cadoc 4060) para o período selecionado.<br>
                             <strong>PDD Total 4060</strong> = 1490000004 + 1890000006.<br>
-                            <strong>Carteira Estágio 1 (3311000002) - Acum.</strong> = Soma acumulada no ano (jan até o mês do período) da conta 3311000002.<br>
-                            <strong>Carteira Estágio 2 (3312000001) - Acum.</strong> = Soma acumulada no ano (jan até o mês do período) da conta 3312000001.<br>
-                            <strong>Carteira Estágio 3 (3313000000) - Acum.</strong> = Soma acumulada no ano (jan até o mês do período) da conta 3313000000.<br>
-                            <strong>PDD / Estágio 3</strong> = PDD Total 4060 ÷ Carteira Estágio 3 (acumulada).<br>
+                            <strong>Carteira Estágio 1 (3311000002)</strong> = Saldo da conta 3311000002 no mês/período selecionado.<br>
+                            <strong>Carteira Estágio 2 (3312000001)</strong> = Saldo da conta 3312000001 no mês/período selecionado.<br>
+                            <strong>Carteira Estágio 3 (3313000000)</strong> = Saldo da conta 3313000000 no mês/período selecionado.<br>
+                            <strong>PDD / Estágio 3</strong> = PDD Total 4060 ÷ Carteira Estágio 3 do mesmo mês/período.<br>
                             <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Resultado com Perda Esperada anualizado) ÷ Carteira de Crédito Bruta. Anualização: valor acumulado YTD × (12 / meses do período).<br>
                             <strong>Desp PDD / NII (ref: período acumulado)</strong> = Desp. PDD acumulada ÷ NII (resultado de intermediação financeira) acumulado.<br>
                             <br>
@@ -10658,13 +10657,13 @@ elif menu == "Glossário":
 
     **PDD Total 4060:** Soma dos saldos das contas 1490000004 e 1890000006 no período.
 
-    **Carteira Estágio 1 (3311000002) - Acum.:** Soma acumulada no ano (jan até o mês do período) da conta 3311000002 no Cadoc 4060.
+    **Carteira Estágio 1 (3311000002):** Saldo da conta 3311000002 no mês/período selecionado (Cadoc 4060).
 
-    **Carteira Estágio 2 (3312000001) - Acum.:** Soma acumulada no ano (jan até o mês do período) da conta 3312000001 no Cadoc 4060.
+    **Carteira Estágio 2 (3312000001):** Saldo da conta 3312000001 no mês/período selecionado (Cadoc 4060).
 
-    **Carteira Estágio 3 (3313000000) - Acum.:** Soma acumulada no ano (jan até o mês do período) da conta 3313000000 no Cadoc 4060.
+    **Carteira Estágio 3 (3313000000):** Saldo da conta 3313000000 no mês/período selecionado (Cadoc 4060).
 
-    **PDD / Estágio 3 (%):** Relação entre PDD Total 4060 e Carteira Estágio 3 acumulada no ano.
+    **PDD / Estágio 3 (%):** Relação entre PDD Total 4060 e Carteira Estágio 3 do mesmo mês/período.
 
     **Desp Captação / Captação (%):** Desp. Captação anualizada dividida por Captações. Fórmula: (Desp. Captação * (12 / meses_do_período)) / Captações.
     """)
