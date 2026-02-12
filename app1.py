@@ -368,7 +368,47 @@ PEERS_TABELA_LAYOUT = [
         ],
     },
     {
-        "section": "Qualidade Carteira",
+        "section": "Qualidade Carteira 4060",
+        "rows": [
+            {
+                "label": "Saldo PDD Crédito (1490000004)",
+                "data_keys": [],
+                "format_key": "Saldo PDD Crédito (1490000004)",
+            },
+            {
+                "label": "Saldo PDD Outros Créditos (1890000006)",
+                "data_keys": [],
+                "format_key": "Saldo PDD Outros Créditos (1890000006)",
+            },
+            {
+                "label": "PDD Total 4060",
+                "data_keys": [],
+                "format_key": "PDD Total 4060",
+            },
+            {
+                "label": "Carteira Estágio 1 (3311000002)",
+                "data_keys": [],
+                "format_key": "Carteira Estágio 1 (3311000002)",
+            },
+            {
+                "label": "Carteira Estágio 2 (3312000001)",
+                "data_keys": [],
+                "format_key": "Carteira Estágio 2 (3312000001)",
+            },
+            {
+                "label": "Carteira Estágio 3 (3313000000)",
+                "data_keys": [],
+                "format_key": "Carteira Estágio 3 (3313000000)",
+            },
+            {
+                "label": "PDD / Estágio 3",
+                "data_keys": [],
+                "format_key": "PDD / Estágio 3",
+            },
+        ],
+    },
+    {
+        "section": "Qualidade Carteira IFData",
         "rows": [
             {
                 "label": "Perda Esperada",
@@ -434,12 +474,6 @@ PEERS_TABELA_LAYOUT = [
                 "label": "Desp PDD Anualizada / Carteira Bruta",
                 "data_keys": [],
                 "format_key": "Desp PDD Anualizada / Carteira Bruta",
-            },
-            {
-                "label": "Desp PDD / NII (ref: período acumulado)",
-                "data_keys": [],
-                "format_key": "Desp PDD / NII",
-                "todo": "TODO: Integrar despesa PDD/NII (período acumulado) a partir das fontes do projeto.",
             },
         ],
     },
@@ -5541,7 +5575,6 @@ elif menu == "Peers (Tabela)":
                             <strong>Carteira Estágio 3 (3313000000)</strong> = Saldo da conta 3313000000 no mês/período selecionado.<br>
                             <strong>PDD / Estágio 3</strong> = PDD Total 4060 ÷ Carteira Estágio 3 do mesmo mês/período.<br>
                             <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Resultado com Perda Esperada anualizado) ÷ Carteira de Crédito Bruta. Anualização: valor acumulado YTD × (12 / meses do período).<br>
-                            <strong>Desp PDD / NII (ref: período acumulado)</strong> = Desp. PDD acumulada ÷ NII (resultado de intermediação financeira) acumulado.<br>
                             <br>
                             <em>Alavancagem</em><br>
                             <strong>Ativo / PL</strong> = Ativo Total ÷ Patrimônio Líquido.<br>
