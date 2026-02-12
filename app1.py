@@ -5680,20 +5680,31 @@ elif menu == "Evolução":
             return float(ll) * (12 / meses) / float(pl)
 
         df_ano["Core Funding"] = pd.to_numeric(df_ano.get("Captações"), errors="coerce")
-        df_ano["Crédito 2.682"] = pd.to_numeric(df_ano.get("Carteira de Crédito"), errors="coerce")
+        df_ano["Carteira Classificada"] = pd.to_numeric(df_ano.get("Carteira de Crédito"), errors="coerce")
         df_ano["ROE anualizado"] = df_ano.apply(_calc_roe_anualizado, axis=1)
         df_ano["Crédito 2.682 / PL"] = np.where(
             pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce") != 0,
-            pd.to_numeric(df_ano["Crédito 2.682"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
+            pd.to_numeric(df_ano["Carteira Classificada"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
             np.nan,
         )
         df_ano["Basileia"] = pd.to_numeric(df_ano.get("Índice de Basileia"), errors="coerce")
         df_ano["CET1"] = pd.to_numeric(df_ano.get("Índice de Capital Principal (CET1)"), errors="coerce")
 
+        if "Lucro Líquido" in df_ano.columns:
+            serie_ll_ytd = pd.to_numeric(df_ano["Lucro Líquido Acumulado YTD"], errors="coerce")
+            serie_ll_alt = pd.to_numeric(df_ano["Lucro Líquido"], errors="coerce")
+            divergencia_ll = (serie_ll_ytd - serie_ll_alt).abs().max(skipna=True)
+            if pd.notna(divergencia_ll) and float(divergencia_ll) > 1:
+                st.warning(
+                    "sanity check de fonte: detectada divergência relevante entre "
+                    "'Lucro Líquido Acumulado YTD' (fonte consolidada) e coluna alternativa 'Lucro Líquido'. "
+                    "mantido o consolidado para a visualização."
+                )
+
         graf_cols = {
             "Lucro Líquido": "Lucro Líquido Acumulado YTD",
             "Patrimônio Líquido": "Patrimônio Líquido",
-            "Crédito 2.682": "Crédito 2.682",
+            "Carteira Classificada": "Carteira Classificada",
             "Core Funding": "Core Funding",
         }
         df_graph = pd.DataFrame({"Ano": df_ano["Ano"]})
@@ -5701,19 +5712,59 @@ elif menu == "Evolução":
             df_graph[k] = pd.to_numeric(df_ano.get(c), errors="coerce")
 
         fig_ev = go.Figure()
-        for serie in ["Lucro Líquido", "Patrimônio Líquido", "Crédito 2.682", "Core Funding"]:
-            fig_ev.add_trace(go.Scatter(x=df_graph["Ano"], y=df_graph[serie], mode="lines+markers", name=serie))
-        fig_ev.update_layout(height=420, yaxis_title="Em R$ mm", xaxis_title="Ano", legend=dict(orientation="h", y=1.05))
+        fig_ev.add_trace(
+            go.Bar(
+                x=df_graph["Ano"],
+                y=df_graph["Lucro Líquido"],
+                name="Lucro Líquido",
+                marker_color="#9B9B9B",
+            )
+        )
+        fig_ev.add_trace(
+            go.Bar(
+                x=df_graph["Ano"],
+                y=df_graph["Patrimônio Líquido"],
+                name="Patrimônio Líquido",
+                marker_color="#102A83",
+            )
+        )
+        fig_ev.add_trace(
+            go.Scatter(
+                x=df_graph["Ano"],
+                y=df_graph["Carteira Classificada"],
+                mode="lines+markers",
+                name="Carteira Classificada",
+                line=dict(color="#FF6B35", width=2),
+            )
+        )
+        fig_ev.add_trace(
+            go.Scatter(
+                x=df_graph["Ano"],
+                y=df_graph["Core Funding"],
+                mode="lines+markers",
+                name="Core Funding",
+                line=dict(color="#1F1F1F", width=2),
+            )
+        )
+        fig_ev.update_layout(
+            barmode="group",
+            height=420,
+            yaxis_title="Em R$ mm",
+            xaxis_title="Ano",
+            legend=dict(orientation="h", y=1.08),
+        )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
 
-        st.caption("Core Funding (rodapé): Captações totais, exceto títulos de dívida elegíveis a capital e dívidas subordinadas elegíveis a capital.")
+        st.caption(
+            "Core Funding (rodapé): Captações totais, exceto títulos de dívida elegíveis a capital e dívidas subordinadas elegíveis a capital."
+        )
 
         df_metric = pd.DataFrame({
             "Métrica": [
                 "ROE anualizado",
                 "Divid./JSCP",
                 "(+/-) Capital",
-                "Crédito 2.682 / PL",
+                "Carteira Classificada / PL",
                 "Basileia",
                 "CET1",
             ]
@@ -5734,7 +5785,7 @@ elif menu == "Evolução":
                 return "-"
             if m in ("ROE anualizado", "Basileia", "CET1"):
                 return formatar_percentual(float(v), decimais=2)
-            if m == "Crédito 2.682 / PL":
+            if m == "Carteira Classificada / PL":
                 return f"{float(v):.2f}x"
             return formatar_valor_br(v)
 
@@ -5755,6 +5806,14 @@ elif menu == "Evolução":
                 file_name=f"evolucao_{instituicao}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="evolucao_excel",
+            )
+
+            st.download_button(
+                label="Baixar gráfico (HTML)",
+                data=fig_ev.to_html(include_plotlyjs='cdn').encode('utf-8'),
+                file_name=f"evolucao_grafico_{instituicao}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                mime="text/html",
+                key="evolucao_grafico_html",
             )
     else:
         st.info("carregando dados automaticamente do github...")
