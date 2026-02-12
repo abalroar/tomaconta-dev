@@ -9687,9 +9687,9 @@ elif menu == "Atualizar Base":
         st.markdown("---")
         col_r1, col_r2, col_r3 = st.columns(3)
         with col_r1:
-            st.metric("Cache Local", f"{total_local}/8")
+            st.metric("Cache Local", f"{total_local}/{len(status_data)}")
         with col_r2:
-            st.metric("GitHub Releases", f"{total_github}/8")
+            st.metric("GitHub Releases", f"{total_github}/{len(status_data)}")
         with col_r3:
             if total_efemero > 0:
                 st.metric("⚠️ Efêmeros", f"{total_efemero}", delta="Publicar!", delta_color="inverse")
@@ -9728,6 +9728,7 @@ elif menu == "Atualizar Base":
             "carteira_pj": "Carteira PJ (Rel. 13) - TODAS as variáveis",
             "carteira_instrumentos": "Carteira Instrumentos 4.966 (Rel. 16) - TODAS as variáveis",
             "taxas_juros": "Taxas de Juros (API BCB) - TODOS produtos/instituições",
+            "bloprudencial": "Conglomerados Prudenciais (BLOPRUDENCIAL) - CSV mensal",
         }
 
         cache_selecionado = st.selectbox(
@@ -9737,15 +9738,27 @@ elif menu == "Atualizar Base":
             key="cache_selecionado"
         )
 
-        # Mostrar status do cache selecionado
-        info_selecionado = cache_manager.info(cache_selecionado)
-        if info_selecionado.get("existe"):
-            st.info(f"Cache atual: {info_selecionado.get('total_periodos', 0)} períodos, {info_selecionado.get('total_registros', 0):,} registros")
-        else:
-            st.warning(f"Cache '{cache_selecionado}' não existe ainda")
-
-        # Flag para identificar se é extração de taxas de juros
+        # Flag para identificar tipo de extração
         is_taxas_juros = (cache_selecionado == "taxas_juros")
+        is_bloprudencial = (cache_selecionado == "bloprudencial")
+
+        # Mostrar status do cache selecionado
+        if is_bloprudencial:
+            base_bloprud = Path("data/cache/bcb_bloprudencial")
+            zips_dir = base_bloprud / "zips"
+            csv_dir = base_bloprud / "csv"
+            total_zips = len(list(zips_dir.glob("*.zip"))) if zips_dir.exists() else 0
+            total_csv = len(list(csv_dir.glob("*.csv"))) if csv_dir.exists() else 0
+            if total_zips > 0 or total_csv > 0:
+                st.info(f"Cache atual BLOPRUDENCIAL: {total_zips} ZIP(s), {total_csv} CSV(s)")
+            else:
+                st.warning("Cache BLOPRUDENCIAL ainda não existe")
+        else:
+            info_selecionado = cache_manager.info(cache_selecionado)
+            if info_selecionado.get("existe"):
+                st.info(f"Cache atual: {info_selecionado.get('total_periodos', 0)} períodos, {info_selecionado.get('total_registros', 0):,} registros")
+            else:
+                st.warning(f"Cache '{cache_selecionado}' não existe ainda")
 
         # =============================================================
         # MODO DE ATUALIZAÇÃO
@@ -9803,6 +9816,42 @@ elif menu == "Atualizar Base":
             # Não precisa de periodos_extrair para taxas_juros
             periodos_extrair = None
 
+        elif is_bloprudencial:
+            st.caption("BLOPRUDENCIAL: extração mensal via GET estático no site do BCB")
+            col1, col2 = st.columns(2)
+            with col1:
+                ano_i = st.selectbox("ano inicial", range(2015, 2031), index=10, key="ano_i_bloprudencial")
+                mes_i = st.selectbox("mês inicial", [f"{m:02d}" for m in range(1, 13)], index=7, key="mes_i_bloprudencial")
+            with col2:
+                ano_f = st.selectbox("ano final", range(2015, 2031), index=11, key="ano_f_bloprudencial")
+                mes_f = st.selectbox("mês final", [f"{m:02d}" for m in range(1, 13)], index=8, key="mes_f_bloprudencial")
+
+            inicio = int(f"{ano_i}{mes_i}")
+            fim = int(f"{ano_f}{mes_f}")
+            if inicio > fim:
+                st.error("Período inicial deve ser menor ou igual ao período final")
+                periodos_extrair = []
+            else:
+                periodos_extrair = []
+                ano_mes = inicio
+                while ano_mes <= fim:
+                    ym_str = str(ano_mes)
+                    periodos_extrair.append(ym_str)
+                    ano = int(ym_str[:4])
+                    mes = int(ym_str[4:6])
+                    if mes == 12:
+                        ano += 1
+                        mes = 1
+                    else:
+                        mes += 1
+                    ano_mes = int(f"{ano}{mes:02d}")
+
+            if periodos_extrair:
+                st.caption(
+                    f"Serão processadas {len(periodos_extrair)} competências: "
+                    f"{periodos_extrair[0][4:6]}/{periodos_extrair[0][:4]} até {periodos_extrair[-1][4:6]}/{periodos_extrair[-1][:4]}"
+                )
+
         else:
             col1, col2 = st.columns(2)
             with col1:
@@ -9829,7 +9878,10 @@ elif menu == "Atualizar Base":
                     key="intervalo_save"
                 )
 
-                st.caption("Nota: a extração usa Tipo de Instituição 1 (Conglomerados Prudenciais e Instituições Independentes)")
+                if is_bloprudencial:
+                    st.caption("Nota: BLOPRUDENCIAL usa endpoint estático por competência YYYYMM")
+                else:
+                    st.caption("Nota: a extração usa Tipo de Instituição 1 (Conglomerados Prudenciais e Instituições Independentes)")
         else:
             intervalo_save = 1  # Não usado para taxas de juros
 
@@ -9885,7 +9937,104 @@ elif menu == "Atualizar Base":
                 # =============================================================
                 # EXTRAÇÃO ESPECIAL PARA TAXAS DE JUROS
                 # =============================================================
-                if is_taxas_juros:
+                if is_bloprudencial:
+                    from utils.ifdata_cache import load_bloprudencial_df_cached, preload_bloprudencial
+
+                    try:
+                        force_refresh_bloprud = (modo_atualizacao == "overwrite")
+                        base_cache_bloprud = "data/cache/bcb_bloprudencial"
+                        logs_bloprud = []
+                        total = max(len(periodos_extrair), 1)
+
+                        if not periodos_extrair:
+                            st.error("Nenhuma competência válida selecionada para BLOPRUDENCIAL")
+                        elif len(periodos_extrair) == 1:
+                            ym = periodos_extrair[0]
+                            status_text.text(f"Carregando BLOPRUDENCIAL {ym}...")
+                            progress_bar.progress(0.5)
+                            df_bloprud = load_bloprudencial_df_cached(
+                                yyyymm=ym,
+                                cache_dir=base_cache_bloprud,
+                                force_refresh=force_refresh_bloprud,
+                            )
+                            progress_bar.progress(1.0)
+                            inspect = (df_bloprud.attrs.get("bloprudencial") or {}).get("inspect", {})
+                            logs_bloprud.append(
+                                f"{ym}: linhas={len(df_bloprud):,} colunas={len(df_bloprud.columns)} sep={inspect.get('delimiter_guess')} enc={inspect.get('encoding_used')}"
+                            )
+                            st.session_state["bloprudencial_df"] = df_bloprud
+                            st.session_state["bloprudencial_yyyymm"] = ym
+                        else:
+                            status_text.text("Pré-carregando múltiplas competências BLOPRUDENCIAL...")
+                            preload_bloprudencial(periodos_extrair, cache_dir=base_cache_bloprud, force_refresh=force_refresh_bloprud)
+                            dfs = {}
+                            for idx, ym in enumerate(periodos_extrair, start=1):
+                                status_text.text(f"[{idx}/{len(periodos_extrair)}] Carregando {ym}...")
+                                progress_bar.progress(idx / total)
+                                dfs[ym] = load_bloprudencial_df_cached(
+                                    yyyymm=ym,
+                                    cache_dir=base_cache_bloprud,
+                                    force_refresh=force_refresh_bloprud,
+                                )
+                                inspect = (dfs[ym].attrs.get("bloprudencial") or {}).get("inspect", {})
+                                logs_bloprud.append(
+                                    f"{ym}: linhas={len(dfs[ym]):,} colunas={len(dfs[ym].columns)} sep={inspect.get('delimiter_guess')} enc={inspect.get('encoding_used')}"
+                                )
+                            st.session_state["bloprudencial_dfs"] = dfs
+                            st.session_state["bloprudencial_yyyymm_list"] = periodos_extrair
+
+                        progress_bar.empty()
+                        status_text.empty()
+                        save_status.empty()
+
+                        st.success(f"Extração BLOPRUDENCIAL concluída para {len(periodos_extrair)} competência(s)")
+                        with st.expander("📋 Log BLOPRUDENCIAL", expanded=False):
+                            for line in logs_bloprud:
+                                st.text(line)
+
+                        # Persistir também no cache manager para permitir publicação/download pelo fluxo padrão
+                        if len(periodos_extrair) == 1 and "bloprudencial_df" in st.session_state:
+                            df_preview = st.session_state["bloprudencial_df"].copy()
+                            ym_preview = st.session_state.get("bloprudencial_yyyymm", "")
+                            if ym_preview and "Período" not in df_preview.columns:
+                                df_preview["Período"] = ym_preview
+                            cache_manager.salvar(
+                                "bloprudencial",
+                                df_preview,
+                                fonte="bcb_bloprudencial",
+                                info_extra={"competencias": [ym_preview]},
+                            )
+                            c1, c2, c3 = st.columns(3)
+                            with c1:
+                                st.metric("Competência", ym_preview or "-")
+                            with c2:
+                                st.metric("Linhas", f"{len(df_preview):,}")
+                            with c3:
+                                st.metric("Colunas", len(df_preview.columns))
+                            st.dataframe(df_preview.head(20), width="stretch")
+                        elif len(periodos_extrair) > 1 and "bloprudencial_dfs" in st.session_state:
+                            df_merge = []
+                            for ym, df_ym in st.session_state["bloprudencial_dfs"].items():
+                                tmp = df_ym.copy()
+                                if "Período" not in tmp.columns:
+                                    tmp["Período"] = ym
+                                df_merge.append(tmp)
+                            if df_merge:
+                                df_bloprud_all = pd.concat(df_merge, ignore_index=True)
+                                cache_manager.salvar(
+                                    "bloprudencial",
+                                    df_bloprud_all,
+                                    fonte="bcb_bloprudencial",
+                                    info_extra={"competencias": periodos_extrair},
+                                )
+
+                    except Exception as e:
+                        progress_bar.empty()
+                        status_text.empty()
+                        save_status.empty()
+                        st.error(f"Erro na extração BLOPRUDENCIAL: {e}")
+
+                elif is_taxas_juros:
                     from utils.ifdata_cache import TaxasJurosCache
 
                     def callback_progresso_tj(progress, message):

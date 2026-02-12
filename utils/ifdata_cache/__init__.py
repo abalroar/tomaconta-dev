@@ -58,6 +58,7 @@ from .manager import (
 
 from .principal import PrincipalCache
 from .capital import CapitalCache, CAMPOS_CAPITAL
+from .bloprudencial_cache import BloprudencialCache
 
 # Novos caches de relatórios completos
 from .relatorios_completos import (
@@ -77,6 +78,16 @@ from .taxas_juros import (
     buscar_instituicoes_disponiveis as buscar_instituicoes_taxas_juros,
     formatar_nome_modalidade,
     MODALIDADES_CONHECIDAS,
+)
+
+from .bloprudencial import (
+    build_bloprudencial_url,
+    download_bloprudencial_zip,
+    extract_bloprudencial_csv,
+    inspect_bloprudencial_csv,
+    load_bloprudencial_df,
+    load_bloprudencial_df_cached,
+    preload_bloprudencial,
 )
 
 from .metric_registry import (
@@ -216,6 +227,7 @@ __all__ = [
     "PrincipalCache",
     "CapitalCache",
     "CAMPOS_CAPITAL",
+    "BloprudencialCache",
     # Implementacoes - relatórios completos
     "AtivoCache",
     "PassivoCache",
@@ -230,6 +242,14 @@ __all__ = [
     "buscar_instituicoes_taxas_juros",
     "formatar_nome_modalidade",
     "MODALIDADES_CONHECIDAS",
+    # Implementacoes - BLOPRUDENCIAL
+    "build_bloprudencial_url",
+    "download_bloprudencial_zip",
+    "extract_bloprudencial_csv",
+    "inspect_bloprudencial_csv",
+    "load_bloprudencial_df",
+    "load_bloprudencial_df_cached",
+    "preload_bloprudencial",
     # Derived metrics
     # Metric registry / contracts
     "MetricDefinition",
