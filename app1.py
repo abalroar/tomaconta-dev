@@ -289,7 +289,6 @@ VARS_PERCENTUAL = [
     'Índice de Imobilização',
     'Perda Esperada / Carteira Bruta',
     'Perda Esperada / (Carteira C4 + C5)',
-    'Desp PDD Anualizada / Carteira Bruta',
     'Carteira de Créd. Class. C4+C5 / Carteira Bruta',
     'PDD / Estágio 3',
     # Variáveis de Capital (Relatório 5)
@@ -2014,7 +2013,6 @@ def _tooltip_ratio_peers(label, valor_num, valor_den, valor_ratio):
         "Perda Esperada / Carteira Bruta": ("Perda Esperada", "Carteira Bruta"),
         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("C4+C5", "Carteira Bruta"),
         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "C4+C5"),
-        "Desp PDD Anualizada / Carteira Bruta": ("Desp PDD Anual.", "Carteira Bruta"),
     }
     lines = []
     if label in _NOMES_COMPONENTES:
@@ -2509,8 +2507,6 @@ def _preparar_metricas_extra_peers(
         "Carteira de Créd. Class. C4+C5": {},
         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": {},
         "Perda Esperada / (Carteira C4 + C5)": {},
-        "Desp PDD Anualizada": {},
-        "Desp PDD Anualizada / Carteira Bruta": {},
         "Saldo PDD Crédito": {},
         "Saldo PDD Outros Créditos": {},
         "PDD Total 4060": {},
@@ -2797,16 +2793,6 @@ def _preparar_metricas_extra_peers(
     col_c4 = _resolver_coluna_peers(cache_carteira_instr, ["C4"])
     col_c5 = _resolver_coluna_peers(cache_carteira_instr, ["C5"])
 
-    col_desp_pdd = _resolver_coluna_peers(
-        cache_dre,
-        [
-            "Resultado com Perda Esperada (f)",
-            "Resultado com Perda Esperada",
-            "Desp. PDD",
-            "Despesa com Perda Esperada",
-        ],
-    )
-
     # Capital: colunas para Índice de Capital Principal e Índice de Basileia Total
     col_cap_principal = _resolver_coluna_peers(
         cache_capital,
@@ -2885,15 +2871,6 @@ def _preparar_metricas_extra_peers(
             extra["Perda Esperada / (Carteira C4 + C5)"][chave] = _calcular_ratio_peers(
                 perda_esperada,
                 carteira_c4_c5,
-            )
-
-            # DRE (Rel. 4): Set/Dez são semestrais; acumular YTD antes de anualizar
-            desp_pdd_ytd = _acumular_dre_ytd_peers(cache_dre, banco, periodo, col_desp_pdd)
-            desp_pdd_anual = _anualizar_valor_dre(desp_pdd_ytd, periodo)
-            extra["Desp PDD Anualizada"][chave] = desp_pdd_anual
-            extra["Desp PDD Anualizada / Carteira Bruta"][chave] = _calcular_ratio_peers(
-                desp_pdd_anual,
-                carteira_bruta,
             )
 
             pdd_credito = _blop_get_sum_periodo_conta(banco, periodo, "1490000004")
@@ -3135,7 +3112,6 @@ def _montar_tabela_peers(
                         "Perda Esperada / Carteira Bruta": ("Perda Esperada", "Carteira de Crédito Bruta"),
                         "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Bruta"),
                         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "Carteira de Créd. Class. C4+C5"),
-                        "Desp PDD Anualizada / Carteira Bruta": ("Desp PDD Anualizada", "Carteira de Crédito Bruta"),
                         "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3"),
                     }
                     if label in extra_values and label in _RATIO_COMPONENTS:
@@ -4481,6 +4457,7 @@ with col_header:
 MENU_PRINCIPAL = [
     "Rankings",
     "Peers (Tabela)",
+    "Evolução",
     "Scatter Plot",
     "DRE",
     "DRE (Balancetes)",
@@ -5626,7 +5603,6 @@ elif menu == "Peers (Tabela)":
                             <strong>Carteira Estágio 2</strong> = Saldo da conta 3312000001 no mês/período selecionado.<br>
                             <strong>Carteira Estágio 3</strong> = Saldo da conta 3313000000 no mês/período selecionado.<br>
                             <strong>PDD / Estágio 3</strong> = PDD Total 4060 ÷ Carteira Estágio 3 do mesmo mês/período.<br>
-                            <strong>Desp PDD Anualizada / Carteira Bruta</strong> = (Resultado com Perda Esperada anualizado) ÷ Carteira de Crédito Bruta. Anualização: valor acumulado YTD × (12 / meses do período).<br>
                             <br>
                             <em>Alavancagem</em><br>
                             <strong>Ativo / PL</strong> = Ativo Total ÷ Patrimônio Líquido.<br>
@@ -5652,6 +5628,138 @@ elif menu == "Peers (Tabela)":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Evolução":
+    if _garantir_dados_principais("Evolução"):
+        st.markdown("### Evolução")
+        st.caption("Séries históricas anuais (Em R$ mm) com foco em desempenho, balanço e capital.")
+
+        df_ev = get_analise_base_df()
+        if df_ev is None or df_ev.empty:
+            st.warning("dados indisponíveis para a aba Evolução.")
+            st.stop()
+
+        col_ano = st.columns([1, 2])
+        with col_ano[0]:
+            qtd_anos = st.selectbox("janela histórica (anos)", [3, 5, 7, 10], index=1)
+
+        df_ev = df_ev.copy()
+        parsed = df_ev["Período"].astype(str).apply(_parse_periodo)
+        df_ev["Ano"] = parsed.apply(lambda x: x[1] if x else None)
+        df_ev["Tri"] = parsed.apply(lambda x: _parte_periodo_para_trimestre_idx(x[0]) if x else None)
+        df_ev = df_ev.dropna(subset=["Ano", "Tri"]).copy()
+        df_ev["Ano"] = df_ev["Ano"].astype(int)
+
+        anos_disp = sorted(df_ev["Ano"].unique().tolist())
+        if not anos_disp:
+            st.warning("não há anos válidos para montar a evolução.")
+            st.stop()
+
+        anos_sel = anos_disp[-qtd_anos:]
+        insts = ordenar_bancos_com_alias(df_ev["Instituição"].dropna().unique().tolist(), st.session_state.get("dict_aliases", {}))
+        inst_padrao = [i for i in insts if "itau" in str(i).lower() or "itaú" in str(i).lower()][:1]
+        if not inst_padrao and insts:
+            inst_padrao = [insts[0]]
+
+        instituicao = st.selectbox("instituição", insts, index=insts.index(inst_padrao[0]) if inst_padrao else 0)
+        df_inst = df_ev[(df_ev["Instituição"] == instituicao) & (df_ev["Ano"].isin(anos_sel))].copy()
+        if df_inst.empty:
+            st.info("sem dados para a instituição na janela selecionada.")
+            st.stop()
+
+        idx_tri = df_inst.groupby("Ano", observed=False)["Tri"].idxmax()
+        df_ano = df_inst.loc[idx_tri].sort_values("Ano").copy()
+
+        def _calc_roe_anualizado(row):
+            ll = pd.to_numeric(row.get("Lucro Líquido Acumulado YTD"), errors="coerce")
+            pl = pd.to_numeric(row.get("Patrimônio Líquido"), errors="coerce")
+            tri = pd.to_numeric(row.get("Tri"), errors="coerce")
+            if pd.isna(ll) or pd.isna(pl) or pd.isna(tri) or float(pl) == 0:
+                return np.nan
+            meses = {1: 3, 2: 6, 3: 9, 4: 12}.get(int(tri), 12)
+            return float(ll) * (12 / meses) / float(pl)
+
+        df_ano["Core Funding"] = pd.to_numeric(df_ano.get("Captações"), errors="coerce")
+        df_ano["Crédito 2.682"] = pd.to_numeric(df_ano.get("Carteira de Crédito"), errors="coerce")
+        df_ano["ROE anualizado"] = df_ano.apply(_calc_roe_anualizado, axis=1)
+        df_ano["Crédito 2.682 / PL"] = np.where(
+            pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce") != 0,
+            pd.to_numeric(df_ano["Crédito 2.682"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
+            np.nan,
+        )
+        df_ano["Basileia"] = pd.to_numeric(df_ano.get("Índice de Basileia"), errors="coerce")
+        df_ano["CET1"] = pd.to_numeric(df_ano.get("Índice de Capital Principal (CET1)"), errors="coerce")
+
+        graf_cols = {
+            "Lucro Líquido": "Lucro Líquido Acumulado YTD",
+            "Patrimônio Líquido": "Patrimônio Líquido",
+            "Crédito 2.682": "Crédito 2.682",
+            "Core Funding": "Core Funding",
+        }
+        df_graph = pd.DataFrame({"Ano": df_ano["Ano"]})
+        for k, c in graf_cols.items():
+            df_graph[k] = pd.to_numeric(df_ano.get(c), errors="coerce")
+
+        fig_ev = go.Figure()
+        for serie in ["Lucro Líquido", "Patrimônio Líquido", "Crédito 2.682", "Core Funding"]:
+            fig_ev.add_trace(go.Scatter(x=df_graph["Ano"], y=df_graph[serie], mode="lines+markers", name=serie))
+        fig_ev.update_layout(height=420, yaxis_title="Em R$ mm", xaxis_title="Ano", legend=dict(orientation="h", y=1.05))
+        st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
+
+        st.caption("Core Funding (rodapé): Captações totais, exceto títulos de dívida elegíveis a capital e dívidas subordinadas elegíveis a capital.")
+
+        df_metric = pd.DataFrame({
+            "Métrica": [
+                "ROE anualizado",
+                "Divid./JSCP",
+                "(+/-) Capital",
+                "Crédito 2.682 / PL",
+                "Basileia",
+                "CET1",
+            ]
+        })
+        for _, row in df_ano.iterrows():
+            ano = int(row["Ano"])
+            df_metric[str(ano)] = [
+                row.get("ROE anualizado"),
+                np.nan,
+                np.nan,
+                row.get("Crédito 2.682 / PL"),
+                row.get("Basileia"),
+                row.get("CET1"),
+            ]
+
+        def _fmt_evol(v, m):
+            if pd.isna(v):
+                return "-"
+            if m in ("ROE anualizado", "Basileia", "CET1"):
+                return formatar_percentual(float(v), decimais=2)
+            if m == "Crédito 2.682 / PL":
+                return f"{float(v):.2f}x"
+            return formatar_valor_br(v)
+
+        df_show = df_metric.copy()
+        for c in df_show.columns[1:]:
+            df_show[c] = [ _fmt_evol(v, m) for v,m in zip(df_metric[c], df_metric["Métrica"]) ]
+        st.dataframe(df_show, width='stretch', hide_index=True)
+
+        with st.expander("📥 exportar"):
+            buffer_excel = io.BytesIO()
+            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                df_graph.to_excel(writer, index=False, sheet_name='grafico_dados')
+                df_metric.to_excel(writer, index=False, sheet_name='tabela_metricas')
+            buffer_excel.seek(0)
+            st.download_button(
+                label="Baixar Excel",
+                data=buffer_excel,
+                file_name=f"evolucao_{instituicao}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="evolucao_excel",
+            )
+    else:
+        st.info("carregando dados automaticamente do github...")
+        st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
 
 elif menu == "Scatter Plot":
     if _garantir_dados_principais("Scatter Plot"):
@@ -7182,12 +7290,6 @@ elif menu == "DRE":
                 "original_label": "Despesas de Captações (g)",
             },
             {
-                "label": "Desp PDD / NIM bruta",
-                "derived_metric": "Desp PDD / NIM bruta",
-                "format": "pct",
-                "concept": "Desp. PDD dividido pela NIM bruta (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito).",
-            },
-            {
                 "label": "Desp PDD / Resultado Intermediação Fin. Bruto",
                 "derived_metric": "Desp PDD / Resultado Intermediação Fin. Bruto",
                 "format": "pct",
@@ -7839,7 +7941,6 @@ elif menu == "DRE":
 
         # Exibir ratios no final da tabela (sem quebrar a ordem dos demais itens)
         _labels_ratio_dre = {
-            "Desp PDD / NIM bruta",
             "Desp PDD / Resultado Intermediação Fin. Bruto",
             "Desp Captação / Captação",
         }
@@ -7985,16 +8086,9 @@ elif menu == "DRE":
                         if not _m_cap.empty:
                             _cap = _m_cap["Captacoes"].iloc[0]
 
-                    _ratio_pdd_nim = (_desp_pdd / _nim) if pd.notna(_desp_pdd) and pd.notna(_nim) and _nim != 0 else pd.NA
                     _ratio_pdd_interm = (_desp_pdd / _interm) if pd.notna(_desp_pdd) and pd.notna(_interm) and _interm != 0 else pd.NA
                     _ratio_capt = (_desp_capt_anual / _cap) if pd.notna(_desp_capt_anual) and pd.notna(_cap) and _cap != 0 else pd.NA
 
-                    tooltip_celula[("Desp PDD / NIM bruta", _periodo_exib)] = (
-                        f"Memória de cálculo\n"
-                        f"Desp. PDD: {_fmt_mm_tip(_desp_pdd)}\n"
-                        f"NIM bruta = Rec. Crédito ({_fmt_mm_tip(_rec_cred)}) + Rec. Arrendamento ({_fmt_mm_tip(_rec_arr)}) + Rec. Outras Op. Crédito ({_fmt_mm_tip(_rec_out)}) = {_fmt_mm_tip(_nim)}\n"
-                        f"Desp PDD / NIM bruta = {_fmt_mm_tip(_desp_pdd)} ÷ {_fmt_mm_tip(_nim)} = {formatar_percentual(_ratio_pdd_nim, decimais=2)}"
-                    )
                     tooltip_celula[("Desp PDD / Resultado Intermediação Fin. Bruto", _periodo_exib)] = (
                         f"Memória de cálculo\n"
                         f"Desp. PDD: {_fmt_mm_tip(_desp_pdd)}\n"
@@ -10732,7 +10826,6 @@ elif menu == "Glossário":
 
     **Crédito/Ativo (%):** Carteira de Crédito Líquida dividida pelo Ativo Total.
 
-    **Desp PDD / NIM bruta (%):** Desp. PDD dividido pela NIM bruta (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito). Fórmula: Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + Rec. Outras Operações c/ Características de Crédito).
 
     **Desp PDD / Resultado Intermediação Fin. Bruto (%):** Desp. PDD dividido pelo Resultado de Intermediação Financeira Bruto. Fórmula: Desp. PDD / Resultado de Intermediação Financeira Bruto.
 

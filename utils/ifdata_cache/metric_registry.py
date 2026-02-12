@@ -111,25 +111,6 @@ METRIC_REGISTRY: Dict[str, MetricDefinition] = {
         display_format="pct",
         source_tables=["principal"],
     ),
-    "desp_pdd_nim_bruta": MetricDefinition(
-        key="desp_pdd_nim_bruta",
-        display_name="Desp PDD / NIM bruta",
-        domain="qualidade_carteira",
-        formula=(
-            "Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + "
-            "Rec. Outras Operações c/ Características de Crédito)"
-        ),
-        dependencies=[
-            "Resultado com Perda Esperada (f)",
-            "Rendas de Operações de Crédito (c)",
-            "Rendas de Arrendamento Financeiro (d)",
-            "Rendas de Outras Operações com Características de Concessão de Crédito (e)",
-        ],
-        unit="%",
-        internal_scale="decimal_0_1",
-        display_format="pct",
-        source_tables=["dre", "derived_metrics"],
-    ),
     "desp_pdd_resultado_intermediacao_fin_bruto": MetricDefinition(
         key="desp_pdd_resultado_intermediacao_fin_bruto",
         display_name="Desp PDD / Resultado Intermediação Fin. Bruto",
@@ -168,7 +149,6 @@ METRIC_REGISTRY: Dict[str, MetricDefinition] = {
 
 
 DERIVED_METRIC_KEYS: List[str] = [
-    "desp_pdd_nim_bruta",
     "desp_pdd_resultado_intermediacao_fin_bruto",
     "desp_captacao_captacao",
 ]

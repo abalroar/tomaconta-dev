@@ -28,7 +28,6 @@ from .metric_registry import (
 logger = logging.getLogger("ifdata_cache")
 
 
-METRIC_PDD_NIM = "Desp PDD / NIM bruta"
 METRIC_PDD_INTERMED = "Desp PDD / Resultado Intermediação Fin. Bruto"
 METRIC_DESP_CAPT = "Desp Captação / Captação"
 
@@ -36,7 +35,6 @@ METRIC_DESP_CAPT = "Desp Captação / Captação"
 DERIVED_METRICS = get_derived_metric_labels()
 if not DERIVED_METRICS:
     DERIVED_METRICS = [
-        METRIC_PDD_NIM,
         METRIC_PDD_INTERMED,
         METRIC_DESP_CAPT,
     ]
@@ -44,7 +42,6 @@ if not DERIVED_METRICS:
 DERIVED_METRICS_FORMAT = get_derived_metric_format_map()
 if not DERIVED_METRICS_FORMAT:
     DERIVED_METRICS_FORMAT = {
-        METRIC_PDD_NIM: "pct",
         METRIC_PDD_INTERMED: "pct",
         METRIC_DESP_CAPT: "pct",
     }
@@ -52,10 +49,6 @@ if not DERIVED_METRICS_FORMAT:
 DERIVED_METRICS_FORMULAS = get_derived_metric_formula_map()
 if not DERIVED_METRICS_FORMULAS:
     DERIVED_METRICS_FORMULAS = {
-        METRIC_PDD_NIM: (
-            "Desp. PDD / (Rec. Crédito + Rec. Arrendamento Financeiro + "
-            "Rec. Outras Operações c/ Características de Crédito)"
-        ),
         METRIC_PDD_INTERMED: "Desp. PDD / Resultado de Intermediação Financeira Bruto",
         METRIC_DESP_CAPT: "Desp. Captação anualizada / Captações",
     }
@@ -343,9 +336,7 @@ def build_derived_metrics(
         raise ValueError("Coluna de Desp. PDD não encontrada no DRE")
 
     if rec_credito is None or rec_arrendamento is None or rec_outras is None:
-        raise ValueError("Colunas para NIM bruta não encontradas no DRE")
-
-    nim_bruta = rec_credito + rec_arrendamento + rec_outras
+        raise ValueError("Colunas para Resultado de Intermediação Financeira Bruto não encontradas no DRE")
 
     if rec_liquidez is None or rec_tvm is None:
         raise ValueError("Colunas para Resultado de Intermediação Financeira Bruto não encontradas no DRE")
@@ -377,14 +368,6 @@ def build_derived_metrics(
     )
 
     dados_metricas = []
-
-    serie_metric_1 = _safe_ratio(
-        desp_pdd_anualizada,
-        nim_bruta,
-        METRIC_PDD_NIM,
-        denominador_counts,
-    )
-    dados_metricas.append((METRIC_PDD_NIM, serie_metric_1))
 
     serie_metric_2 = _safe_ratio(
         desp_pdd_anualizada,
