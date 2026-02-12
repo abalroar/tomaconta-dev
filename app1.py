@@ -273,7 +273,30 @@ st.markdown("""
 APP_DIR = Path(__file__).parent.resolve()
 DATA_DIR = APP_DIR / "data"
 
-ALIASES_PATH = str(DATA_DIR / "Aliases.xlsx")
+
+def _resolver_aliases_path() -> Path:
+    """Resolve caminho do arquivo de aliases com fallback para variações de nome/case.
+
+    Em ambientes Linux, `Data/alias.xlsx` e `data/Aliases.xlsx` são caminhos diferentes.
+    Usuários frequentemente atualizam o arquivo com variações de maiúsculas/minúsculas;
+    este resolvedor evita que o app "perca" o arquivo por causa disso.
+    """
+    candidatos = [
+        APP_DIR / "data" / "Aliases.xlsx",
+        APP_DIR / "data" / "alias.xlsx",
+        APP_DIR / "Data" / "Aliases.xlsx",
+        APP_DIR / "Data" / "alias.xlsx",
+    ]
+
+    for caminho in candidatos:
+        if caminho.exists():
+            return caminho
+
+    # fallback: mantém caminho canônico para mensagens/diagnóstico
+    return candidatos[0]
+
+
+ALIASES_PATH = _resolver_aliases_path()
 LOGO_PATH = str(DATA_DIR / "logo.jpg")
 
 # Senha para proteger a funcionalidade de atualização de cache
@@ -1141,11 +1164,11 @@ def preparar_download_cache_local(cache_manager: CacheManager, tipo_cache: str) 
 
 def _aliases_file_token() -> str:
     """Token de versão do arquivo de aliases para invalidação de cache."""
-    path = Path(ALIASES_PATH)
+    path = _resolver_aliases_path()
     if not path.exists():
         return "aliases:missing"
     stat = path.stat()
-    return f"aliases:{int(stat.st_mtime)}:{stat.st_size}"
+    return f"aliases:{path.as_posix()}:{int(stat.st_mtime)}:{stat.st_size}"
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1153,8 +1176,11 @@ def carregar_aliases(alias_file_token: str):
     """Carrega aliases do Excel com cache de 1 hora e invalidação por arquivo."""
     _ = alias_file_token
     _perf_start("carregar_aliases")
-    if os.path.exists(ALIASES_PATH):
-        df = pd.read_excel(ALIASES_PATH)
+    aliases_path = _resolver_aliases_path()
+    if aliases_path.exists():
+        df = pd.read_excel(aliases_path)
+        # higiene mínima de cabeçalhos para evitar quebra por espaços acidentais
+        df.columns = [str(col).strip() for col in df.columns]
         print(_perf_log("carregar_aliases"))
         return df
     print(_perf_log("carregar_aliases"))
