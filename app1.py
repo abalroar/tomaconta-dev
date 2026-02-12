@@ -5632,7 +5632,7 @@ elif menu == "Peers (Tabela)":
 elif menu == "Evolução":
     if _garantir_dados_principais("Evolução"):
         st.markdown("### Evolução")
-        st.caption("Séries históricas anuais (Em R$ mm) com foco em desempenho, balanço e capital.")
+        st.caption("Evolução: financia vendas da montadora e estoques das concessionárias.")
 
         df_ev = get_analise_base_df()
         if df_ev is None or df_ev.empty:
@@ -5680,7 +5680,9 @@ elif menu == "Evolução":
             return float(ll) * (12 / meses) / float(pl)
 
         df_ano["Core Funding"] = pd.to_numeric(df_ano.get("Captações"), errors="coerce")
-        df_ano["Carteira Classificada"] = pd.to_numeric(df_ano.get("Carteira de Crédito"), errors="coerce")
+        carteira_classificada_base = pd.to_numeric(df_ano.get("Carteira Classificada"), errors="coerce")
+        carteira_credito_base = pd.to_numeric(df_ano.get("Carteira de Crédito"), errors="coerce")
+        df_ano["Carteira Classificada"] = carteira_classificada_base.combine_first(carteira_credito_base)
         df_ano["ROE anualizado"] = df_ano.apply(_calc_roe_anualizado, axis=1)
         df_ano["Crédito 2.682 / PL"] = np.where(
             pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce") != 0,
@@ -5711,7 +5713,15 @@ elif menu == "Evolução":
         for k, c in graf_cols.items():
             df_graph[k] = pd.to_numeric(df_ano.get(c), errors="coerce")
 
-        ano_labels = [str(int(ano)) for ano in df_graph["Ano"].tolist()]
+        ano_labels = [f"dez-{str(int(ano))[-2:]}" for ano in df_graph["Ano"].tolist()]
+
+        def _fmt_mm_plot(v):
+            if pd.isna(v):
+                return ""
+            try:
+                return f"{float(v):,.0f}".replace(",", ".")
+            except Exception:
+                return ""
 
         fig_ev = go.Figure()
         fig_ev.add_trace(
@@ -5720,6 +5730,8 @@ elif menu == "Evolução":
                 y=df_graph["Lucro Líquido"],
                 name="Lucro Líquido",
                 marker_color="#9B9B9B",
+                text=[_fmt_mm_plot(v) for v in df_graph["Lucro Líquido"]],
+                textposition="outside",
                 yaxis="y",
             )
         )
@@ -5729,6 +5741,8 @@ elif menu == "Evolução":
                 y=df_graph["Patrimônio Líquido"],
                 name="Patrimônio Líquido",
                 marker_color="#102A83",
+                text=[_fmt_mm_plot(v) for v in df_graph["Patrimônio Líquido"]],
+                textposition="outside",
                 yaxis="y",
             )
         )
@@ -5736,9 +5750,12 @@ elif menu == "Evolução":
             go.Scatter(
                 x=ano_labels,
                 y=df_graph["Carteira Classificada"],
-                mode="lines",
+                mode="lines+markers+text",
                 name="Carteira Classificada",
                 line=dict(color="#FF6B35", width=2, shape="spline", smoothing=1.15),
+                marker=dict(size=8, color="#FF6B35"),
+                text=[_fmt_mm_plot(v) for v in df_graph["Carteira Classificada"]],
+                textposition="top center",
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -5747,21 +5764,25 @@ elif menu == "Evolução":
             go.Scatter(
                 x=ano_labels,
                 y=df_graph["Core Funding"],
-                mode="lines",
+                mode="lines+markers+text",
                 name="Core Funding",
                 line=dict(color="#1F1F1F", width=2, shape="spline", smoothing=1.15),
+                marker=dict(size=8, color="#1F1F1F"),
+                text=[_fmt_mm_plot(v) for v in df_graph["Core Funding"]],
+                textposition="bottom center",
                 connectgaps=True,
                 yaxis="y2",
             )
         )
         fig_ev.update_layout(
             barmode="group",
-            height=420,
+            height=480,
             yaxis=dict(title="Lucro/PL (R$ mm)", rangemode="tozero"),
             yaxis2=dict(title="Carteira/Core Funding (R$ mm)", overlaying="y", side="right", rangemode="tozero"),
             xaxis_title="Ano",
             xaxis=dict(type="category", categoryorder="array", categoryarray=ano_labels),
-            legend=dict(orientation="h", y=1.08),
+            legend=dict(orientation="v", y=0.5, x=0.01),
+            margin=dict(t=30, b=20),
         )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
 
@@ -5790,19 +5811,35 @@ elif menu == "Evolução":
                 row.get("CET1"),
             ]
 
+        def _fmt_valor_br(v):
+            if pd.isna(v):
+                return "-"
+            try:
+                return f"{float(v):,.0f}".replace(",", ".")
+            except Exception:
+                return "-"
+
+        def _fmt_pct(v):
+            if pd.isna(v):
+                return "-"
+            try:
+                return f"{float(v) * 100:.1f}%".replace(".", ",")
+            except Exception:
+                return "-"
+
         def _fmt_evol(v, m):
             if pd.isna(v):
                 return "-"
             if m in ("ROE anualizado", "Basileia", "CET1"):
-                return formatar_percentual(float(v), decimais=2)
+                return _fmt_pct(v)
             if m == "Carteira Classificada / PL":
-                return f"{float(v):.2f}x"
-            return formatar_valor_br(v)
+                return f"{float(v):.1f}x".replace(".", ",")
+            return _fmt_valor_br(v)
 
         df_show = df_metric.copy()
         for c in df_show.columns[1:]:
             df_show[c] = [ _fmt_evol(v, m) for v,m in zip(df_metric[c], df_metric["Métrica"]) ]
-        st.dataframe(df_show, width='stretch', hide_index=True)
+        st.table(df_show.set_index("Métrica"))
 
         with st.expander("📥 exportar"):
             buffer_excel = io.BytesIO()
