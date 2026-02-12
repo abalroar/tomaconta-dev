@@ -5361,6 +5361,7 @@ elif menu == "Peers (Tabela)":
 
 elif menu == "Scatter Plot":
     if _garantir_dados_principais("Scatter Plot"):
+    if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         df = get_analise_base_df()
         _log_roe_trace(df, "scatter_df_base")
         df = _garantir_indice_basileia_coluna(df)
