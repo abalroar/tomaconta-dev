@@ -3791,6 +3791,7 @@ def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
         columns="Métrica",
         values="Valor",
         aggfunc="first",
+        observed=False,
     ).reset_index()
     df_pivot.columns.name = None
     df_out = df_periodo.merge(df_pivot, on="Instituição", how="left")
@@ -6651,7 +6652,8 @@ elif menu == "Rankings":
                                     index='Instituição',
                                     columns='Período',
                                     values=variavel,
-                                    aggfunc='first'
+                                    aggfunc='first',
+                                    observed=False,
                                 ).reset_index()
                                 colunas_ordenadas = ['Instituição'] + periodos_hist
                                 df_export_hist = df_export_hist.reindex(columns=colunas_ordenadas)
