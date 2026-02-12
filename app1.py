@@ -1381,6 +1381,7 @@ def _preparar_cores_para_cache(df_aliases):
     cores = tuple(df_aliases[coluna_cor].tolist())
     return content_hash, (instituicoes, aliases, cores)
 
+@st.cache_data(ttl=300, show_spinner=False)
 def verificar_caches_github() -> dict:
     """Verifica quais caches existem no GitHub Releases.
 
@@ -3688,6 +3689,33 @@ def get_df_periodo_brincar(periodo: str) -> pd.DataFrame:
     return df_periodo
 
 
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _get_analise_base_df(principal_token: str, alias_sig: tuple, capital_mesclado: bool) -> pd.DataFrame:
+    """Base unificada para abas analíticas com dependências explícitas para cache."""
+    _ = (principal_token, capital_mesclado)
+    dados_periodos = _carregar_dados_periodos_preparados(principal_token, alias_sig)
+    if not dados_periodos:
+        return pd.DataFrame()
+
+    df = pd.concat(dados_periodos.values(), ignore_index=True)
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = _normalizar_lucro_liquido(df.copy())
+    df = _recalcular_roe_anualizado_df(df)
+    return df
+
+
+def get_analise_base_df() -> pd.DataFrame:
+    """Retorna base memoizada para Peers e Scatter."""
+    principal_token = _cache_version_token("principal")
+    alias_sig = _alias_signature()
+    capital_mesclado = bool(st.session_state.get('_dados_capital_mesclados', False))
+    return _get_analise_base_df(principal_token, alias_sig, capital_mesclado)
+
+
 def _get_cache_data_mtime(cache_obj) -> Optional[float]:
     if cache_obj is None:
         return None
@@ -3804,6 +3832,18 @@ def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
         "mem_mb": _df_mem_mb(df_derived),
     }
     return df_out, diag
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_scatter_periodo_df(periodo: str, principal_token: str, derived_token: str, alias_sig: tuple, capital_mesclado: bool):
+    """Carrega dataframe de um período do Scatter já com métricas derivadas anexadas."""
+    _ = derived_token
+    df_base = _get_analise_base_df(principal_token, alias_sig, capital_mesclado)
+    if df_base is None or df_base.empty or 'Período' not in df_base.columns:
+        return pd.DataFrame(), {"tempo_s": 0.0, "linhas": 0, "mem_mb": 0.0}
+
+    df_periodo = df_base[df_base['Período'] == periodo].copy()
+    return anexar_metricas_derivadas_periodo(df_periodo, periodo)
 
 
 # FIX PROBLEMA 3: Busca de cor com normalização
@@ -5095,9 +5135,7 @@ elif menu == "Peers (Tabela)":
         peers_perf = {}
 
         t_dados = time.perf_counter()
-        df = get_dados_concatenados()
-        df = _normalizar_lucro_liquido(df)
-        df = _recalcular_roe_anualizado_df(df)
+        df = get_analise_base_df()
         _perf_peers_stage(peers_perf, "a_leitura_dados_brutos", t_dados)
         _log_roe_trace(df, "peers_df_base")
 
@@ -5303,9 +5341,7 @@ elif menu == "Peers (Tabela)":
 
 elif menu == "Scatter Plot":
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
-        df = get_dados_concatenados()  # OTIMIZAÇÃO: usar cache
-        df = _normalizar_lucro_liquido(df)
-        df = _recalcular_roe_anualizado_df(df)
+        df = get_analise_base_df()
         _log_roe_trace(df, "scatter_df_base")
         df = _garantir_indice_basileia_coluna(df)
         df = _ajustar_basileia_para_scatter(df)
@@ -5354,9 +5390,14 @@ elif menu == "Scatter Plot":
                 key="bancos_multiselect"
             )
 
-        # Aplica filtros ao dataframe
-        df_periodo = df[df['Período'] == periodo_scatter]
-        df_periodo, diag_scatter_derived = anexar_metricas_derivadas_periodo(df_periodo, periodo_scatter)
+        # Aplica filtros ao dataframe (já com métricas derivadas cacheadas por período)
+        df_periodo, diag_scatter_derived = get_scatter_periodo_df(
+            periodo_scatter,
+            _cache_version_token("principal"),
+            _cache_version_token("derived_metrics"),
+            _alias_signature(),
+            bool(st.session_state.get('_dados_capital_mesclados', False)),
+        )
 
         if bancos_selecionados:
             # Usa os bancos selecionados no multiselect
@@ -5514,9 +5555,21 @@ elif menu == "Scatter Plot":
         if periodo_inicial == periodo_subseq:
             st.warning("Selecione dois períodos diferentes para visualizar a movimentação.")
         else:
-            # Filtra dados para os dois períodos
-            df_p1 = df[df['Período'] == periodo_inicial].copy()
-            df_p2 = df[df['Período'] == periodo_subseq].copy()
+            # Filtra dados para os dois períodos (com métricas derivadas cacheadas)
+            df_p1, diag_scatter_derived_p1 = get_scatter_periodo_df(
+                periodo_inicial,
+                _cache_version_token("principal"),
+                _cache_version_token("derived_metrics"),
+                _alias_signature(),
+                bool(st.session_state.get('_dados_capital_mesclados', False)),
+            )
+            df_p2, diag_scatter_derived_p2 = get_scatter_periodo_df(
+                periodo_subseq,
+                _cache_version_token("principal"),
+                _cache_version_token("derived_metrics"),
+                _alias_signature(),
+                bool(st.session_state.get('_dados_capital_mesclados', False)),
+            )
 
             # Aplica seleção de bancos ou top N
             if bancos_selecionados_n2:
@@ -7805,8 +7858,10 @@ elif menu == "DRE (Balancetes)":
         txt = " ".join(txt.split())
         return txt
 
-    def _balancetes_obter_cnpj_por_instituicao(instituicoes_ref: list) -> dict:
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _balancetes_obter_cnpj_por_instituicao(instituicoes_ref: tuple, principal_token: str) -> dict:
         """Obtém mapeamento de instituições para CNPJs."""
+        _ = principal_token
         mapa = {}
 
         # 1) Varrer caches já existentes
@@ -7870,7 +7925,7 @@ elif menu == "DRE (Balancetes)":
         )
 
         # Mapear CNPJs
-        cnpj_map = _balancetes_obter_cnpj_por_instituicao(instituicoes_bal)
+        cnpj_map = _balancetes_obter_cnpj_por_instituicao(tuple(instituicoes_bal), _cache_version_token("principal"))
         instituicoes_com_cnpj = [i for i in instituicoes_bal if cnpj_map.get(i)]
 
         # Status do cache
