@@ -6338,18 +6338,7 @@ elif menu == "Evolução":
         cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal (CET1)")
         if cet1_fonte.isna().all():
             cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal")
-        df_ano["Índice de Capital Principal (CET1) (%)"] = _normalizar_percentual_display(cet1_fonte)
-
-        if "Lucro Líquido" in df_ano.columns:
-            serie_ll_ytd = pd.to_numeric(df_ano["Lucro Líquido Acumulado YTD"], errors="coerce")
-            serie_ll_alt = pd.to_numeric(df_ano["Lucro Líquido"], errors="coerce")
-            divergencia_ll = (serie_ll_ytd - serie_ll_alt).abs().max(skipna=True)
-            if pd.notna(divergencia_ll) and float(divergencia_ll) > 1:
-                st.warning(
-                    "sanity check de fonte: detectada divergência relevante entre "
-                    "'Lucro Líquido Acumulado YTD' (fonte consolidada) e coluna alternativa 'Lucro Líquido'. "
-                    "mantido o consolidado para a visualização."
-                )
+        df_ano["Índice de Capital Principal (CET1)"] = _normalizar_percentual_display(cet1_fonte)
 
         graf_cols = {
             "Lucro Líquido": "Lucro Líquido Acumulado YTD",
@@ -6379,9 +6368,6 @@ elif menu == "Evolução":
                 y=df_graph["Lucro Líquido"],
                 name="Lucro Líquido",
                 marker_color="#9B9B9B",
-                text=[_fmt_mm_plot(v) for v in df_graph["Lucro Líquido"]],
-                textposition="outside",
-                textfont=dict(size=16),
                 yaxis="y",
             )
         )
@@ -6391,9 +6377,6 @@ elif menu == "Evolução":
                 y=df_graph["Patrimônio Líquido"],
                 name="Patrimônio Líquido",
                 marker_color="#102A83",
-                text=[_fmt_mm_plot(v) for v in df_graph["Patrimônio Líquido"]],
-                textposition="outside",
-                textfont=dict(size=16),
                 yaxis="y",
             )
         )
@@ -6401,13 +6384,10 @@ elif menu == "Evolução":
             go.Scatter(
                 x=ano_labels,
                 y=df_graph["Carteira Classificada"],
-                mode="lines+markers+text",
+                mode="lines+markers",
                 name="Carteira Classificada",
                 line=dict(color="#FF6B35", width=2, shape="spline", smoothing=1.15),
                 marker=dict(size=8, color="#FF6B35"),
-                text=[_fmt_mm_plot(v) for v in df_graph["Carteira Classificada"]],
-                textposition="top center",
-                textfont=dict(size=16),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -6416,17 +6396,44 @@ elif menu == "Evolução":
             go.Scatter(
                 x=ano_labels,
                 y=df_graph["Core Funding"],
-                mode="lines+markers+text",
+                mode="lines+markers",
                 name="Core Funding",
                 line=dict(color="#1F1F1F", width=2, shape="spline", smoothing=1.15),
                 marker=dict(size=8, color="#1F1F1F"),
-                text=[_fmt_mm_plot(v) for v in df_graph["Core Funding"]],
-                textposition="bottom center",
-                textfont=dict(size=16),
                 connectgaps=True,
                 yaxis="y2",
             )
         )
+
+        annotations_ev = []
+
+        def _add_label_annotations(serie, yref, font_color, bg_color, yshift):
+            for idx, valor in enumerate(serie):
+                texto = _fmt_mm_plot(valor)
+                if not texto:
+                    continue
+                annotations_ev.append(
+                    dict(
+                        x=ano_labels[idx],
+                        y=valor,
+                        xref="x",
+                        yref=yref,
+                        text=texto,
+                        showarrow=False,
+                        yshift=yshift,
+                        font=dict(size=14, color=font_color),
+                        bgcolor=bg_color,
+                        bordercolor="rgba(0,0,0,0.08)",
+                        borderwidth=1,
+                        borderpad=3,
+                    )
+                )
+
+        _add_label_annotations(df_graph["Lucro Líquido"], "y", "#4A4A4A", "rgba(255,255,255,0.88)", 14)
+        _add_label_annotations(df_graph["Patrimônio Líquido"], "y", "#102A83", "rgba(234,240,255,0.92)", 14)
+        _add_label_annotations(df_graph["Carteira Classificada"], "y2", "#FF6B35", "rgba(255,245,240,0.9)", 16)
+        _add_label_annotations(df_graph["Core Funding"], "y2", "#000000", "rgba(245,245,245,0.92)", -16)
+
         fig_ev.update_layout(
             barmode="group",
             height=480,
@@ -6436,6 +6443,7 @@ elif menu == "Evolução":
             xaxis=dict(type="category", categoryorder="array", categoryarray=ano_labels),
             legend=dict(orientation="v", y=0.5, x=0.01),
             margin=dict(t=30, b=20),
+            annotations=annotations_ev,
         )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
 
@@ -6448,7 +6456,7 @@ elif menu == "Evolução":
                 "ROE anualizado",
                 "Carteira Classificada / PL",
                 "Índice de Basileia (%)",
-                "Índice de Capital Principal (CET1) (%)",
+                "Índice de Capital Principal (CET1)",
             ]
         })
         for _, row in df_ano.iterrows():
@@ -6457,7 +6465,7 @@ elif menu == "Evolução":
                 row.get("ROE anualizado"),
                 row.get("Crédito 2.682 / PL"),
                 row.get("Índice de Basileia (%)"),
-                row.get("Índice de Capital Principal (CET1) (%)"),
+                row.get("Índice de Capital Principal (CET1)"),
             ]
 
         def _fmt_valor_br(v):
@@ -6479,7 +6487,7 @@ elif menu == "Evolução":
         def _fmt_evol(v, m):
             if pd.isna(v):
                 return "-"
-            if m in ("ROE anualizado", "Índice de Basileia (%)", "Índice de Capital Principal (CET1) (%)"):
+            if m in ("ROE anualizado", "Índice de Basileia (%)", "Índice de Capital Principal (CET1)"):
                 return _fmt_pct(v)
             if m == "Carteira Classificada / PL":
                 return f"{float(v):.1f}x".replace(".", ",")
