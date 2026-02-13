@@ -6335,8 +6335,29 @@ elif menu == "Evolução":
         basileia_fonte = _numeric_series(df_ano, "Índice de Basileia")
         df_ano["Índice de Basileia (%)"] = _normalizar_basileia_display(basileia_fonte)
 
-        cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal (CET1)")
+        # CET1: usar a mesma fonte/lógica da Tabela (Peers), via relatório de Capital.
+        # Obtém Índice de CET1 por período (decimal 0-1) e só então converte para display.
+        cet1_map = {}
+        for periodo in df_ano.get("Período", pd.Series(dtype="object")).dropna().unique():
+            df_cet1_periodo = obter_cet1_periodo(
+                periodo,
+                st.session_state.get("dados_capital", {}),
+                st.session_state.get("dict_aliases", {}),
+                st.session_state.get("df_aliases"),
+                st.session_state.get("dados_periodos"),
+            )
+            if df_cet1_periodo is None or df_cet1_periodo.empty:
+                continue
+            serie_cet1_inst = pd.to_numeric(
+                df_cet1_periodo.loc[df_cet1_periodo["Instituição"] == instituicao, "Índice de CET1"],
+                errors="coerce",
+            ).dropna()
+            if not serie_cet1_inst.empty:
+                cet1_map[periodo] = float(serie_cet1_inst.iloc[0])
+
+        cet1_fonte = df_ano.get("Período", pd.Series(index=df_ano.index)).map(cet1_map)
         if cet1_fonte.isna().all():
+            # fallback único: usar coluna já mesclada em dados_periodos, se disponível
             cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal")
         df_ano["Índice de Capital Principal (CET1)"] = _normalizar_percentual_display(cet1_fonte)
 
