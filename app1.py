@@ -1552,9 +1552,62 @@ def _parsear_conglomerados_csv(texto: str) -> list[dict]:
     return resultados
 
 
+def _carregar_conglomerados_bloprudencial_fallback() -> list[dict]:
+    """Monta lista de conglomerados a partir dos CSVs BLOPRUDENCIAL locais."""
+    candidatos = sorted(APP_DIR.glob("*BLOPRUDENCIAL*.CSV"), reverse=True)
+    if not candidatos:
+        return []
+
+    conglomerados = {}
+    for caminho in candidatos:
+        try:
+            with caminho.open("r", encoding="latin1", errors="ignore") as fp:
+                for linha in fp:
+                    if not linha or linha.startswith("Balancete") or linha.startswith("Data de geracao") or linha.startswith("Fonte:"):
+                        continue
+                    if linha.startswith("#"):
+                        continue
+
+                    partes = [p.strip() for p in linha.split(";")]
+                    if len(partes) < 7:
+                        continue
+
+                    cnpj = re.sub(r"\D", "", partes[2]).zfill(14)
+                    nome_inst = partes[4].strip()
+                    cod_congl = partes[5].strip()
+                    nome_congl = partes[6].strip()
+                    if not cod_congl or not nome_congl:
+                        continue
+
+                    codigo = re.sub(r"\D", "", cod_congl)
+                    if not codigo:
+                        continue
+
+                    chave = codigo
+                    if chave not in conglomerados:
+                        conglomerados[chave] = {
+                            "codigo": int(codigo),
+                            "nome": nome_congl,
+                            "participacoes": [],
+                        }
+
+                    if cnpj and nome_inst:
+                        reg = {"cnpj": cnpj, "nome": nome_inst, "condicao": "PARTICIPANTE"}
+                        if reg not in conglomerados[chave]["participacoes"]:
+                            conglomerados[chave]["participacoes"].append(reg)
+        except Exception:
+            continue
+
+    resultado = sorted(conglomerados.values(), key=lambda x: x.get("codigo", 0))
+    for item in resultado:
+        if item.get("participacoes"):
+            item["participacoes"][0]["condicao"] = "LIDER"
+    return resultado
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def carregar_conglomerados() -> list[dict]:
-    """Carrega conglomerados do CSV local (quando existir) com fallback para API oficial."""
+    """Carrega conglomerados com fallback progressivo (CSV local -> API -> BLOPRUDENCIAL)."""
     arquivo_local = APP_DIR / "conglomerados.csv"
     if arquivo_local.exists():
         conteudo = arquivo_local.read_text(encoding="utf-8", errors="ignore")
@@ -1562,10 +1615,30 @@ def carregar_conglomerados() -> list[dict]:
         if dados_csv:
             return dados_csv
 
-    resp = requests.get("https://www3.bcb.gov.br/informes/rest/conglomerados", timeout=40)
-    resp.raise_for_status()
-    payload = json.loads(resp.text)
-    return payload.get("content", []) if isinstance(payload, dict) else payload
+    url = "https://www3.bcb.gov.br/informes/rest/conglomerados"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0",
+    }
+
+    for metodo in ("GET", "POST"):
+        try:
+            resposta = requests.request(metodo, url, timeout=40, headers=headers)
+            if resposta.status_code == 405:
+                continue
+            resposta.raise_for_status()
+            payload = json.loads(resposta.text)
+            dados_api = payload.get("content", []) if isinstance(payload, dict) else payload
+            if dados_api:
+                return dados_api
+        except Exception:
+            continue
+
+    fallback = _carregar_conglomerados_bloprudencial_fallback()
+    if fallback:
+        return fallback
+
+    raise RuntimeError("Não foi possível carregar conglomerados (CSV local, API ou BLOPRUDENCIAL).")
 
 
 def _extrair_nome_cargo_de_texto(texto: str) -> tuple[str, str]:
