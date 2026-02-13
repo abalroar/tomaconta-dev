@@ -6338,18 +6338,7 @@ elif menu == "Evolução":
         cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal (CET1)")
         if cet1_fonte.isna().all():
             cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal")
-        df_ano["Índice de Capital Principal (CET1) (%)"] = _normalizar_percentual_display(cet1_fonte)
-
-        if "Lucro Líquido" in df_ano.columns:
-            serie_ll_ytd = pd.to_numeric(df_ano["Lucro Líquido Acumulado YTD"], errors="coerce")
-            serie_ll_alt = pd.to_numeric(df_ano["Lucro Líquido"], errors="coerce")
-            divergencia_ll = (serie_ll_ytd - serie_ll_alt).abs().max(skipna=True)
-            if pd.notna(divergencia_ll) and float(divergencia_ll) > 1:
-                st.warning(
-                    "sanity check de fonte: detectada divergência relevante entre "
-                    "'Lucro Líquido Acumulado YTD' (fonte consolidada) e coluna alternativa 'Lucro Líquido'. "
-                    "mantido o consolidado para a visualização."
-                )
+        df_ano["Índice de Capital Principal (CET1)"] = _normalizar_percentual_display(cet1_fonte)
 
         graf_cols = {
             "Lucro Líquido": "Lucro Líquido Acumulado YTD",
@@ -6467,7 +6456,7 @@ elif menu == "Evolução":
                 "ROE anualizado",
                 "Carteira Classificada / PL",
                 "Índice de Basileia (%)",
-                "Índice de Capital Principal (CET1) (%)",
+                "Índice de Capital Principal (CET1)",
             ]
         })
         for _, row in df_ano.iterrows():
@@ -6476,7 +6465,7 @@ elif menu == "Evolução":
                 row.get("ROE anualizado"),
                 row.get("Crédito 2.682 / PL"),
                 row.get("Índice de Basileia (%)"),
-                row.get("Índice de Capital Principal (CET1) (%)"),
+                row.get("Índice de Capital Principal (CET1)"),
             ]
 
         def _fmt_valor_br(v):
@@ -6498,7 +6487,7 @@ elif menu == "Evolução":
         def _fmt_evol(v, m):
             if pd.isna(v):
                 return "-"
-            if m in ("ROE anualizado", "Índice de Basileia (%)", "Índice de Capital Principal (CET1) (%)"):
+            if m in ("ROE anualizado", "Índice de Basileia (%)", "Índice de Capital Principal (CET1)"):
                 return _fmt_pct(v)
             if m == "Carteira Classificada / PL":
                 return f"{float(v):.1f}x".replace(".", ",")
