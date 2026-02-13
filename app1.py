@@ -6222,6 +6222,13 @@ elif menu == "Evolução":
         st.markdown("### Evolução")
         st.caption("Evolução: financia vendas da montadora e estoques das concessionárias.")
 
+        # Diagnóstico raiz: CET1 na Evolução vinha vazio quando `dados_capital`
+        # ainda não estava carregado nesta aba (navegação rápida / ordem de uso).
+        # Peers lê Capital explicitamente na própria aba; aqui garantimos o mesmo
+        # pré-requisito antes de buscar CET1 por período.
+        if not st.session_state.get("dados_capital"):
+            carregar_dados_capital()
+
         df_ev = get_analise_base_df()
         if df_ev is None or df_ev.empty:
             st.warning("dados indisponíveis para a aba Evolução.")
@@ -6335,21 +6342,36 @@ elif menu == "Evolução":
         basileia_fonte = _numeric_series(df_ano, "Índice de Basileia")
         df_ano["Índice de Basileia (%)"] = _normalizar_basileia_display(basileia_fonte)
 
-        cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal (CET1)")
-        if cet1_fonte.isna().all():
-            cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal")
-        df_ano["Índice de Capital Principal (CET1) (%)"] = _normalizar_percentual_display(cet1_fonte)
+        # CET1: usar a mesma fonte/lógica da Tabela (Peers), via relatório de Capital.
+        # Obtém Índice de CET1 por período (decimal 0-1) e só então converte para display.
+        cet1_map = {}
+        for periodo in df_ano.get("Período", pd.Series(dtype="object")).dropna().unique():
+            df_cet1_periodo = obter_cet1_periodo(
+                periodo,
+                st.session_state.get("dados_capital", {}),
+                st.session_state.get("dict_aliases", {}),
+                st.session_state.get("df_aliases"),
+                st.session_state.get("dados_periodos"),
+            )
+            if df_cet1_periodo is None or df_cet1_periodo.empty:
+                continue
+            mask_inst = df_cet1_periodo["Instituição"] == instituicao
+            if not bool(mask_inst.any()):
+                inst_norm = _normalizar_label_peers(str(instituicao))
+                mask_inst = df_cet1_periodo["Instituição"].astype(str).apply(_normalizar_label_peers) == inst_norm
 
-        if "Lucro Líquido" in df_ano.columns:
-            serie_ll_ytd = pd.to_numeric(df_ano["Lucro Líquido Acumulado YTD"], errors="coerce")
-            serie_ll_alt = pd.to_numeric(df_ano["Lucro Líquido"], errors="coerce")
-            divergencia_ll = (serie_ll_ytd - serie_ll_alt).abs().max(skipna=True)
-            if pd.notna(divergencia_ll) and float(divergencia_ll) > 1:
-                st.warning(
-                    "sanity check de fonte: detectada divergência relevante entre "
-                    "'Lucro Líquido Acumulado YTD' (fonte consolidada) e coluna alternativa 'Lucro Líquido'. "
-                    "mantido o consolidado para a visualização."
-                )
+            serie_cet1_inst = pd.to_numeric(
+                df_cet1_periodo.loc[mask_inst, "Índice de CET1"],
+                errors="coerce",
+            ).dropna()
+            if not serie_cet1_inst.empty:
+                cet1_map[periodo] = float(serie_cet1_inst.iloc[0])
+
+        cet1_fonte = df_ano.get("Período", pd.Series(index=df_ano.index)).map(cet1_map)
+        if cet1_fonte.isna().all():
+            # fallback único: usar coluna já mesclada em dados_periodos, se disponível
+            cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal")
+        df_ano["Índice de Capital Principal (CET1)"] = _normalizar_indice_para_decimal(cet1_fonte)
 
         graf_cols = {
             "Lucro Líquido": "Lucro Líquido Acumulado YTD",
@@ -6379,9 +6401,6 @@ elif menu == "Evolução":
                 y=df_graph["Lucro Líquido"],
                 name="Lucro Líquido",
                 marker_color="#9B9B9B",
-                text=[_fmt_mm_plot(v) for v in df_graph["Lucro Líquido"]],
-                textposition="outside",
-                textfont=dict(size=16),
                 yaxis="y",
             )
         )
@@ -6391,9 +6410,6 @@ elif menu == "Evolução":
                 y=df_graph["Patrimônio Líquido"],
                 name="Patrimônio Líquido",
                 marker_color="#102A83",
-                text=[_fmt_mm_plot(v) for v in df_graph["Patrimônio Líquido"]],
-                textposition="outside",
-                textfont=dict(size=16),
                 yaxis="y",
             )
         )
@@ -6401,13 +6417,10 @@ elif menu == "Evolução":
             go.Scatter(
                 x=ano_labels,
                 y=df_graph["Carteira Classificada"],
-                mode="lines+markers+text",
+                mode="lines+markers",
                 name="Carteira Classificada",
                 line=dict(color="#FF6B35", width=2, shape="spline", smoothing=1.15),
                 marker=dict(size=8, color="#FF6B35"),
-                text=[_fmt_mm_plot(v) for v in df_graph["Carteira Classificada"]],
-                textposition="top center",
-                textfont=dict(size=16),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -6416,17 +6429,44 @@ elif menu == "Evolução":
             go.Scatter(
                 x=ano_labels,
                 y=df_graph["Core Funding"],
-                mode="lines+markers+text",
+                mode="lines+markers",
                 name="Core Funding",
                 line=dict(color="#1F1F1F", width=2, shape="spline", smoothing=1.15),
                 marker=dict(size=8, color="#1F1F1F"),
-                text=[_fmt_mm_plot(v) for v in df_graph["Core Funding"]],
-                textposition="bottom center",
-                textfont=dict(size=16),
                 connectgaps=True,
                 yaxis="y2",
             )
         )
+
+        annotations_ev = []
+
+        def _add_label_annotations(serie, yref, font_color, bg_color, yshift):
+            for idx, valor in enumerate(serie):
+                texto = _fmt_mm_plot(valor)
+                if not texto:
+                    continue
+                annotations_ev.append(
+                    dict(
+                        x=ano_labels[idx],
+                        y=valor,
+                        xref="x",
+                        yref=yref,
+                        text=texto,
+                        showarrow=False,
+                        yshift=yshift,
+                        font=dict(size=14, color=font_color),
+                        bgcolor=bg_color,
+                        bordercolor="rgba(0,0,0,0.08)",
+                        borderwidth=1,
+                        borderpad=3,
+                    )
+                )
+
+        _add_label_annotations(df_graph["Lucro Líquido"], "y", "#4A4A4A", "rgba(255,255,255,0.88)", 14)
+        _add_label_annotations(df_graph["Patrimônio Líquido"], "y", "#102A83", "rgba(234,240,255,0.92)", 14)
+        _add_label_annotations(df_graph["Carteira Classificada"], "y2", "#FF6B35", "rgba(255,245,240,0.9)", 16)
+        _add_label_annotations(df_graph["Core Funding"], "y2", "#000000", "rgba(245,245,245,0.92)", -16)
+
         fig_ev.update_layout(
             barmode="group",
             height=480,
@@ -6436,6 +6476,7 @@ elif menu == "Evolução":
             xaxis=dict(type="category", categoryorder="array", categoryarray=ano_labels),
             legend=dict(orientation="v", y=0.5, x=0.01),
             margin=dict(t=30, b=20),
+            annotations=annotations_ev,
         )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
 
@@ -6448,7 +6489,7 @@ elif menu == "Evolução":
                 "ROE anualizado",
                 "Carteira Classificada / PL",
                 "Índice de Basileia (%)",
-                "Índice de Capital Principal (CET1) (%)",
+                "Índice de Capital Principal (CET1)",
             ]
         })
         for _, row in df_ano.iterrows():
@@ -6457,7 +6498,7 @@ elif menu == "Evolução":
                 row.get("ROE anualizado"),
                 row.get("Crédito 2.682 / PL"),
                 row.get("Índice de Basileia (%)"),
-                row.get("Índice de Capital Principal (CET1) (%)"),
+                row.get("Índice de Capital Principal (CET1)"),
             ]
 
         def _fmt_valor_br(v):
@@ -6472,14 +6513,16 @@ elif menu == "Evolução":
             if pd.isna(v):
                 return "-"
             try:
-                return f"{float(v) * 100:.2f}%".replace(".", ",")
+                v_num = float(v)
+                v_pct = v_num * 100 if abs(v_num) <= 1 else v_num
+                return f"{v_pct:.2f}%".replace(".", ",")
             except Exception:
                 return "-"
 
         def _fmt_evol(v, m):
             if pd.isna(v):
                 return "-"
-            if m in ("ROE anualizado", "Índice de Basileia (%)", "Índice de Capital Principal (CET1) (%)"):
+            if m in ("ROE anualizado", "Índice de Basileia (%)", "Índice de Capital Principal (CET1)"):
                 return _fmt_pct(v)
             if m == "Carteira Classificada / PL":
                 return f"{float(v):.1f}x".replace(".", ",")
@@ -6488,7 +6531,39 @@ elif menu == "Evolução":
         df_show = df_metric.copy()
         for c in df_show.columns[1:]:
             df_show[c] = [ _fmt_evol(v, m) for v,m in zip(df_metric[c], df_metric["Métrica"]) ]
-        st.dataframe(df_show.set_index("Métrica"), width='stretch')
+
+        periodos_cols = list(df_show.columns[1:])
+
+        def _render_evolucao_table_html(df_show_local: pd.DataFrame, periodos_local: list) -> str:
+            html = """
+            <style>
+            .evol-table-wrap { width: 100%; overflow-x: auto; margin-top: 10px; }
+            .evol-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+            .evol-table th, .evol-table td { border: 1px solid #ddd; padding: 8px 10px; white-space: nowrap; }
+            .evol-table th { background-color: #6a6a6a; color: white; text-align: center; font-weight: 600; }
+            .evol-table th:first-child { background-color: #4a4a4a; text-align: left; }
+            .evol-table td:first-child { text-align: left; font-weight: 500; }
+            .evol-table td { text-align: right; }
+            .evol-zebra { background-color: #f8f9fa; }
+            </style>
+            <div class="evol-table-wrap"><table class="evol-table"><thead><tr><th>Métrica</th>
+            """
+            for p in periodos_local:
+                html += f"<th>{_html_mod.escape(str(p))}</th>"
+            html += "</tr></thead><tbody>"
+
+            for idx, row in df_show_local.iterrows():
+                zebra = "evol-zebra" if idx % 2 == 0 else ""
+                html += f'<tr class="{zebra}"><td>{_html_mod.escape(str(row["Métrica"]))}</td>'
+                for p in periodos_local:
+                    html += f"<td>{_html_mod.escape(str(row[p]))}</td>"
+                html += "</tr>"
+
+            html += "</tbody></table></div>"
+            return html
+
+        tabela_html = _render_evolucao_table_html(df_show, periodos_cols)
+        st.markdown(tabela_html, unsafe_allow_html=True)
 
         col_export1, col_export2, col_export3 = st.columns(3)
         buffer_excel = io.BytesIO()
@@ -6520,6 +6595,15 @@ elif menu == "Evolução":
             )
 
         with col_export3:
+            st.download_button(
+                label="exportar html (visual)",
+                data=tabela_html,
+                file_name=f"evolucao_tabela_visual_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                mime="text/html",
+                key="evolucao_html",
+                use_container_width=True,
+            )
+
             png_bytes = _plotly_fig_to_png_bytes(fig_ev)
             if png_bytes:
                 st.download_button(
