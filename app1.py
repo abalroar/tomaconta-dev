@@ -6371,7 +6371,7 @@ elif menu == "Evolução":
         if cet1_fonte.isna().all():
             # fallback único: usar coluna já mesclada em dados_periodos, se disponível
             cet1_fonte = _numeric_series(df_ano, "Índice de Capital Principal")
-        df_ano["Índice de Capital Principal (CET1)"] = _normalizar_percentual_display(cet1_fonte)
+        df_ano["Índice de Capital Principal (CET1)"] = _normalizar_indice_para_decimal(cet1_fonte)
 
         graf_cols = {
             "Lucro Líquido": "Lucro Líquido Acumulado YTD",
@@ -6513,7 +6513,9 @@ elif menu == "Evolução":
             if pd.isna(v):
                 return "-"
             try:
-                return f"{float(v) * 100:.2f}%".replace(".", ",")
+                v_num = float(v)
+                v_pct = v_num * 100 if abs(v_num) <= 1 else v_num
+                return f"{v_pct:.2f}%".replace(".", ",")
             except Exception:
                 return "-"
 
@@ -6529,7 +6531,39 @@ elif menu == "Evolução":
         df_show = df_metric.copy()
         for c in df_show.columns[1:]:
             df_show[c] = [ _fmt_evol(v, m) for v,m in zip(df_metric[c], df_metric["Métrica"]) ]
-        st.dataframe(df_show.set_index("Métrica"), width='stretch')
+
+        periodos_cols = list(df_show.columns[1:])
+
+        def _render_evolucao_table_html(df_show_local: pd.DataFrame, periodos_local: list) -> str:
+            html = """
+            <style>
+            .evol-table-wrap { width: 100%; overflow-x: auto; margin-top: 10px; }
+            .evol-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+            .evol-table th, .evol-table td { border: 1px solid #ddd; padding: 8px 10px; white-space: nowrap; }
+            .evol-table th { background-color: #6a6a6a; color: white; text-align: center; font-weight: 600; }
+            .evol-table th:first-child { background-color: #4a4a4a; text-align: left; }
+            .evol-table td:first-child { text-align: left; font-weight: 500; }
+            .evol-table td { text-align: right; }
+            .evol-zebra { background-color: #f8f9fa; }
+            </style>
+            <div class="evol-table-wrap"><table class="evol-table"><thead><tr><th>Métrica</th>
+            """
+            for p in periodos_local:
+                html += f"<th>{_html_mod.escape(str(p))}</th>"
+            html += "</tr></thead><tbody>"
+
+            for idx, row in df_show_local.iterrows():
+                zebra = "evol-zebra" if idx % 2 == 0 else ""
+                html += f'<tr class="{zebra}"><td>{_html_mod.escape(str(row["Métrica"]))}</td>'
+                for p in periodos_local:
+                    html += f"<td>{_html_mod.escape(str(row[p]))}</td>"
+                html += "</tr>"
+
+            html += "</tbody></table></div>"
+            return html
+
+        tabela_html = _render_evolucao_table_html(df_show, periodos_cols)
+        st.markdown(tabela_html, unsafe_allow_html=True)
 
         col_export1, col_export2, col_export3 = st.columns(3)
         buffer_excel = io.BytesIO()
@@ -6561,6 +6595,15 @@ elif menu == "Evolução":
             )
 
         with col_export3:
+            st.download_button(
+                label="exportar html (visual)",
+                data=tabela_html,
+                file_name=f"evolucao_tabela_visual_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                mime="text/html",
+                key="evolucao_html",
+                use_container_width=True,
+            )
+
             png_bytes = _plotly_fig_to_png_bytes(fig_ev)
             if png_bytes:
                 st.download_button(
