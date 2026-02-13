@@ -6222,6 +6222,13 @@ elif menu == "Evolução":
         st.markdown("### Evolução")
         st.caption("Evolução: financia vendas da montadora e estoques das concessionárias.")
 
+        # Diagnóstico raiz: CET1 na Evolução vinha vazio quando `dados_capital`
+        # ainda não estava carregado nesta aba (navegação rápida / ordem de uso).
+        # Peers lê Capital explicitamente na própria aba; aqui garantimos o mesmo
+        # pré-requisito antes de buscar CET1 por período.
+        if not st.session_state.get("dados_capital"):
+            carregar_dados_capital()
+
         df_ev = get_analise_base_df()
         if df_ev is None or df_ev.empty:
             st.warning("dados indisponíveis para a aba Evolução.")
@@ -6348,8 +6355,13 @@ elif menu == "Evolução":
             )
             if df_cet1_periodo is None or df_cet1_periodo.empty:
                 continue
+            mask_inst = df_cet1_periodo["Instituição"] == instituicao
+            if not bool(mask_inst.any()):
+                inst_norm = _normalizar_label_peers(str(instituicao))
+                mask_inst = df_cet1_periodo["Instituição"].astype(str).apply(_normalizar_label_peers) == inst_norm
+
             serie_cet1_inst = pd.to_numeric(
-                df_cet1_periodo.loc[df_cet1_periodo["Instituição"] == instituicao, "Índice de CET1"],
+                df_cet1_periodo.loc[mask_inst, "Índice de CET1"],
                 errors="coerce",
             ).dropna()
             if not serie_cet1_inst.empty:
