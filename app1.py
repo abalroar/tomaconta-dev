@@ -69,6 +69,7 @@ import io
 import base64
 import subprocess
 import re
+import unicodedata
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -1497,6 +1498,369 @@ def _preparar_cores_para_cache(df_aliases):
     aliases = tuple(df_aliases['Alias Banco'].tolist())
     cores = tuple(df_aliases[coluna_cor].tolist())
     return content_hash, (instituicoes, aliases, cores)
+
+
+def _normalizar_texto_sem_acento(valor: str) -> str:
+    txt = unicodedata.normalize("NFKD", str(valor or ""))
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", txt).strip().upper()
+
+
+def obter_aliases_orgaos() -> pd.DataFrame:
+    """Reutiliza o mesmo cache de Aliases.xlsx já carregado nas demais abas."""
+    df_aliases = st.session_state.get("df_aliases")
+    if isinstance(df_aliases, pd.DataFrame) and not df_aliases.empty:
+        return df_aliases
+
+    # fallback defensivo: mantém o mesmo fluxo/padrão de cache das outras abas
+    alias_file_token = _aliases_file_token()
+    df_aliases = carregar_aliases(alias_file_token)
+    if isinstance(df_aliases, pd.DataFrame) and not df_aliases.empty:
+        return aplicar_alias_overrides(df_aliases)
+
+    return pd.DataFrame(columns=["Instituição", "Alias Banco", "Cor", "Código Cor"])
+
+
+def _parsear_conglomerados_csv(texto: str) -> list[dict]:
+    blocos = re.split(r"(?=Conglomerado)", texto, flags=re.IGNORECASE)
+    resultados = []
+    for bloco in blocos:
+        bloco_limpo = " ".join(bloco.split())
+        if not bloco_limpo:
+            continue
+
+        cod_match = re.search(r"CDIGO\D*(\d{4,8})", bloco_limpo, flags=re.IGNORECASE)
+        nome_match = re.search(r"NOME\s*(.*?)\s*TIPO", bloco_limpo, flags=re.IGNORECASE)
+        if not cod_match:
+            continue
+
+        codigo = int(cod_match.group(1))
+        nome = nome_match.group(1).strip(" -") if nome_match else "SEM NOME"
+        participacoes = []
+
+        for part in re.finditer(
+            r"CNPJ\D*([0-9]{8,14})\s*(.*?)\s*(LIDER|PARTICIPANTE)",
+            bloco_limpo,
+            flags=re.IGNORECASE,
+        ):
+            cnpj = part.group(1).zfill(14)
+            nome_inst = re.sub(r"\s+", " ", part.group(2)).strip(" -")
+            condicao = _normalizar_texto_sem_acento(part.group(3))
+            participacoes.append({"cnpj": cnpj, "nome": nome_inst, "condicao": condicao})
+
+        resultados.append({"codigo": codigo, "nome": nome, "participacoes": participacoes})
+    return resultados
+
+
+def _carregar_conglomerados_bloprudencial_fallback() -> list[dict]:
+    """Monta lista de conglomerados a partir dos CSVs BLOPRUDENCIAL locais."""
+    candidatos = sorted(APP_DIR.glob("*BLOPRUDENCIAL*.CSV"), reverse=True)
+    if not candidatos:
+        return []
+
+    conglomerados = {}
+    for caminho in candidatos:
+        try:
+            with caminho.open("r", encoding="latin1", errors="ignore") as fp:
+                for linha in fp:
+                    if not linha or linha.startswith("Balancete") or linha.startswith("Data de geracao") or linha.startswith("Fonte:"):
+                        continue
+                    if linha.startswith("#"):
+                        continue
+
+                    partes = [p.strip() for p in linha.split(";")]
+                    if len(partes) < 7:
+                        continue
+
+                    cnpj = re.sub(r"\D", "", partes[2]).zfill(14)
+                    nome_inst = partes[4].strip()
+                    cod_congl = partes[5].strip()
+                    nome_congl = partes[6].strip()
+                    if not cod_congl or not nome_congl:
+                        continue
+
+                    codigo = re.sub(r"\D", "", cod_congl)
+                    if not codigo:
+                        continue
+
+                    chave = codigo
+                    if chave not in conglomerados:
+                        conglomerados[chave] = {
+                            "codigo": int(codigo),
+                            "nome": nome_congl,
+                            "participacoes": [],
+                        }
+
+                    if cnpj and nome_inst:
+                        reg = {"cnpj": cnpj, "nome": nome_inst, "condicao": "PARTICIPANTE"}
+                        if reg not in conglomerados[chave]["participacoes"]:
+                            conglomerados[chave]["participacoes"].append(reg)
+        except Exception:
+            continue
+
+    resultado = sorted(conglomerados.values(), key=lambda x: x.get("codigo", 0))
+    for item in resultado:
+        if item.get("participacoes"):
+            item["participacoes"][0]["condicao"] = "LIDER"
+    return resultado
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def carregar_conglomerados() -> list[dict]:
+    """Carrega conglomerados com fallback progressivo (CSV local -> API -> BLOPRUDENCIAL)."""
+    arquivo_local = APP_DIR / "conglomerados.csv"
+    if arquivo_local.exists():
+        conteudo = arquivo_local.read_text(encoding="utf-8", errors="ignore")
+        dados_csv = _parsear_conglomerados_csv(conteudo)
+        if dados_csv:
+            return dados_csv
+
+    url = "https://www3.bcb.gov.br/informes/rest/conglomerados"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0",
+    }
+
+    for metodo in ("GET", "POST"):
+        try:
+            resposta = requests.request(metodo, url, timeout=40, headers=headers)
+            if resposta.status_code == 405:
+                continue
+            resposta.raise_for_status()
+            payload = json.loads(resposta.text)
+            dados_api = payload.get("content", []) if isinstance(payload, dict) else payload
+            if dados_api:
+                return dados_api
+        except Exception:
+            continue
+
+    fallback = _carregar_conglomerados_bloprudencial_fallback()
+    if fallback:
+        return fallback
+
+    raise RuntimeError("Não foi possível carregar conglomerados (CSV local, API ou BLOPRUDENCIAL).")
+
+
+CARGOS_CHAVE_DIRETORIA = (
+    "DIRETOR", "DIRETORA", "PRESIDENTE", "VICE", "ADMINISTRADOR", "CEO", "CFO", "COO"
+)
+CARGOS_CHAVE_CONSELHO = (
+    "CONSELHO", "CONSELHEIRO", "CONSELHEIRA"
+)
+PADROES_RUIDO_ORGAOS = (
+    "HTTP://", "HTTPS://", "WWW.", "CEP", "ENDERECO", "LOGRADOURO", "BAIRRO", "CIDADE", "PAIS", "UF"
+)
+
+
+def _classificar_orgao(cargo: str) -> str:
+    cargo_norm = _normalizar_texto_sem_acento(cargo)
+    if any(ch in cargo_norm for ch in CARGOS_CHAVE_CONSELHO):
+        return "Conselho"
+    if any(ch in cargo_norm for ch in CARGOS_CHAVE_DIRETORIA):
+        return "Diretoria"
+    return "Outros"
+
+
+def _texto_parece_ruido(texto: str) -> bool:
+    txt = _normalizar_texto_sem_acento(texto)
+    if not txt:
+        return True
+    if any(p in txt for p in PADROES_RUIDO_ORGAOS):
+        return True
+    if re.fullmatch(r"[0-9\-\s/]{6,}", txt):
+        return True
+    return False
+
+
+def _nome_pessoa_valido(nome: str) -> bool:
+    nome_norm = _normalizar_texto_sem_acento(nome)
+    if _texto_parece_ruido(nome_norm):
+        return False
+    tokens = [t for t in nome_norm.split() if t]
+    if len(tokens) < 2:
+        return False
+    if any(tok in {"S/A", "LTDA", "BRASIL", "AUTORIZADA", "ATIVIDADE"} for tok in tokens):
+        return False
+    return True
+
+
+def _extrair_nome_cargo_de_texto(texto: str) -> tuple[str, str, str]:
+    bruto = _normalizar_texto_sem_acento(texto)
+    bruto = re.sub(r"\d{11}", "", bruto).strip()
+    bruto = re.sub(r"^(DIRETORIA|CONSELHO)+", "", bruto).strip()
+
+    if not bruto or _texto_parece_ruido(bruto):
+        return "", "", ""
+
+    padrao = re.search(
+        r"(CONSELHEIR[OA](?: [A-Z ]+)?|MEMBRO DO CONSELHO(?: [A-Z ]+)?|DIRETOR(?:A)?(?: [A-Z ]+)?|PRESIDENTE|VICE[- ]PRESIDENTE|ADMINISTRADOR(?: [A-Z ]+)?)\s+([A-Z][A-Z ]{4,})$",
+        bruto,
+    )
+    if padrao:
+        cargo = padrao.group(1).strip()
+        nome = padrao.group(2).strip()
+        orgao = _classificar_orgao(cargo)
+        if _nome_pessoa_valido(nome):
+            return nome, cargo, orgao
+
+    if any(ch in bruto for ch in CARGOS_CHAVE_DIRETORIA + CARGOS_CHAVE_CONSELHO):
+        return "", "", ""
+
+    return "", "", ""
+
+
+def _extrair_orgaos_do_json(payload) -> pd.DataFrame:
+    linhas = []
+
+    def _registrar(nome: str, cargo: str):
+        nome_limpo = _normalizar_texto_sem_acento(re.sub(r"\d{11}", "", str(nome)).strip())
+        cargo_limpo = _normalizar_texto_sem_acento(str(cargo))
+        if not nome_limpo or not cargo_limpo:
+            return
+        if _texto_parece_ruido(nome_limpo):
+            return
+        if not _nome_pessoa_valido(nome_limpo):
+            return
+
+        orgao = _classificar_orgao(cargo_limpo)
+        if orgao not in {"Conselho", "Diretoria"}:
+            return
+
+        linhas.append({"Nome": nome_limpo, "Cargo": cargo_limpo, "Órgão": orgao})
+
+    def _visitar(no, chave_pai: str = ""):
+        if isinstance(no, dict):
+            normalizadas = {_normalizar_texto_sem_acento(k): v for k, v in no.items()}
+            nome = normalizadas.get("NOME") or normalizadas.get("NOMEPESSOA")
+            cargo = normalizadas.get("CARGO") or normalizadas.get("CARGONOME")
+            if nome and cargo:
+                _registrar(nome, cargo)
+
+            for k, valor in no.items():
+                chave = _normalizar_texto_sem_acento(k)
+                if isinstance(valor, (dict, list)):
+                    _visitar(valor, chave)
+                elif isinstance(valor, str):
+                    if "ORGAO" in chave or "ESTATUT" in chave or "CONSEL" in chave or "DIRETOR" in chave:
+                        nome2, cargo2, _ = _extrair_nome_cargo_de_texto(valor)
+                        if nome2 and cargo2:
+                            _registrar(nome2, cargo2)
+        elif isinstance(no, list):
+            for item in no:
+                _visitar(item, chave_pai)
+
+    _visitar(payload)
+    if not linhas:
+        return pd.DataFrame(columns=["Nome", "Cargo", "Órgão"])
+
+    df = pd.DataFrame(linhas)
+    df = df.drop_duplicates().sort_values(["Órgão", "Cargo", "Nome"]).reset_index(drop=True)
+    return df
+
+
+def _render_orgaos_tabela_html(df_orgaos: pd.DataFrame, cor_linha: str = "#F4F1EA") -> str:
+    if df_orgaos.empty:
+        return ""
+
+    linhas_html = []
+    for _, row in df_orgaos.iterrows():
+        nome = _html_mod.escape(str(row.get("Nome", "")))
+        cargo = _html_mod.escape(str(row.get("Cargo", "")))
+        linhas_html.append(f"<tr><td>{nome}</td><td>{cargo}</td></tr>")
+
+    return f"""
+    <style>
+    .orgaos-table-wrap {{
+        border: 1px solid #dcdcdc;
+        border-radius: 10px;
+        overflow: hidden;
+        margin-top: 0.4rem;
+    }}
+    .orgaos-table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'IBM Plex Sans', sans-serif;
+        font-size: 1.02rem;
+    }}
+    .orgaos-table thead th {{
+        background: #d6d8de;
+        color: #3a3f4b;
+        text-align: left;
+        padding: 12px 14px;
+        font-weight: 600;
+        border-bottom: 1px solid #c7c9d0;
+    }}
+    .orgaos-table tbody td {{
+        padding: 12px 14px;
+        border-bottom: 1px solid #ececec;
+    }}
+    .orgaos-table tbody tr:nth-child(odd) td {{
+        background: {cor_linha}22;
+    }}
+    .orgaos-table tbody tr:nth-child(even) td {{
+        background: #f8f9fc;
+    }}
+    </style>
+    <div class="orgaos-table-wrap">
+      <table class="orgaos-table">
+        <thead>
+          <tr><th>Nome</th><th>Cargo</th></tr>
+        </thead>
+        <tbody>
+          {''.join(linhas_html)}
+        </tbody>
+      </table>
+    </div>
+    """
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def consultar_orgaos_estatutarios(cnpj: str) -> pd.DataFrame:
+    url = f"https://www3.bcb.gov.br/informes/rest/pessoasJuridicas?cnpj={cnpj}"
+    resposta = requests.get(url, timeout=40)
+    resposta.raise_for_status()
+    payload = json.loads(resposta.text)
+    return _extrair_orgaos_do_json(payload)
+
+
+def gerar_excel_orgaos_estatutarios(
+    df_orgaos: pd.DataFrame,
+    titulo: str,
+    cor_fundo: str = "#F5F5F5",
+    fonte: str = "Banco Central do Brasil via API /informes/rest/pessoasJuridicas",
+    data_extracao: str = "",
+) -> bytes:
+    output = io.BytesIO()
+    data_txt = data_extracao or datetime.now().strftime("%d/%m/%Y")
+
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df_export = df_orgaos[["Nome", "Cargo"]].copy() if {"Nome", "Cargo"}.issubset(df_orgaos.columns) else df_orgaos.copy()
+        df_export.to_excel(writer, sheet_name="Órgãos", index=False, startrow=2)
+
+        workbook = writer.book
+        worksheet = writer.sheets["Órgãos"]
+
+        title_fmt = workbook.add_format({"bold": True, "font_size": 14, "font_color": "#2b2f3a"})
+        subtitle_fmt = workbook.add_format({"italic": True, "font_color": "#50555f"})
+        header_fmt = workbook.add_format({"bold": True, "bg_color": "#D6D8DE", "border": 1, "align": "left"})
+        row_a_fmt = workbook.add_format({"border": 1, "bg_color": cor_fundo})
+        row_b_fmt = workbook.add_format({"border": 1, "bg_color": "#F8F9FC"})
+
+        worksheet.merge_range(0, 0, 0, 1, titulo, title_fmt)
+        worksheet.merge_range(1, 0, 1, 1, f"Fonte: {fonte} | Data de extração: {data_txt}", subtitle_fmt)
+
+        worksheet.write(2, 0, "Nome", header_fmt)
+        worksheet.write(2, 1, "Cargo", header_fmt)
+        worksheet.set_column(0, 0, 46)
+        worksheet.set_column(1, 1, 34)
+
+        for i in range(len(df_export)):
+            fmt = row_a_fmt if i % 2 == 0 else row_b_fmt
+            worksheet.write(i + 3, 0, str(df_export.iloc[i]["Nome"]), fmt)
+            worksheet.write(i + 3, 1, str(df_export.iloc[i]["Cargo"]), fmt)
+
+    output.seek(0)
+    return output.getvalue()
 
 @st.cache_data(ttl=300, show_spinner=False)
 def verificar_caches_github() -> dict:
@@ -4538,6 +4902,7 @@ with col_header:
 MENU_PRINCIPAL = [
     "Rankings",
     "Peers (Tabela)",
+    "Órgãos Estatutários",
     "Evolução",
     "Scatter Plot",
     "DRE",
@@ -5710,6 +6075,147 @@ elif menu == "Peers (Tabela)":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Órgãos Estatutários":
+    st.markdown("### Órgãos Estatutários")
+
+    try:
+        dados_conglomerados = carregar_conglomerados()
+    except Exception as exc:
+        st.error(f"Erro ao carregar conglomerados: {exc}")
+        dados_conglomerados = []
+
+    if not dados_conglomerados:
+        st.warning("Nenhum conglomerado disponível para seleção.")
+    else:
+        opcoes_conglomerado = []
+        mapa_conglomerado = {}
+        for item in dados_conglomerados:
+            codigo = item.get("codigo")
+            nome = str(item.get("nome") or "SEM NOME").replace(" - PRUDENCIAL", "").strip()
+            if not codigo:
+                continue
+            chave = f"{int(codigo)} - {nome}"
+            if chave in mapa_conglomerado:
+                continue
+            mapa_conglomerado[chave] = item
+            opcoes_conglomerado.append(chave)
+
+        conglomerado_sel = st.selectbox(
+            "Selecione o conglomerado",
+            options=opcoes_conglomerado,
+            index=0,
+            key="orgaos_conglomerado",
+        )
+
+        selecionado = mapa_conglomerado.get(conglomerado_sel, {})
+        participacoes = selecionado.get("participacoes", []) or []
+        instituicoes = []
+        vistos = set()
+        for part in participacoes:
+            cnpj_raw = part.get("cnpj")
+            if cnpj_raw is None:
+                continue
+            cnpj = re.sub(r"\D", "", str(cnpj_raw)).zfill(14)
+            cond = _normalizar_texto_sem_acento(part.get("condicao", ""))
+            if cond not in {"LIDER", "PARTICIPANTE"}:
+                continue
+            nome_inst = str(part.get("nome") or "NOME NÃO INFORMADO").strip()
+            chave_inst = f"{cnpj} - {nome_inst}"
+            if chave_inst in vistos:
+                continue
+            vistos.add(chave_inst)
+            instituicoes.append({"label": chave_inst, "cnpj": cnpj, "nome": nome_inst})
+
+        if not instituicoes:
+            st.warning("Não há instituições LIDER/PARTICIPANTE para este conglomerado.")
+        else:
+            inst_sel = st.selectbox(
+                "Selecione a instituição",
+                options=[x["label"] for x in instituicoes],
+                index=0,
+                key="orgaos_instituicao",
+            )
+            inst_obj = next((x for x in instituicoes if x["label"] == inst_sel), None)
+
+            if inst_obj:
+                st.markdown(f"### Órgãos Estatutários - {inst_obj['nome']}")
+
+                aliases_df = obter_aliases_orgaos()
+                cor_linha = "#F4F1EA"
+                if not aliases_df.empty and "Instituição" in aliases_df.columns:
+                    col_cor = "Código Cor" if "Código Cor" in aliases_df.columns else ("Cor" if "Cor" in aliases_df.columns else None)
+                    if col_cor:
+                        match = aliases_df[
+                            aliases_df["Instituição"].astype(str).str.upper().str.strip() == inst_obj["nome"].upper().strip()
+                        ]
+                        if match.empty and "Alias Banco" in aliases_df.columns:
+                            match = aliases_df[
+                                aliases_df["Alias Banco"].astype(str).str.upper().str.strip() == inst_obj["nome"].upper().strip()
+                            ]
+                        if not match.empty:
+                            cor_tmp = normalizar_codigo_cor(match.iloc[0].get(col_cor))
+                            if cor_tmp:
+                                cor_linha = cor_tmp
+
+                st.markdown(
+                    f"""
+                    <style>
+                    div[data-testid="stDataFrame"] tbody tr:nth-child(odd) td {{
+                        background-color: {cor_linha}20;
+                    }}
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                try:
+                    df_orgaos = consultar_orgaos_estatutarios(inst_obj["cnpj"])
+                    if df_orgaos.empty:
+                        st.warning("A API não retornou membros de Conselho/Diretoria para esta instituição.")
+                    else:
+                        opcoes_orgao = ["Todos", "Conselho", "Diretoria"]
+                        orgao_sel = st.selectbox(
+                            "Selecione o órgão estatutário",
+                            options=opcoes_orgao,
+                            index=0,
+                            key="orgaos_tipo_orgao",
+                        )
+
+                        if orgao_sel == "Todos":
+                            df_filtrado = df_orgaos.copy()
+                        else:
+                            df_filtrado = df_orgaos[df_orgaos["Órgão"] == orgao_sel].copy()
+
+                        if df_filtrado.empty:
+                            st.info(f"Sem registros para '{orgao_sel}' nesta instituição.")
+                        else:
+                            st.markdown(
+                                _render_orgaos_tabela_html(df_filtrado[["Nome", "Cargo"]], cor_linha=cor_linha),
+                                unsafe_allow_html=True,
+                            )
+
+                            data_extracao = datetime.now().strftime('%d/%m/%Y')
+                            excel_bytes = gerar_excel_orgaos_estatutarios(
+                                df_filtrado,
+                                titulo=f"Órgãos Estatutários - {inst_obj['nome']} ({orgao_sel})",
+                                cor_fundo=cor_linha,
+                                data_extracao=data_extracao,
+                            )
+                            st.download_button(
+                                "Exportar para Excel",
+                                data=excel_bytes,
+                                file_name=f"orgaos_estatutarios_{orgao_sel.lower()}_{inst_obj['cnpj']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="download_orgaos_estatutarios",
+                            )
+                except Exception as exc:
+                    st.error(f"Erro ao consultar API de pessoas jurídicas: {exc}")
+
+                st.caption(
+                    f"Dados extraídos em {datetime.now().strftime('%d/%m/%Y às %H:%M')}. "
+                    "Fonte: Banco Central do Brasil via API /informes/rest/pessoasJuridicas"
+                )
 
 elif menu == "Evolução":
     if _garantir_dados_principais("Evolução"):
