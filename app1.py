@@ -4902,11 +4902,10 @@ with col_header:
 MENU_PRINCIPAL = [
     "Rankings",
     "Peers (Tabela)",
-    "Órgãos Estatutários",
+    "Conselho e Diretoria",
     "Evolução",
     "Scatter Plot",
     "DRE",
-    "DRE (Balancetes)",
     "Carteira 4.966",
     "Taxas de Juros por Produto",
     "Crie sua métrica!",
@@ -6076,8 +6075,8 @@ elif menu == "Peers (Tabela)":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Órgãos Estatutários":
-    st.markdown("### Órgãos Estatutários")
+elif menu == "Conselho e Diretoria":
+    st.markdown("### Conselho e Diretoria")
 
     try:
         dados_conglomerados = carregar_conglomerados()
@@ -6139,7 +6138,7 @@ elif menu == "Órgãos Estatutários":
             inst_obj = next((x for x in instituicoes if x["label"] == inst_sel), None)
 
             if inst_obj:
-                st.markdown(f"### Órgãos Estatutários - {inst_obj['nome']}")
+                st.markdown(f"### Conselho e Diretoria - {inst_obj['nome']}")
 
                 aliases_df = obter_aliases_orgaos()
                 cor_linha = "#F4F1EA"
@@ -6198,7 +6197,7 @@ elif menu == "Órgãos Estatutários":
                             data_extracao = datetime.now().strftime('%d/%m/%Y')
                             excel_bytes = gerar_excel_orgaos_estatutarios(
                                 df_filtrado,
-                                titulo=f"Órgãos Estatutários - {inst_obj['nome']} ({orgao_sel})",
+                                titulo=f"Conselho e Diretoria - {inst_obj['nome']} ({orgao_sel})",
                                 cor_fundo=cor_linha,
                                 data_extracao=data_extracao,
                             )
@@ -9129,309 +9128,6 @@ elif menu == "DRE":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dre_download_excel"
         )
-
-
-elif menu == "DRE (Balancetes)":
-    if not _garantir_dados_principais("DRE (Balancetes)"):
-        st.stop()
-    st.markdown("### DRE (Balancetes BC — Cadoc 4060)")
-    st.caption("Demonstrações Contábeis do Banco Central com dados cacheados para acesso rápido e análise de múltiplos bancos.")
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_balancetes_data():
-        """Carrega dados de balancetes do cache."""
-        manager = get_cache_manager()
-        resultado = manager.carregar("balancetes")
-        if resultado.sucesso and resultado.dados is not None:
-            return resultado.dados, None
-        return None, resultado.mensagem
-
-    def _balancetes_normalizar_nome(valor: str) -> str:
-        """Normaliza nome de instituição para mapeamento de CNPJ."""
-        if valor is None:
-            return ""
-        txt = str(valor).strip().upper()
-        txt = txt.replace("Á", "A").replace("À", "A").replace("Ã", "A").replace("Â", "A")
-        txt = txt.replace("É", "E").replace("Ê", "E")
-        txt = txt.replace("Í", "I")
-        txt = txt.replace("Ó", "O").replace("Õ", "O").replace("Ô", "O")
-        txt = txt.replace("Ú", "U").replace("Ç", "C")
-        txt = " ".join(txt.split())
-        return txt
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _balancetes_obter_cnpj_por_instituicao(instituicoes_ref: tuple, principal_token: str) -> dict:
-        """Obtém mapeamento de instituições para CNPJs."""
-        _ = principal_token
-        mapa = {}
-
-        # 1) Varrer caches já existentes
-        manager = get_cache_manager()
-        candidatos = ["principal", "dre", "ativo", "passivo", "carteira_pf", "carteira_pj", "carteira_instrumentos"]
-        for tipo in candidatos:
-            try:
-                resultado = manager.carregar(tipo)
-                if not resultado or not resultado.sucesso or resultado.dados is None or resultado.dados.empty:
-                    continue
-                df_tmp = resultado.dados
-                col_inst = next((c for c in ["Instituição", "Instituicao", "NomeInstituicao"] if c in df_tmp.columns), None)
-                col_cnpj = next((c for c in ["CNPJ", "Cnpj", "cnpj", "CNPJ_Instituicao"] if c in df_tmp.columns), None)
-                if col_inst and col_cnpj:
-                    df_map = df_tmp[[col_inst, col_cnpj]].dropna().drop_duplicates()
-                    for _, row in df_map.iterrows():
-                        nome = _balancetes_normalizar_nome(row[col_inst])
-                        cnpj = re.sub(r"\D", "", str(row[col_cnpj]))
-                        if nome and cnpj and nome not in mapa:
-                            mapa[nome] = cnpj
-            except Exception:
-                pass
-
-        # 2) Fallback estático
-        try:
-            fallback_path = Path(__file__).parent / "data" / "instituicoes_fallback.json"
-            if fallback_path.exists():
-                fb = json.loads(fallback_path.read_text(encoding="utf-8"))
-                if isinstance(fb, dict):
-                    for k, v in fb.items():
-                        if str(k).startswith("_"):
-                            continue
-                        cnpj = re.sub(r"\D", "", str(k))
-                        nome = _balancetes_normalizar_nome(v)
-                        if nome and len(cnpj) >= 8 and nome not in mapa:
-                            mapa[nome] = cnpj
-        except Exception:
-            pass
-
-        # 3) Mapear para nomes da UI
-        out = {}
-        for inst in instituicoes_ref:
-            n = _balancetes_normalizar_nome(inst)
-            out[inst] = mapa.get(n)
-        return out
-
-    # Carregar dados do cache
-    df_balancetes, erro_balancetes = load_balancetes_data()
-
-    # Obter lista de instituições
-    manager_bal = get_cache_manager()
-    resultado_principal_bal = manager_bal.carregar("principal")
-    df_principal_bal = resultado_principal_bal.dados if (resultado_principal_bal and resultado_principal_bal.sucesso) else None
-
-    if df_principal_bal is None or df_principal_bal.empty or "Instituição" not in df_principal_bal.columns:
-        st.warning("Não foi possível carregar lista de instituições a partir do cache principal.")
-    else:
-        _dict_aliases_bal = st.session_state.get('dict_aliases', {})
-        instituicoes_bal = ordenar_bancos_com_alias(
-            df_principal_bal["Instituição"].dropna().unique().tolist(), _dict_aliases_bal
-        )
-
-        # Mapear CNPJs
-        cnpj_map = _balancetes_obter_cnpj_por_instituicao(tuple(instituicoes_bal), _cache_version_token("principal"))
-        instituicoes_com_cnpj = [i for i in instituicoes_bal if cnpj_map.get(i)]
-
-        # Status do cache
-        col_status, col_acoes = st.columns([3, 1])
-
-        with col_status:
-            if df_balancetes is not None and not df_balancetes.empty:
-                n_registros = len(df_balancetes)
-                periodos_unicos = df_balancetes["Período"].nunique() if "Período" in df_balancetes.columns else 0
-                instituicoes_cache = df_balancetes["Instituição"].nunique() if "Instituição" in df_balancetes.columns else 0
-                st.success(f"✓ Cache carregado: {n_registros:,} registros | {periodos_unicos} períodos | {instituicoes_cache} instituições")
-            else:
-                st.info("Cache vazio ou não disponível. Use o botão 'Atualizar Cache' para extrair dados.")
-
-        with col_acoes:
-            if st.button("🔄 Atualizar Cache", help="Extrair novos dados do BCB e atualizar cache"):
-                st.session_state["balancetes_modo_atualizacao"] = True
-                st.rerun()
-
-        # Modo de atualização do cache
-        if st.session_state.get("balancetes_modo_atualizacao", False):
-            st.markdown("---")
-            st.markdown("### 🔄 Atualizar Cache de Balancetes")
-            st.caption("Esta operação irá extrair dados de balancetes de TODAS as instituições com CNPJ mapeado.")
-
-            col_config1, col_config2 = st.columns(2)
-
-            with col_config1:
-                ano_inicial = st.number_input(
-                    "Ano Inicial",
-                    min_value=2015,
-                    max_value=datetime.now().year,
-                    value=2023,
-                    key="bal_ano_inicial"
-                )
-
-            with col_config2:
-                ano_final = st.number_input(
-                    "Ano Final",
-                    min_value=2015,
-                    max_value=datetime.now().year,
-                    value=datetime.now().year,
-                    key="bal_ano_final"
-                )
-
-            documentos_selecionados = st.multiselect(
-                "Documentos COSIF",
-                options=["4060", "4066"],
-                default=["4060"],
-                help="4060 = Balancete Analítico | 4066 = Balancete Sintético",
-                key="bal_documentos"
-            )
-
-            st.caption(f"Serão extraídos dados de {len(instituicoes_com_cnpj)} instituições com CNPJ mapeado.")
-
-            col_btn1, col_btn2 = st.columns(2)
-
-            with col_btn1:
-                if st.button("▶️ Iniciar Extração", type="primary", disabled=not documentos_selecionados):
-                    # Gerar lista de períodos trimestrais
-                    periodos_extrair = []
-                    for ano in range(ano_inicial, ano_final + 1):
-                        for mes in ["03", "06", "09", "12"]:
-                            periodos_extrair.append(f"{ano}{mes}")
-
-                    # Criar mapeamento CNPJ
-                    instituicoes_cnpj = {nome: cnpj_map[nome] for nome in instituicoes_com_cnpj}
-
-                    # Exibir progresso
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-
-                    # Usar dicionário mutável para contadores (evita problemas com nonlocal em Streamlit)
-                    contadores = {"total": len(periodos_extrair), "processados": 0}
-
-                    def callback_progresso(periodo, df):
-                        contadores["processados"] += 1
-                        progresso = contadores["processados"] / contadores["total"]
-                        progress_bar.progress(progresso)
-                        status_text.text(f"Processando {periodo} ({contadores['processados']}/{contadores['total']})...")
-
-                    try:
-                        # Obter cache de balancetes
-                        cache_bal = manager_bal.obter("balancetes")
-
-                        # Extrair dados
-                        status_text.text("Iniciando extração...")
-                        resultado = cache_bal.extrair_todos_periodos(
-                            periodos=periodos_extrair,
-                            instituicoes_cnpj=instituicoes_cnpj,
-                            documentos=documentos_selecionados,
-                            callback_progresso=callback_progresso
-                        )
-
-                        if resultado.sucesso:
-                            progress_bar.progress(1.0)
-                            status_text.text("✓ Extração concluída!")
-                            st.success(f"✓ Cache atualizado com sucesso! {resultado.mensagem}")
-                            st.session_state["balancetes_modo_atualizacao"] = False
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error(f"Erro na extração: {resultado.mensagem}")
-
-                    except Exception as e:
-                        st.error(f"Erro durante extração: {str(e)}")
-
-            with col_btn2:
-                if st.button("✖️ Cancelar"):
-                    st.session_state["balancetes_modo_atualizacao"] = False
-                    st.rerun()
-
-            st.markdown("---")
-
-        # Visualização de dados
-        if df_balancetes is not None and not df_balancetes.empty:
-            st.markdown("### 📊 Visualização de Balancetes")
-
-            # Filtros
-            col_filtro1, col_filtro2, col_filtro3 = st.columns(3)
-
-            with col_filtro1:
-                # Filtro de instituições disponíveis no cache
-                instituicoes_disponiveis = sorted(df_balancetes["Instituição"].unique().tolist())
-                instituicoes_selecionadas = st.multiselect(
-                    "Instituições",
-                    options=instituicoes_disponiveis,
-                    default=instituicoes_disponiveis[:3] if len(instituicoes_disponiveis) >= 3 else instituicoes_disponiveis,
-                    key="bal_inst_filtro"
-                )
-
-            with col_filtro2:
-                # Filtro de períodos
-                periodos_disponiveis = sorted(df_balancetes["Período"].unique().tolist(), reverse=True)
-                if periodos_disponiveis:
-                    periodo_selecionado = st.selectbox(
-                        "Período",
-                        options=periodos_disponiveis,
-                        key="bal_periodo_filtro"
-                    )
-                else:
-                    periodo_selecionado = None
-                    st.warning("Nenhum período disponível")
-
-            with col_filtro3:
-                # Filtro de documento
-                documentos_disponiveis = sorted(df_balancetes["Documento"].unique().tolist())
-                documento_selecionado = st.selectbox(
-                    "Documento COSIF",
-                    options=documentos_disponiveis,
-                    key="bal_doc_filtro"
-                )
-
-            # Aplicar filtros
-            df_filtrado = df_balancetes.copy()
-
-            if instituicoes_selecionadas:
-                df_filtrado = df_filtrado[df_filtrado["Instituição"].isin(instituicoes_selecionadas)]
-
-            if periodo_selecionado:
-                df_filtrado = df_filtrado[df_filtrado["Período"] == periodo_selecionado]
-
-            if documento_selecionado:
-                df_filtrado = df_filtrado[df_filtrado["Documento"] == documento_selecionado]
-
-            # Exibir dados
-            if not df_filtrado.empty:
-                st.markdown(f"#### Dados Filtrados ({len(df_filtrado):,} registros)")
-                st.dataframe(df_filtrado, width='stretch', hide_index=True)
-
-                # Exportar
-                st.markdown("#### 📥 Exportar Dados")
-                buffer_excel_bal = BytesIO()
-                with pd.ExcelWriter(buffer_excel_bal, engine="xlsxwriter") as writer:
-                    # Aba 1: dados filtrados
-                    df_filtrado.to_excel(writer, index=False, sheet_name="balancetes")
-                    ws1 = writer.sheets["balancetes"]
-                    for i, col in enumerate(df_filtrado.columns):
-                        max_len = max(len(str(col)), df_filtrado[col].astype(str).map(len).max())
-                        ws1.set_column(i, i, min(max_len + 2, 50))
-
-                    # Aba 2: resumo
-                    resumo = pd.DataFrame({
-                        "Instituição": sorted(df_filtrado["Instituição"].unique()),
-                    })
-                    resumo["Registros"] = resumo["Instituição"].apply(
-                        lambda inst: int((df_filtrado["Instituição"] == inst).sum())
-                    )
-                    resumo.to_excel(writer, index=False, sheet_name="resumo")
-                    ws2 = writer.sheets["resumo"]
-                    ws2.set_column(0, 0, 40)
-                    ws2.set_column(1, 1, 12)
-
-                buffer_excel_bal.seek(0)
-                st.download_button(
-                    label="📥 Baixar Excel",
-                    data=buffer_excel_bal,
-                    file_name=f"Balancetes_{documento_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="bal_download_excel"
-                )
-            else:
-                st.warning("Nenhum dado disponível com os filtros selecionados.")
-        else:
-            st.info("💡 O cache está vazio. Use o botão 'Atualizar Cache' acima para extrair dados do BCB.")
 
 
 elif menu == "Carteira 4.966":
