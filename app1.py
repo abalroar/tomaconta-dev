@@ -7272,10 +7272,11 @@ elif menu == "Rankings":
                             )
 
                             n_bancos = len(df_selecionado_cap)
+                            # Paleta inspirada no Itaú BBA: laranja, preto/grafite e cinza.
                             cores_componentes = {
-                                'CET1 (%)': '#1f77b4',
-                                'AT1 (%)': '#ff7f0e',
-                                'T2 (%)': '#2ca02c'
+                                'CET1 (%)': '#ff5a00',  # laranja base
+                                'AT1 (%)': '#111111',   # preto/grafite
+                                'T2 (%)': '#b7b7b7'     # cinza intermediário
                             }
 
                             fig_basileia = go.Figure()
