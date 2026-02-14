@@ -34,6 +34,11 @@ def _perf_log(label: str) -> str:
 import utils  # garante pacote utils carregado
 importlib.invalidate_caches()
 
+from utils.cosif_pdf_mapping import (
+    get_cosif_description_map_cached,
+    normalize_cosif_code_digits,
+)
+
 from utils.ifdata_extractor import (
     gerar_periodos,
     processar_todos_periodos,
@@ -8179,6 +8184,14 @@ elif menu == "DRE":
             }
         return mapa
 
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_cosif_pdf_description_map():
+        """Carrega mapa COSIF (código numérico -> descrição) extraído do PDF oficial em cache."""
+        try:
+            return get_cosif_description_map_cached()
+        except Exception:
+            return {}
+
     def load_dre_mapping():
         return [
             {
@@ -8915,6 +8928,7 @@ elif menu == "DRE":
 
         formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries_ordenado}
         dre_cosif_map = load_dre_cosif_mapping()
+        cosif_desc_pdf_map = load_cosif_pdf_description_map()
         tooltip_por_label = {}
         entradas_com_label = []
         for entry in mapping_entries_ordenado:
@@ -8945,8 +8959,10 @@ elif menu == "DRE":
                     for item_depara in depara:
                         conta = str(item_depara.get("account") or "").strip()
                         desc = str(item_depara.get("description") or "").strip()
-                        if conta and desc:
-                            tooltip_parts.append(f"[{conta}] {desc}")
+                        desc_pdf = cosif_desc_pdf_map.get(normalize_cosif_code_digits(conta), "") if conta else ""
+                        desc_final = desc_pdf or desc
+                        if conta and desc_final:
+                            tooltip_parts.append(f"[{conta}] {desc_final}")
                         elif conta:
                             tooltip_parts.append(f"[{conta}]")
                 elif cosif_info.get("contas"):
@@ -9170,7 +9186,7 @@ elif menu == "DRE":
                 <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
                 <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
                 <strong>Cobertura COSIF atual:</strong> {len(dre_cosif_map)} linha(s) com mapeamento explícito no arquivo versionado.<br>
-                <strong>Etapa 0 (mapeamento COSIF):</strong> o tooltip ⓘ exibe o de-para IFData ↔ COSIF (conta e descrição) para as linhas já reconciliadas no arquivo <code>data/dre_cosif_mapping.json</code>.<br>
+                <strong>Etapa 0 (mapeamento COSIF):</strong> o tooltip ⓘ exibe o de-para IFData ↔ COSIF (conta e descrição) para as linhas já reconciliadas no arquivo <code>data/dre_cosif_mapping.json</code>, com enriquecimento de descrições pela base oficial <code>completo_contas.pdf</code> quando disponível em cache.<br>
                 <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
                 <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
             </div>
@@ -9239,10 +9255,12 @@ elif menu == "DRE":
                 for item_depara in depara:
                     conta = str(item_depara.get("account") or "").strip()
                     desc = str(item_depara.get("description") or "").strip()
+                    desc_pdf = cosif_desc_pdf_map.get(normalize_cosif_code_digits(conta), "") if conta else ""
+                    desc_final = desc_pdf or desc
                     if conta:
                         contas.append(f"[{conta}]")
-                    if desc:
-                        descricoes.append(desc)
+                    if desc_final:
+                        descricoes.append(desc_final)
 
                 ifdata_ref = str(cosif_info.get("ifdata_label") or "").strip()
                 if not ifdata_ref:

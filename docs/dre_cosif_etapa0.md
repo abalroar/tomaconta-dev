@@ -37,3 +37,12 @@ Implementar um piloto validado para a linha:
 
 ## Evolução aplicada
 - A etapa 0 passou a usar arquivo versionado com de-para por linha (`data/dre_cosif_mapping.json`), incluindo conta COSIF e descrição exibidas no tooltip (ⓘ).
+
+## Fonte estável (COSIF oficial)
+- Para reduzir fragilidade de scraping HTML/JS, o app passa a suportar enriquecimento por PDF oficial do COSIF:
+  - `https://www3.bcb.gov.br/aplica/cosif/manual/completo_contas.pdf`
+- Estratégia aplicada:
+  1. cache local do PDF em `data/cache/cosif/`;
+  2. parse de linhas `código + descrição` por regex;
+  3. persistência de dicionário local para reuso rápido;
+  4. uso desse dicionário para preencher/atualizar descrições COSIF no tooltip e na aba exportável `Glossário COSIF`.
