@@ -33,3 +33,7 @@ Implementar um piloto validado para a linha:
 ## Observações técnicas
 - A estrutura adicionada no código permite ampliar o mapeamento sem alterar o renderer.
 - O texto foi mantido em português e no mesmo padrão de linguagem da interface atual.
+
+
+## Evolução aplicada
+- A etapa 0 passou a usar arquivo versionado com de-para por linha (`data/dre_cosif_mapping.json`), incluindo conta COSIF e descrição exibidas no tooltip (ⓘ).

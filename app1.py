@@ -8155,9 +8155,24 @@ elif menu == "DRE":
                 str(c).strip() for c in item.get("cosif_accounts", [])
                 if str(c).strip()
             ]
+            depara = []
+            for linha in item.get("cosif_depara", []) if isinstance(item.get("cosif_depara", []), list) else []:
+                if not isinstance(linha, dict):
+                    continue
+                conta = str(linha.get("account") or "").strip()
+                desc = str(linha.get("description") or "").strip()
+                if not conta:
+                    continue
+                depara.append({"account": conta, "description": desc})
+
+            # Backward compatibility: se vier apenas cosif_accounts, converte para de-para sem descrição.
+            if not depara and contas:
+                depara = [{"account": c, "description": ""} for c in contas]
+
             mapa[label] = {
                 "ifdata_label": str(item.get("ifdata_label") or "").strip(),
                 "contas": contas,
+                "depara": depara,
                 "formula": str(item.get("cosif_formula") or "").strip(),
                 "status": str(item.get("status") or "").strip(),
                 "source": str(item.get("source") or "").strip(),
@@ -8922,16 +8937,28 @@ elif menu == "DRE":
             cosif_info = dre_cosif_map.get(entry["label"])
             if cosif_info:
                 if cosif_info.get("ifdata_label"):
-                    tooltip_parts.append(f"IFData (referência COSIF): {cosif_info['ifdata_label']}")
-                if cosif_info.get("contas"):
+                    tooltip_parts.append(f"IFData (reconciliação): {cosif_info['ifdata_label']}")
+
+                depara = cosif_info.get("depara") or []
+                if depara:
+                    tooltip_parts.append("De-para COSIF (conta → descrição):")
+                    for item_depara in depara:
+                        conta = str(item_depara.get("account") or "").strip()
+                        desc = str(item_depara.get("description") or "").strip()
+                        if conta and desc:
+                            tooltip_parts.append(f"[{conta}] {desc}")
+                        elif conta:
+                            tooltip_parts.append(f"[{conta}]")
+                elif cosif_info.get("contas"):
                     contas_txt = " + ".join([f"[{c}]" for c in cosif_info["contas"]])
                     tooltip_parts.append(f"Contas COSIF (IFData): {contas_txt}")
+
                 if cosif_info.get("formula"):
                     tooltip_parts.append(cosif_info["formula"])
                 if cosif_info.get("status"):
                     tooltip_parts.append(f"Status do mapeamento: {cosif_info['status']}")
 
-            tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
+            tooltip_por_label[entry["label"]] = "\n".join(tooltip_parts)
 
             label_exib = entry["label"]
             entrada_copy = entry.copy()
@@ -9143,7 +9170,7 @@ elif menu == "DRE":
                 <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
                 <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
                 <strong>Cobertura COSIF atual:</strong> {len(dre_cosif_map)} linha(s) com mapeamento explícito no arquivo versionado.<br>
-                <strong>Etapa 0 (mapeamento COSIF):</strong> mapeamentos carregados de <code>data/dre_cosif_mapping.json</code> e exibidos no tooltip ⓘ por linha.<br>
+                <strong>Etapa 0 (mapeamento COSIF):</strong> o tooltip ⓘ exibe o de-para IFData ↔ COSIF (conta e descrição) para as linhas já reconciliadas no arquivo <code>data/dre_cosif_mapping.json</code>.<br>
                 <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
                 <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
             </div>
