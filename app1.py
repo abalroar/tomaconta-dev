@@ -4902,7 +4902,7 @@ with col_header:
 MENU_PRINCIPAL = [
     "Rankings",
     "Peers (Tabela)",
-    "Órgãos Estatutários",
+    "Conselho e Diretoria",
     "Evolução",
     "Scatter Plot",
     "DRE",
@@ -6076,8 +6076,8 @@ elif menu == "Peers (Tabela)":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Órgãos Estatutários":
-    st.markdown("### Órgãos Estatutários")
+elif menu == "Conselho e Diretoria":
+    st.markdown("### Conselho e Diretoria")
 
     try:
         dados_conglomerados = carregar_conglomerados()
@@ -6139,7 +6139,7 @@ elif menu == "Órgãos Estatutários":
             inst_obj = next((x for x in instituicoes if x["label"] == inst_sel), None)
 
             if inst_obj:
-                st.markdown(f"### Órgãos Estatutários - {inst_obj['nome']}")
+                st.markdown(f"### Conselho e Diretoria - {inst_obj['nome']}")
 
                 aliases_df = obter_aliases_orgaos()
                 cor_linha = "#F4F1EA"
@@ -6198,7 +6198,7 @@ elif menu == "Órgãos Estatutários":
                             data_extracao = datetime.now().strftime('%d/%m/%Y')
                             excel_bytes = gerar_excel_orgaos_estatutarios(
                                 df_filtrado,
-                                titulo=f"Órgãos Estatutários - {inst_obj['nome']} ({orgao_sel})",
+                                titulo=f"Conselho e Diretoria - {inst_obj['nome']} ({orgao_sel})",
                                 cor_fundo=cor_linha,
                                 data_extracao=data_extracao,
                             )
