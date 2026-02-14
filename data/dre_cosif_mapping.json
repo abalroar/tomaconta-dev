@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "updated_at": "2026-02-14",
+  "scope": "Aba DRE (Relatório 4)",
+  "mappings": [
+    {
+      "label": "Res. Derivativos",
+      "ifdata_label": "Resultado com Derivativos (i)",
+      "cosif_accounts": [
+        "7158000003",
+        "8155000005"
+      ],
+      "cosif_formula": "Somatório das contas COSIF [7158000003] + [8155000005]",
+      "status": "validado_exemplo",
+      "source": "IFData + balancete COSIF 4060"
+    }
+  ]
+}
