@@ -1641,24 +1641,9 @@ def carregar_conglomerados() -> list[dict]:
     raise RuntimeError("Não foi possível carregar conglomerados (CSV local, API ou BLOPRUDENCIAL).")
 
 
-CARGOS_CHAVE_DIRETORIA = (
-    "DIRETOR", "DIRETORA", "PRESIDENTE", "VICE", "ADMINISTRADOR", "CEO", "CFO", "COO"
-)
-CARGOS_CHAVE_CONSELHO = (
-    "CONSELHO", "CONSELHEIRO", "CONSELHEIRA"
-)
 PADROES_RUIDO_ORGAOS = (
     "HTTP://", "HTTPS://", "WWW.", "CEP", "ENDERECO", "LOGRADOURO", "BAIRRO", "CIDADE", "PAIS", "UF"
 )
-
-
-def _classificar_orgao(cargo: str) -> str:
-    cargo_norm = _normalizar_texto_sem_acento(cargo)
-    if any(ch in cargo_norm for ch in CARGOS_CHAVE_CONSELHO):
-        return "Conselho"
-    if any(ch in cargo_norm for ch in CARGOS_CHAVE_DIRETORIA):
-        return "Diretoria"
-    return "Outros"
 
 
 def _texto_parece_ruido(texto: str) -> bool:
@@ -1684,78 +1669,51 @@ def _nome_pessoa_valido(nome: str) -> bool:
     return True
 
 
-def _extrair_nome_cargo_de_texto(texto: str) -> tuple[str, str, str]:
-    bruto = _normalizar_texto_sem_acento(texto)
-    bruto = re.sub(r"\d{11}", "", bruto).strip()
-    bruto = re.sub(r"^(DIRETORIA|CONSELHO)+", "", bruto).strip()
-
-    if not bruto or _texto_parece_ruido(bruto):
-        return "", "", ""
-
-    padrao = re.search(
-        r"(CONSELHEIR[OA](?: [A-Z ]+)?|MEMBRO DO CONSELHO(?: [A-Z ]+)?|DIRETOR(?:A)?(?: [A-Z ]+)?|PRESIDENTE|VICE[- ]PRESIDENTE|ADMINISTRADOR(?: [A-Z ]+)?)\s+([A-Z][A-Z ]{4,})$",
-        bruto,
-    )
-    if padrao:
-        cargo = padrao.group(1).strip()
-        nome = padrao.group(2).strip()
-        orgao = _classificar_orgao(cargo)
-        if _nome_pessoa_valido(nome):
-            return nome, cargo, orgao
-
-    if any(ch in bruto for ch in CARGOS_CHAVE_DIRETORIA + CARGOS_CHAVE_CONSELHO):
-        return "", "", ""
-
-    return "", "", ""
-
-
 def _extrair_orgaos_do_json(payload) -> pd.DataFrame:
+    """Extrai órgãos exatamente da estrutura primária retornada pelo BCB (payload['orgaos'])."""
+    colunas = ["OrgaoId", "OrgaoNome", "Nome", "Cargo"]
+    if not isinstance(payload, dict):
+        return pd.DataFrame(columns=colunas)
+
+    orgaos = payload.get("orgaos")
+    if not isinstance(orgaos, list):
+        return pd.DataFrame(columns=colunas)
+
     linhas = []
+    for orgao in orgaos:
+        if not isinstance(orgao, dict):
+            continue
 
-    def _registrar(nome: str, cargo: str):
-        nome_limpo = _normalizar_texto_sem_acento(re.sub(r"\d{11}", "", str(nome)).strip())
-        cargo_limpo = _normalizar_texto_sem_acento(str(cargo))
-        if not nome_limpo or not cargo_limpo:
-            return
-        if _texto_parece_ruido(nome_limpo):
-            return
-        if not _nome_pessoa_valido(nome_limpo):
-            return
+        orgao_id = orgao.get("id")
+        orgao_nome = str(orgao.get("nome") or "").strip()
+        administradores = orgao.get("administradores") or []
+        if not isinstance(administradores, list):
+            continue
 
-        orgao = _classificar_orgao(cargo_limpo)
-        if orgao not in {"Conselho", "Diretoria"}:
-            return
+        for adm in administradores:
+            if not isinstance(adm, dict):
+                continue
+            nome = _normalizar_texto_sem_acento(re.sub(r"\d{11}", "", str(adm.get("nome") or "")).strip())
+            cargo = _normalizar_texto_sem_acento(str(adm.get("cargo") or "").strip())
+            if not nome or not cargo:
+                continue
+            if _texto_parece_ruido(nome) or not _nome_pessoa_valido(nome):
+                continue
 
-        linhas.append({"Nome": nome_limpo, "Cargo": cargo_limpo, "Órgão": orgao})
+            linhas.append(
+                {
+                    "OrgaoId": orgao_id,
+                    "OrgaoNome": orgao_nome,
+                    "Nome": nome,
+                    "Cargo": cargo,
+                }
+            )
 
-    def _visitar(no, chave_pai: str = ""):
-        if isinstance(no, dict):
-            normalizadas = {_normalizar_texto_sem_acento(k): v for k, v in no.items()}
-            nome = normalizadas.get("NOME") or normalizadas.get("NOMEPESSOA")
-            cargo = normalizadas.get("CARGO") or normalizadas.get("CARGONOME")
-            if nome and cargo:
-                _registrar(nome, cargo)
-
-            for k, valor in no.items():
-                chave = _normalizar_texto_sem_acento(k)
-                if isinstance(valor, (dict, list)):
-                    _visitar(valor, chave)
-                elif isinstance(valor, str):
-                    if "ORGAO" in chave or "ESTATUT" in chave or "CONSEL" in chave or "DIRETOR" in chave:
-                        nome2, cargo2, _ = _extrair_nome_cargo_de_texto(valor)
-                        if nome2 and cargo2:
-                            _registrar(nome2, cargo2)
-        elif isinstance(no, list):
-            for item in no:
-                _visitar(item, chave_pai)
-
-    _visitar(payload)
     if not linhas:
-        return pd.DataFrame(columns=["Nome", "Cargo", "Órgão"])
+        return pd.DataFrame(columns=colunas)
 
     df = pd.DataFrame(linhas)
-    df = df.drop_duplicates().sort_values(["Órgão", "Cargo", "Nome"]).reset_index(drop=True)
-    return df
+    return df.drop_duplicates().sort_values(["OrgaoNome", "Cargo", "Nome"]).reset_index(drop=True)
 
 
 def _render_orgaos_tabela_html(df_orgaos: pd.DataFrame, cor_linha: str = "#F4F1EA") -> str:
@@ -1815,8 +1773,10 @@ def _render_orgaos_tabela_html(df_orgaos: pd.DataFrame, cor_linha: str = "#F4F1E
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def consultar_orgaos_estatutarios(cnpj: str) -> pd.DataFrame:
+def consultar_orgaos_estatutarios(cnpj: str, id_bacen: str = "") -> pd.DataFrame:
     url = f"https://www3.bcb.gov.br/informes/rest/pessoasJuridicas?cnpj={cnpj}"
+    if id_bacen:
+        url = f"{url}&idBacen={id_bacen}"
     resposta = requests.get(url, timeout=40)
     resposta.raise_for_status()
     payload = json.loads(resposta.text)
@@ -2699,6 +2659,54 @@ def _recalcular_roe_anualizado_df(df: pd.DataFrame) -> pd.DataFrame:
     out["ROE Ac. YTD an. (%)"] = roe
 
     return out.drop(columns=["_tri_tmp", "_tri_idx_tmp", "_ano_tmp", "_mes_tmp"], errors="ignore")
+
+
+def _calcular_roe_alinhado_peers_para_instituicao(df_base: pd.DataFrame, instituicao: str) -> pd.DataFrame:
+    """Retorna ROE (critério Peers) por Ano/Tri para uma instituição."""
+    if df_base is None or df_base.empty:
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    cols_obrig = {"Instituição", "Período", "Lucro Líquido Acumulado YTD", "Patrimônio Líquido"}
+    if not cols_obrig.issubset(df_base.columns):
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    recorte = df_base[df_base["Instituição"] == instituicao].copy()
+    if recorte.empty:
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    periodo_split = recorte["Período"].astype(str).str.split("/", expand=True)
+    recorte["Ano"] = pd.to_numeric(periodo_split[1], errors="coerce")
+    recorte["Tri"] = pd.to_numeric(periodo_split[0], errors="coerce").map(_parte_periodo_para_trimestre_idx)
+    recorte = recorte.dropna(subset=["Ano", "Tri"]).copy()
+    if recorte.empty:
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    recorte["Ano"] = recorte["Ano"].astype(int)
+    recorte["Tri"] = recorte["Tri"].astype(int)
+
+    idx_ult = recorte.groupby(["Ano", "Tri"], observed=False).tail(1).index
+    recorte = recorte.loc[idx_ult].sort_values(["Ano", "Tri"]).copy()
+
+    ll = pd.to_numeric(recorte["Lucro Líquido Acumulado YTD"], errors="coerce")
+    pl_t = pd.to_numeric(recorte["Patrimônio Líquido"], errors="coerce")
+
+    pl_dez_prev = (
+        recorte.assign(_pl=pl_t)
+        .loc[recorte["Tri"] == 4]
+        .groupby("Ano", observed=False)["_pl"]
+        .last()
+        .shift(1)
+        .rename("_pl_dez_prev")
+    )
+    recorte = recorte.merge(pl_dez_prev, left_on="Ano", right_index=True, how="left")
+
+    mes = pd.to_numeric(recorte["Tri"], errors="coerce").map({1: 3, 2: 6, 3: 9, 4: 12})
+    recorte["ROE Ac. Anualizado (%)"] = pd.to_numeric(
+        _calcular_roe_anualizado(ll, pl_t, recorte["_pl_dez_prev"], mes),
+        errors="coerce",
+    )
+
+    return recorte[["Ano", "Tri", "ROE Ac. Anualizado (%)"]]
 
 
 def _build_peers_lookup(df: Optional[pd.DataFrame]) -> dict:
@@ -4083,6 +4091,83 @@ def _gerar_excel_peers_dados_puros(
                     col_idx += 1
             row_idx += 1
 
+    workbook.close()
+    output.seek(0)
+    return output
+
+
+def _gerar_excel_evolucao_tabela_visual(
+    df_show: pd.DataFrame,
+    periodos_cols: list[str],
+    instituicao: str,
+    periodo_inicio: str,
+    periodo_final: str,
+) -> BytesIO:
+    """Exporta a tabela de Evolução em layout visual (similar ao Excel visual de Peers)."""
+    output = BytesIO()
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    worksheet = workbook.add_worksheet("evolucao_visual")
+
+    n_cols = 1 + len(periodos_cols)
+    border = {"border": 1, "border_color": "#dddddd"}
+
+    title_fmt = workbook.add_format({
+        "bold": True,
+        "align": "left",
+        "valign": "vcenter",
+        "bg_color": "#111111",
+        "font_color": "white",
+        "font_size": 11,
+        **border,
+    })
+    header_first_fmt = workbook.add_format({
+        "bold": True,
+        "align": "left",
+        "valign": "vcenter",
+        "bg_color": "#111111",
+        "font_color": "white",
+        **border,
+    })
+    header_period_fmt = workbook.add_format({
+        "bold": True,
+        "align": "center",
+        "valign": "vcenter",
+        "bg_color": "#6E6E6E",
+        "font_color": "white",
+        **border,
+    })
+    row_even_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+    row_odd_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#ffffff", **border})
+    row_even_val = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+    row_odd_val = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", **border})
+
+    worksheet.set_column(0, 0, 40)
+    worksheet.set_column(1, max(1, n_cols - 1), 16)
+
+    row_idx = 0
+    titulo = f"Evolução - {instituicao} | {periodo_para_exibicao(periodo_inicio)} a {periodo_para_exibicao(periodo_final)}"
+    worksheet.merge_range(row_idx, 0, row_idx, n_cols - 1, titulo, title_fmt)
+    row_idx += 1
+
+    worksheet.write(row_idx, 0, "Métrica", header_first_fmt)
+    col_idx = 1
+    for periodo in periodos_cols:
+        worksheet.write(row_idx, col_idx, periodo, header_period_fmt)
+        col_idx += 1
+    row_idx += 1
+
+    for i, (_, row) in enumerate(df_show.iterrows()):
+        is_even = i % 2 == 0
+        fmt_label = row_even_label if is_even else row_odd_label
+        fmt_val = row_even_val if is_even else row_odd_val
+        worksheet.write(row_idx, 0, str(row.get("Métrica", "")), fmt_label)
+        col_idx = 1
+        for periodo in periodos_cols:
+            worksheet.write(row_idx, col_idx, str(row.get(periodo, "-")), fmt_val)
+            col_idx += 1
+        row_idx += 1
+
+    worksheet.freeze_panes(2, 1)
     workbook.close()
     output.seek(0)
     return output
@@ -6175,7 +6260,7 @@ elif menu == "Conselho e Diretoria":
             if chave_inst in vistos:
                 continue
             vistos.add(chave_inst)
-            instituicoes.append({"label": chave_inst, "cnpj": cnpj, "nome": nome_inst})
+            instituicoes.append({"label": chave_inst, "cnpj": cnpj, "nome": nome_inst, "id_bacen": str(part.get("idBacen") or "").strip()})
 
         if not instituicoes:
             st.warning("Não há instituições LIDER/PARTICIPANTE para este conglomerado.")
@@ -6220,11 +6305,21 @@ elif menu == "Conselho e Diretoria":
                 )
 
                 try:
-                    df_orgaos = consultar_orgaos_estatutarios(inst_obj["cnpj"])
+                    df_orgaos = consultar_orgaos_estatutarios(inst_obj["cnpj"], inst_obj.get("id_bacen", ""))
                     if df_orgaos.empty:
-                        st.warning("A API não retornou membros de Conselho/Diretoria para esta instituição.")
+                        st.warning("A API não retornou membros de órgãos estatutários para esta instituição.")
                     else:
-                        opcoes_orgao = ["Todos", "Conselho", "Diretoria"]
+                        orgaos_disponiveis = (
+                            df_orgaos[["OrgaoId", "OrgaoNome"]]
+                            .drop_duplicates()
+                            .sort_values(["OrgaoNome", "OrgaoId"], na_position="last")
+                            .reset_index(drop=True)
+                        )
+                        mapa_opcoes = {
+                            f"{str(row['OrgaoId']) if pd.notna(row['OrgaoId']) else 'sem-id'} - {row['OrgaoNome']}": row
+                            for _, row in orgaos_disponiveis.iterrows()
+                        }
+                        opcoes_orgao = ["Todos"] + list(mapa_opcoes.keys())
                         orgao_sel = st.selectbox(
                             "Selecione o órgão estatutário",
                             options=opcoes_orgao,
@@ -6235,11 +6330,24 @@ elif menu == "Conselho e Diretoria":
                         if orgao_sel == "Todos":
                             df_filtrado = df_orgaos.copy()
                         else:
-                            df_filtrado = df_orgaos[df_orgaos["Órgão"] == orgao_sel].copy()
+                            orgao_ref = mapa_opcoes.get(orgao_sel)
+                            if orgao_ref is None:
+                                df_filtrado = df_orgaos.copy()
+                            else:
+                                mask_nome = df_orgaos["OrgaoNome"] == orgao_ref["OrgaoNome"]
+                                if pd.notna(orgao_ref["OrgaoId"]):
+                                    mask = mask_nome & (df_orgaos["OrgaoId"] == orgao_ref["OrgaoId"])
+                                else:
+                                    mask = mask_nome
+                                df_filtrado = df_orgaos[mask].copy()
 
                         if df_filtrado.empty:
                             st.info(f"Sem registros para '{orgao_sel}' nesta instituição.")
                         else:
+                            st.caption(
+                                f"Órgãos retornados pela fonte primária: {len(orgaos_disponiveis)} | "
+                                + ", ".join(op for op in mapa_opcoes.keys())
+                            )
                             st.markdown(
                                 _render_orgaos_tabela_html(df_filtrado[["Nome", "Cargo"]], cor_linha=cor_linha),
                                 unsafe_allow_html=True,
@@ -6248,14 +6356,14 @@ elif menu == "Conselho e Diretoria":
                             data_extracao = datetime.now().strftime('%d/%m/%Y')
                             excel_bytes = gerar_excel_orgaos_estatutarios(
                                 df_filtrado,
-                                titulo=f"Conselho e Diretoria - {inst_obj['nome']} ({orgao_sel})",
+                                titulo=f"Órgãos Estatutários - {inst_obj['nome']} ({orgao_sel})",
                                 cor_fundo=cor_linha,
                                 data_extracao=data_extracao,
                             )
                             st.download_button(
                                 "Exportar para Excel",
                                 data=excel_bytes,
-                                file_name=f"orgaos_estatutarios_{orgao_sel.lower()}_{inst_obj['cnpj']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                file_name=f"orgaos_estatutarios_{inst_obj['cnpj']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key="download_orgaos_estatutarios",
                             )
@@ -6360,15 +6468,6 @@ elif menu == "Evolução":
         map_mes = {1: "mar", 2: "jun", 3: "set", 4: "dez"}
         df_ano["LabelPeriodo"] = df_ano.apply(lambda r: f"{map_mes.get(int(r['Tri']), str(r['Tri']))}-{str(int(r['Ano']))[-2:]}", axis=1)
 
-        def _calc_roe_anualizado(row):
-            ll = pd.to_numeric(row.get("Lucro Líquido Acumulado YTD"), errors="coerce")
-            pl = pd.to_numeric(row.get("Patrimônio Líquido"), errors="coerce")
-            tri = pd.to_numeric(row.get("Tri"), errors="coerce")
-            if pd.isna(ll) or pd.isna(pl) or pd.isna(tri) or float(pl) == 0:
-                return np.nan
-            meses = {1: 3, 2: 6, 3: 9, 4: 12}.get(int(tri), 12)
-            return float(ll) * (12 / meses) / float(pl)
-
         def _numeric_series(dataframe, coluna):
             if coluna in dataframe.columns:
                 return pd.to_numeric(dataframe[coluna], errors="coerce")
@@ -6383,7 +6482,22 @@ elif menu == "Evolução":
             .combine_first(carteira_classificada_2025)
             .combine_first(carteira_credito_base)
         )
-        df_ano["ROE anualizado"] = df_ano.apply(_calc_roe_anualizado, axis=1)
+        # ROE na Evolução: cálculo único e definitivo pelo mesmo critério da Peers.
+        roe_peers_inst = _calcular_roe_alinhado_peers_para_instituicao(df_ev, instituicao)
+        if not roe_peers_inst.empty:
+            df_ano = df_ano.merge(
+                roe_peers_inst.rename(columns={"ROE Ac. Anualizado (%)": "_roe_peers"}),
+                on=["Ano", "Tri"],
+                how="left",
+            )
+            df_ano["ROE anualizado"] = pd.to_numeric(df_ano["_roe_peers"], errors="coerce")
+            df_ano = df_ano.drop(columns=["_roe_peers"], errors="ignore")
+        else:
+            # Fallback operacional: usa coluna já disponibilizada no dataset, se houver.
+            col_roe = "ROE Ac. Anualizado (%)" if "ROE Ac. Anualizado (%)" in df_ano.columns else (
+                "ROE Ac. YTD an. (%)" if "ROE Ac. YTD an. (%)" in df_ano.columns else None
+            )
+            df_ano["ROE anualizado"] = pd.to_numeric(df_ano[col_roe], errors="coerce") if col_roe else np.nan
         df_ano["Crédito 2.682 / PL"] = np.where(
             pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce") != 0,
             pd.to_numeric(df_ano["Carteira Classificada"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
@@ -6618,6 +6732,14 @@ elif menu == "Evolução":
         st.markdown(tabela_html, unsafe_allow_html=True)
 
         col_export1, col_export2, col_export3 = st.columns(3)
+        buffer_excel_visual = _gerar_excel_evolucao_tabela_visual(
+            df_show=df_show,
+            periodos_cols=periodos_cols,
+            instituicao=instituicao,
+            periodo_inicio=periodo_inicio,
+            periodo_final=periodo_final,
+        )
+
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
             df_graph.to_excel(writer, index=False, sheet_name='grafico_dados')
@@ -6627,7 +6749,17 @@ elif menu == "Evolução":
 
         with col_export1:
             st.download_button(
-                label="exportar excel",
+                label="excel visual (tabela)",
+                data=buffer_excel_visual.getvalue(),
+                file_name=f"evolucao_tabela_visual_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="evolucao_excel_visual",
+                use_container_width=True,
+            )
+
+        with col_export2:
+            st.download_button(
+                label="excel (dados brutos)",
                 data=buffer_excel.getvalue(),
                 file_name=f"evolucao_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6635,27 +6767,7 @@ elif menu == "Evolução":
                 use_container_width=True,
             )
 
-        with col_export2:
-            csv_metric = df_metric.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="exportar csv",
-                data=csv_metric,
-                file_name=f"evolucao_tabela_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key="evolucao_csv",
-                use_container_width=True,
-            )
-
         with col_export3:
-            st.download_button(
-                label="exportar html (visual)",
-                data=tabela_html,
-                file_name=f"evolucao_tabela_visual_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-                mime="text/html",
-                key="evolucao_html",
-                use_container_width=True,
-            )
-
             png_bytes = _plotly_fig_to_png_bytes(fig_ev)
             if png_bytes:
                 st.download_button(
