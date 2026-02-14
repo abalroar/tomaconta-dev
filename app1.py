@@ -1783,8 +1783,8 @@ def _render_orgaos_tabela_html(df_orgaos: pd.DataFrame, cor_linha: str = "#F4F1E
         font-size: 1.02rem;
     }}
     .orgaos-table thead th {{
-        background: #d6d8de;
-        color: #3a3f4b;
+        background: #111111;
+        color: #ffffff;
         text-align: left;
         padding: 12px 14px;
         font-weight: 600;
@@ -3676,15 +3676,15 @@ def _render_peers_table_html(
         padding-right: 8px;
     }
     .peers-table thead tr:first-child th {
-        background-color: #4a4a4a;
+        background-color: #111111;
         color: white;
     }
     .peers-table thead tr:nth-child(2) th {
-        background-color: #6a6a6a;
+        background-color: #6E6E6E;
         color: white;
     }
     .peer-section {
-        background-color: #4a90e2;
+        background-color: #ff5a00;
         color: white;
         font-weight: 600;
         text-align: left !important;
@@ -3850,12 +3850,12 @@ def _gerar_imagem_peers_tabela(
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor("#dddddd")
         if row_idx == 0:
-            cell.set_facecolor("#4a4a4a")
+            cell.set_facecolor("#111111")
             cell.get_text().set_color("white")
             cell.get_text().set_fontweight("bold")
             cell.get_text().set_ha("center")
         elif row_idx == 1:
-            cell.set_facecolor("#6a6a6a")
+            cell.set_facecolor("#6E6E6E")
             cell.get_text().set_color("white")
             cell.get_text().set_fontweight("bold")
             cell.get_text().set_ha("center")
@@ -3900,10 +3900,10 @@ def _gerar_excel_peers_tabela(
     n_cols = 1 + len(bancos) * len(periodos)
     border = {"border": 1, "border_color": "#dddddd"}
     header_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#4a4a4a", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#111111", "font_color": "white", **border}
     )
     subheader_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6a6a6a", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", **border}
     )
     section_fmt = workbook.add_format(
         {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#4a90e2", "font_color": "white", **border}
@@ -3997,10 +3997,10 @@ def _gerar_excel_peers_dados_puros(
     n_cols = 1 + len(bancos) * len(periodos)
     border = {"border": 1, "border_color": "#dddddd"}
     header_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#4a4a4a", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#111111", "font_color": "white", **border}
     )
     subheader_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6a6a6a", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", **border}
     )
     section_fmt = workbook.add_format(
         {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#4a90e2", "font_color": "white", **border}
@@ -6410,7 +6410,7 @@ elif menu == "Evolução":
                 x=ano_labels,
                 y=df_graph["Lucro Líquido"],
                 name="Lucro Líquido",
-                marker_color="#9B9B9B",
+                marker_color="#111111",
                 yaxis="y",
             )
         )
@@ -6419,7 +6419,7 @@ elif menu == "Evolução":
                 x=ano_labels,
                 y=df_graph["Patrimônio Líquido"],
                 name="Patrimônio Líquido",
-                marker_color="#102A83",
+                marker_color="#6E6E6E",
                 yaxis="y",
             )
         )
@@ -6429,8 +6429,8 @@ elif menu == "Evolução":
                 y=df_graph["Carteira Classificada"],
                 mode="lines+markers",
                 name="Carteira Classificada",
-                line=dict(color="#FF6B35", width=2, shape="spline", smoothing=1.15),
-                marker=dict(size=8, color="#FF6B35"),
+                line=dict(color="#ff5a00", width=2, shape="spline", smoothing=1.15),
+                marker=dict(size=8, color="#ff5a00"),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -6441,8 +6441,8 @@ elif menu == "Evolução":
                 y=df_graph["Core Funding"],
                 mode="lines+markers",
                 name="Core Funding",
-                line=dict(color="#1F1F1F", width=2, shape="spline", smoothing=1.15),
-                marker=dict(size=8, color="#1F1F1F"),
+                line=dict(color="#222222", width=2, shape="spline", smoothing=1.15),
+                marker=dict(size=8, color="#222222"),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -6464,7 +6464,7 @@ elif menu == "Evolução":
                         text=texto,
                         showarrow=False,
                         yshift=yshift,
-                        font=dict(size=14, color=font_color),
+                        font=dict(size=16, color=font_color),
                         bgcolor=bg_color,
                         bordercolor="rgba(0,0,0,0.08)",
                         borderwidth=1,
@@ -6472,10 +6472,10 @@ elif menu == "Evolução":
                     )
                 )
 
-        _add_label_annotations(df_graph["Lucro Líquido"], "y", "#4A4A4A", "rgba(255,255,255,0.88)", 14)
-        _add_label_annotations(df_graph["Patrimônio Líquido"], "y", "#102A83", "rgba(234,240,255,0.92)", 14)
-        _add_label_annotations(df_graph["Carteira Classificada"], "y2", "#FF6B35", "rgba(255,245,240,0.9)", 16)
-        _add_label_annotations(df_graph["Core Funding"], "y2", "#000000", "rgba(245,245,245,0.92)", -16)
+        _add_label_annotations(df_graph["Lucro Líquido"], "y", "#FFFFFF", "rgba(17,17,17,0.94)", 14)
+        _add_label_annotations(df_graph["Patrimônio Líquido"], "y", "#111111", "rgba(232,232,232,0.96)", 14)
+        _add_label_annotations(df_graph["Carteira Classificada"], "y2", "#ff5a00", "rgba(255,243,236,0.96)", 16)
+        _add_label_annotations(df_graph["Core Funding"], "y2", "#FFFFFF", "rgba(34,34,34,0.94)", -22)
 
         fig_ev.update_layout(
             barmode="group",
@@ -6486,6 +6486,8 @@ elif menu == "Evolução":
             xaxis=dict(type="category", categoryorder="array", categoryarray=ano_labels),
             legend=dict(orientation="v", y=0.5, x=0.01),
             margin=dict(t=30, b=20),
+            plot_bgcolor="#f2f2f2",
+            paper_bgcolor="#f2f2f2",
             annotations=annotations_ev,
         )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
@@ -6550,8 +6552,8 @@ elif menu == "Evolução":
             .evol-table-wrap { width: 100%; overflow-x: auto; margin-top: 10px; }
             .evol-table { width: 100%; border-collapse: collapse; font-size: 14px; }
             .evol-table th, .evol-table td { border: 1px solid #ddd; padding: 8px 10px; white-space: nowrap; }
-            .evol-table th { background-color: #6a6a6a; color: white; text-align: center; font-weight: 600; }
-            .evol-table th:first-child { background-color: #4a4a4a; text-align: left; }
+            .evol-table th { background-color: #6E6E6E; color: white; text-align: center; font-weight: 600; }
+            .evol-table th:first-child { background-color: #111111; text-align: left; }
             .evol-table td:first-child { text-align: left; font-weight: 500; }
             .evol-table td { text-align: right; }
             .evol-zebra { background-color: #f8f9fa; }
@@ -7280,6 +7282,11 @@ elif menu == "Rankings":
                             }
 
                             fig_basileia = go.Figure()
+                            cores_label_componentes = {
+                                'CET1 (%)': '#ffffff',
+                                'AT1 (%)': '#ffffff',
+                                'T2 (%)': '#111111',
+                            }
                             for componente, cor in cores_componentes.items():
                                 nome_display = componente.replace(' (%)', '')
                                 fig_basileia.add_trace(go.Bar(
@@ -7287,6 +7294,9 @@ elif menu == "Rankings":
                                     y=df_selecionado_cap[componente],
                                     name=nome_display,
                                     marker_color=cor,
+                                    text=df_selecionado_cap[componente].apply(lambda x: f"{x:.2f}%"),
+                                    textposition='inside',
+                                    textfont=dict(size=12, color=cores_label_componentes.get(componente, '#111111')),
                                     hovertemplate=(
                                         "<b>%{x}</b><br>"
                                         f"{nome_display}: %{{y:.2f}}%<extra></extra>"
@@ -7299,7 +7309,7 @@ elif menu == "Rankings":
                                 mode='text',
                                 text=df_selecionado_cap['Índice de Basileia Total (%)'].apply(lambda x: f"{x:.2f}%"),
                                 textposition='top center',
-                                textfont=dict(size=10, color='#333'),
+                                textfont=dict(size=12, color='#222'),
                                 showlegend=False,
                                 hoverinfo='skip'
                             ))
@@ -8450,12 +8460,12 @@ elif menu == "DRE":
             padding-right: 8px;
         }
         .carteira-table thead tr:first-child th {
-            background-color: #4a4a4a;
+            background-color: #111111;
             color: white;
             text-align: center;
         }
         .carteira-table thead tr:nth-child(2) th {
-            background-color: #6a6a6a;
+            background-color: #6E6E6E;
             color: white;
         }
         .dre-info {
@@ -8957,8 +8967,8 @@ elif menu == "DRE":
             worksheet = workbook.add_worksheet("DRE")
             writer.sheets["DRE"] = worksheet
 
-            fmt_head_dark = workbook.add_format({"bold": True, "font_color": "white", "bg_color": "#4a4a4a", "align": "center", "valign": "vcenter", "border": 1})
-            fmt_head_mid = workbook.add_format({"bold": True, "font_color": "white", "bg_color": "#6a6a6a", "align": "center", "valign": "vcenter", "border": 1})
+            fmt_head_dark = workbook.add_format({"bold": True, "font_color": "white", "bg_color": "#111111", "align": "center", "valign": "vcenter", "border": 1})
+            fmt_head_mid = workbook.add_format({"bold": True, "font_color": "white", "bg_color": "#6E6E6E", "align": "center", "valign": "vcenter", "border": 1})
             fmt_item = workbook.add_format({"align": "left", "valign": "vcenter", "border": 1})
             fmt_item_child = workbook.add_format({"align": "left", "valign": "vcenter", "border": 1, "indent": 1})
             fmt_num = workbook.add_format({"align": "right", "valign": "vcenter", "border": 1, "num_format": "#,##0"})
@@ -9204,12 +9214,12 @@ elif menu == "Carteira 4.966":
                     font-weight: bold;
                 }
                 .carteira-table thead tr:first-child th {
-                    background-color: #4a4a4a;
+                    background-color: #111111;
                     color: white;
                     text-align: center;
                 }
                 .carteira-table thead tr:nth-child(2) th {
-                    background-color: #6a6a6a;
+                    background-color: #6E6E6E;
                     color: white;
                 }
                 .delta-pos { color: #28a745; }
@@ -9289,10 +9299,10 @@ elif menu == "Carteira 4.966":
                     n_cols = 1 + len(periodos) * 2
                     border = {"border": 1, "border_color": "#dddddd"}
                     header_fmt = workbook.add_format(
-                        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#4a4a4a", "font_color": "white", **border}
+                        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#111111", "font_color": "white", **border}
                     )
                     subheader_fmt = workbook.add_format(
-                        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6a6a6a", "font_color": "white", **border}
+                        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", **border}
                     )
                     row_even = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
                     row_odd = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", **border})
