@@ -7178,10 +7178,13 @@ elif menu == "Rankings":
                 format_info = {**format_info, 'tickformat': '.1f'}
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False, variavel_ref: Optional[str] = None):
-                valor_norm = _normalizar_valor_indicador(valor, variavel_ref)
-                if pd.isna(valor_norm):
+                _ = variavel_ref
+                if valor is None or pd.isna(valor):
                     return "N/A"
-                valor_display = valor_norm * fmt_info['multiplicador']
+                try:
+                    valor_display = float(valor)
+                except Exception:
+                    return "N/A"
                 valor_formatado = format(valor_display, fmt_info['tickformat'])
                 if incluir_sinal and valor_display > 0:
                     valor_formatado = f"+{valor_formatado}"
@@ -7382,10 +7385,11 @@ elif menu == "Rankings":
                     if df_selecionado.empty:
                         st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
                     else:
-                        df_selecionado['_valor_norm'] = df_selecionado[indicador_col].apply(
-                            lambda v: _normalizar_valor_indicador(v, indicador_col)
+                        df_selecionado['valor_display'] = _calcular_valores_display(
+                            df_selecionado[indicador_col],
+                            indicador_col,
+                            format_info,
                         )
-                        df_selecionado['valor_display'] = df_selecionado['_valor_norm'] * format_info['multiplicador']
                         media_display = calcular_media_ponderada(df_selecionado, 'valor_display', coluna_peso_resumo)
                         label_media = get_label_media(coluna_peso_resumo)
 
