@@ -9188,6 +9188,85 @@ elif menu == "DRE":
                 st.caption(f"Tempo recorte derivado: {diag_info.get('derived_load_s', 0):.3f}s")
 
         st.markdown("#### Exportar DRE (layout da tabela)")
+
+        DRE_GLOSSARIO_EXPORT_ORDER = [
+            "Resultado de Intermediação Financeira Bruto",
+            "Rec. Aplicações Interfinanceiras Liquidez",
+            "Rec. TVMs",
+            "Rec. Crédito",
+            "Rec. Arrendamento Financeiro",
+            "Rec. Outras Operações c/ Características de Crédito",
+            "Desp. PDD",
+            "Desp. Captação",
+            "Desp. Dívida Elegível a Capital",
+            "Res. Derivativos",
+            "Outros Res. Intermediação Financeira",
+            "Resultado Int. Financeira Líquido",
+            "Resultado Transações Pgto",
+            "Renda Tarifas Bancárias",
+            "Outras Prestações de Serviços",
+            "Desp. Pessoal",
+            "Desp. Adm",
+            "Desp. PDD Outras Operações",
+            "Desp. JSCP Cooperativas",
+            "Desp. Tributárias",
+            "Res. Participação Controladas",
+            "Outras Receitas",
+            "Outras Despesas",
+            "IR/CSLL",
+            "Res. Participação Lucro",
+            "Lucro Líquido Período Acumulado",
+            "Desp PDD / Resultado Intermediação Fin. Bruto",
+            "Desp Captação / Captação",
+        ]
+
+        DRE_GLOSSARIO_LABEL_ALIAS = {
+            "Lucro Líquido Período Acumulado": "Lucro Líquido Período",
+        }
+
+        def _montar_glossario_export_rows():
+            rows = []
+            mapa_entries = {e.get("label"): e for e in mapping_entries_ordenado if e.get("label")}
+
+            for ordem, label_export in enumerate(DRE_GLOSSARIO_EXPORT_ORDER, start=1):
+                label_lookup = DRE_GLOSSARIO_LABEL_ALIAS.get(label_export, label_export)
+                entry = mapa_entries.get(label_lookup, {})
+                cosif_info = dre_cosif_map.get(label_lookup, {})
+                depara = cosif_info.get("depara") or []
+
+                contas = []
+                descricoes = []
+                for item_depara in depara:
+                    conta = str(item_depara.get("account") or "").strip()
+                    desc = str(item_depara.get("description") or "").strip()
+                    if conta:
+                        contas.append(f"[{conta}]")
+                    if desc:
+                        descricoes.append(desc)
+
+                ifdata_ref = str(cosif_info.get("ifdata_label") or "").strip()
+                if not ifdata_ref:
+                    ifdata_ref = str(entry.get("original_label") or "").strip()
+
+                nivel = "Principal"
+                if entry.get("is_child"):
+                    nivel = "Filho"
+                elif entry.get("is_ratio_footer"):
+                    nivel = "Rodapé (ratio)"
+
+                rows.append({
+                    "Ordem": ordem,
+                    "Nível": nivel,
+                    "Linha DRE": label_export,
+                    "Referência IFData": ifdata_ref or "N/D",
+                    "Contas COSIF": " | ".join(contas) if contas else "N/D",
+                    "Descrição COSIF": " | ".join(descricoes) if descricoes else "N/D",
+                    "Fórmula COSIF": str(cosif_info.get("formula") or "").strip() or "N/D",
+                    "Status Mapeamento": str(cosif_info.get("status") or "").strip() or ("mapeado" if depara else "não mapeado"),
+                })
+
+            return rows
+
         buffer_excel = BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
             workbook = writer.book
@@ -9239,10 +9318,49 @@ elif menu == "DRE":
             worksheet.set_column(0, 0, 52)
             worksheet.set_column(1, len(periodos_disponiveis), 16)
             worksheet.freeze_panes(2, 1)
+
+            # Aba obrigatória de glossário exportável (de-para DRE -> COSIF)
+            ws_gloss = workbook.add_worksheet("Glossário COSIF")
+            writer.sheets["Glossário COSIF"] = ws_gloss
+            gloss_headers = [
+                "Ordem",
+                "Nível",
+                "Linha DRE",
+                "Referência IFData",
+                "Contas COSIF",
+                "Descrição COSIF",
+                "Fórmula COSIF",
+                "Status Mapeamento",
+            ]
+            for col_idx, head in enumerate(gloss_headers):
+                ws_gloss.write(0, col_idx, head, fmt_head_dark)
+
+            gloss_rows = _montar_glossario_export_rows()
+            for row_idx_gl, row_data in enumerate(gloss_rows, start=1):
+                ws_gloss.write_number(row_idx_gl, 0, int(row_data["Ordem"]))
+                ws_gloss.write(row_idx_gl, 1, row_data["Nível"])
+                ws_gloss.write(row_idx_gl, 2, row_data["Linha DRE"])
+                ws_gloss.write(row_idx_gl, 3, row_data["Referência IFData"])
+                ws_gloss.write(row_idx_gl, 4, row_data["Contas COSIF"])
+                ws_gloss.write(row_idx_gl, 5, row_data["Descrição COSIF"])
+                ws_gloss.write(row_idx_gl, 6, row_data["Fórmula COSIF"])
+                ws_gloss.write(row_idx_gl, 7, row_data["Status Mapeamento"])
+
+            ws_gloss.set_column(0, 0, 8)
+            ws_gloss.set_column(1, 1, 18)
+            ws_gloss.set_column(2, 2, 50)
+            ws_gloss.set_column(3, 3, 50)
+            ws_gloss.set_column(4, 4, 45)
+            ws_gloss.set_column(5, 5, 90)
+            ws_gloss.set_column(6, 6, 55)
+            ws_gloss.set_column(7, 7, 20)
+            ws_gloss.freeze_panes(1, 0)
+            ws_gloss.autofilter(0, 0, max(1, len(gloss_rows)), len(gloss_headers) - 1)
+
         buffer_excel.seek(0)
 
         st.download_button(
-            label="Baixar Excel (DRE)",
+            label="Baixar Excel (DRE + Glossário COSIF)",
             data=buffer_excel,
             file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
