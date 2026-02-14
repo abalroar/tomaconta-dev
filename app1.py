@@ -8132,6 +8132,53 @@ elif menu == "DRE":
             return [p for p in parts if p]
         return []
 
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_dre_cosif_mapping():
+        """Carrega mapeamento COSIF da DRE (etapa 0+) a partir de arquivo versionado."""
+        caminho = Path("data/dre_cosif_mapping.json")
+        if not caminho.exists():
+            return {}
+        try:
+            payload = json.loads(caminho.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+        mappings = payload.get("mappings", []) if isinstance(payload, dict) else []
+        mapa = {}
+        for item in mappings:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            contas = [
+                str(c).strip() for c in item.get("cosif_accounts", [])
+                if str(c).strip()
+            ]
+            depara = []
+            for linha in item.get("cosif_depara", []) if isinstance(item.get("cosif_depara", []), list) else []:
+                if not isinstance(linha, dict):
+                    continue
+                conta = str(linha.get("account") or "").strip()
+                desc = str(linha.get("description") or "").strip()
+                if not conta:
+                    continue
+                depara.append({"account": conta, "description": desc})
+
+            # Backward compatibility: se vier apenas cosif_accounts, converte para de-para sem descrição.
+            if not depara and contas:
+                depara = [{"account": c, "description": ""} for c in contas]
+
+            mapa[label] = {
+                "ifdata_label": str(item.get("ifdata_label") or "").strip(),
+                "contas": contas,
+                "depara": depara,
+                "formula": str(item.get("cosif_formula") or "").strip(),
+                "status": str(item.get("status") or "").strip(),
+                "source": str(item.get("source") or "").strip(),
+            }
+        return mapa
+
     def load_dre_mapping():
         return [
             {
@@ -8867,6 +8914,7 @@ elif menu == "DRE":
                 _entry["is_ratio_footer"] = True
 
         formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries_ordenado}
+        dre_cosif_map = load_dre_cosif_mapping()
         tooltip_por_label = {}
         entradas_com_label = []
         for entry in mapping_entries_ordenado:
@@ -8885,7 +8933,32 @@ elif menu == "DRE":
                 tooltip_parts.append(f"Fontes: {fontes_fmt}")
             if entry.get("ytd_note"):
                 tooltip_parts.append("Nota YTD: no BC o DRE é semestral acumulado; aqui exibimos acumulado do ano (YTD).")
-            tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
+
+            cosif_info = dre_cosif_map.get(entry["label"])
+            if cosif_info:
+                if cosif_info.get("ifdata_label"):
+                    tooltip_parts.append(f"IFData (reconciliação): {cosif_info['ifdata_label']}")
+
+                depara = cosif_info.get("depara") or []
+                if depara:
+                    tooltip_parts.append("De-para COSIF (conta → descrição):")
+                    for item_depara in depara:
+                        conta = str(item_depara.get("account") or "").strip()
+                        desc = str(item_depara.get("description") or "").strip()
+                        if conta and desc:
+                            tooltip_parts.append(f"[{conta}] {desc}")
+                        elif conta:
+                            tooltip_parts.append(f"[{conta}]")
+                elif cosif_info.get("contas"):
+                    contas_txt = " + ".join([f"[{c}]" for c in cosif_info["contas"]])
+                    tooltip_parts.append(f"Contas COSIF (IFData): {contas_txt}")
+
+                if cosif_info.get("formula"):
+                    tooltip_parts.append(cosif_info["formula"])
+                if cosif_info.get("status"):
+                    tooltip_parts.append(f"Status do mapeamento: {cosif_info['status']}")
+
+            tooltip_por_label[entry["label"]] = "\n".join(tooltip_parts)
 
             label_exib = entry["label"]
             entrada_copy = entry.copy()
@@ -9091,11 +9164,13 @@ elif menu == "DRE":
         )
 
         st.markdown(
-            """
+            f"""
             <div style="font-size: 12px; color: #666; margin-top: 12px;">
                 <strong>mini-glossário DRE:</strong><br>
                 <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
                 <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
+                <strong>Cobertura COSIF atual:</strong> {len(dre_cosif_map)} linha(s) com mapeamento explícito no arquivo versionado.<br>
+                <strong>Etapa 0 (mapeamento COSIF):</strong> o tooltip ⓘ exibe o de-para IFData ↔ COSIF (conta e descrição) para as linhas já reconciliadas no arquivo <code>data/dre_cosif_mapping.json</code>.<br>
                 <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
                 <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
             </div>
@@ -9113,6 +9188,85 @@ elif menu == "DRE":
                 st.caption(f"Tempo recorte derivado: {diag_info.get('derived_load_s', 0):.3f}s")
 
         st.markdown("#### Exportar DRE (layout da tabela)")
+
+        DRE_GLOSSARIO_EXPORT_ORDER = [
+            "Resultado de Intermediação Financeira Bruto",
+            "Rec. Aplicações Interfinanceiras Liquidez",
+            "Rec. TVMs",
+            "Rec. Crédito",
+            "Rec. Arrendamento Financeiro",
+            "Rec. Outras Operações c/ Características de Crédito",
+            "Desp. PDD",
+            "Desp. Captação",
+            "Desp. Dívida Elegível a Capital",
+            "Res. Derivativos",
+            "Outros Res. Intermediação Financeira",
+            "Resultado Int. Financeira Líquido",
+            "Resultado Transações Pgto",
+            "Renda Tarifas Bancárias",
+            "Outras Prestações de Serviços",
+            "Desp. Pessoal",
+            "Desp. Adm",
+            "Desp. PDD Outras Operações",
+            "Desp. JSCP Cooperativas",
+            "Desp. Tributárias",
+            "Res. Participação Controladas",
+            "Outras Receitas",
+            "Outras Despesas",
+            "IR/CSLL",
+            "Res. Participação Lucro",
+            "Lucro Líquido Período Acumulado",
+            "Desp PDD / Resultado Intermediação Fin. Bruto",
+            "Desp Captação / Captação",
+        ]
+
+        DRE_GLOSSARIO_LABEL_ALIAS = {
+            "Lucro Líquido Período Acumulado": "Lucro Líquido Período",
+        }
+
+        def _montar_glossario_export_rows():
+            rows = []
+            mapa_entries = {e.get("label"): e for e in mapping_entries_ordenado if e.get("label")}
+
+            for ordem, label_export in enumerate(DRE_GLOSSARIO_EXPORT_ORDER, start=1):
+                label_lookup = DRE_GLOSSARIO_LABEL_ALIAS.get(label_export, label_export)
+                entry = mapa_entries.get(label_lookup, {})
+                cosif_info = dre_cosif_map.get(label_lookup, {})
+                depara = cosif_info.get("depara") or []
+
+                contas = []
+                descricoes = []
+                for item_depara in depara:
+                    conta = str(item_depara.get("account") or "").strip()
+                    desc = str(item_depara.get("description") or "").strip()
+                    if conta:
+                        contas.append(f"[{conta}]")
+                    if desc:
+                        descricoes.append(desc)
+
+                ifdata_ref = str(cosif_info.get("ifdata_label") or "").strip()
+                if not ifdata_ref:
+                    ifdata_ref = str(entry.get("original_label") or "").strip()
+
+                nivel = "Principal"
+                if entry.get("is_child"):
+                    nivel = "Filho"
+                elif entry.get("is_ratio_footer"):
+                    nivel = "Rodapé (ratio)"
+
+                rows.append({
+                    "Ordem": ordem,
+                    "Nível": nivel,
+                    "Linha DRE": label_export,
+                    "Referência IFData": ifdata_ref or "N/D",
+                    "Contas COSIF": " | ".join(contas) if contas else "N/D",
+                    "Descrição COSIF": " | ".join(descricoes) if descricoes else "N/D",
+                    "Fórmula COSIF": str(cosif_info.get("formula") or "").strip() or "N/D",
+                    "Status Mapeamento": str(cosif_info.get("status") or "").strip() or ("mapeado" if depara else "não mapeado"),
+                })
+
+            return rows
+
         buffer_excel = BytesIO()
         with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
             workbook = writer.book
@@ -9164,10 +9318,49 @@ elif menu == "DRE":
             worksheet.set_column(0, 0, 52)
             worksheet.set_column(1, len(periodos_disponiveis), 16)
             worksheet.freeze_panes(2, 1)
+
+            # Aba obrigatória de glossário exportável (de-para DRE -> COSIF)
+            ws_gloss = workbook.add_worksheet("Glossário COSIF")
+            writer.sheets["Glossário COSIF"] = ws_gloss
+            gloss_headers = [
+                "Ordem",
+                "Nível",
+                "Linha DRE",
+                "Referência IFData",
+                "Contas COSIF",
+                "Descrição COSIF",
+                "Fórmula COSIF",
+                "Status Mapeamento",
+            ]
+            for col_idx, head in enumerate(gloss_headers):
+                ws_gloss.write(0, col_idx, head, fmt_head_dark)
+
+            gloss_rows = _montar_glossario_export_rows()
+            for row_idx_gl, row_data in enumerate(gloss_rows, start=1):
+                ws_gloss.write_number(row_idx_gl, 0, int(row_data["Ordem"]))
+                ws_gloss.write(row_idx_gl, 1, row_data["Nível"])
+                ws_gloss.write(row_idx_gl, 2, row_data["Linha DRE"])
+                ws_gloss.write(row_idx_gl, 3, row_data["Referência IFData"])
+                ws_gloss.write(row_idx_gl, 4, row_data["Contas COSIF"])
+                ws_gloss.write(row_idx_gl, 5, row_data["Descrição COSIF"])
+                ws_gloss.write(row_idx_gl, 6, row_data["Fórmula COSIF"])
+                ws_gloss.write(row_idx_gl, 7, row_data["Status Mapeamento"])
+
+            ws_gloss.set_column(0, 0, 8)
+            ws_gloss.set_column(1, 1, 18)
+            ws_gloss.set_column(2, 2, 50)
+            ws_gloss.set_column(3, 3, 50)
+            ws_gloss.set_column(4, 4, 45)
+            ws_gloss.set_column(5, 5, 90)
+            ws_gloss.set_column(6, 6, 55)
+            ws_gloss.set_column(7, 7, 20)
+            ws_gloss.freeze_panes(1, 0)
+            ws_gloss.autofilter(0, 0, max(1, len(gloss_rows)), len(gloss_headers) - 1)
+
         buffer_excel.seek(0)
 
         st.download_button(
-            label="Baixar Excel (DRE)",
+            label="Baixar Excel (DRE + Glossário COSIF)",
             data=buffer_excel,
             file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
