@@ -2661,6 +2661,54 @@ def _recalcular_roe_anualizado_df(df: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=["_tri_tmp", "_tri_idx_tmp", "_ano_tmp", "_mes_tmp"], errors="ignore")
 
 
+def _calcular_roe_alinhado_peers_para_instituicao(df_base: pd.DataFrame, instituicao: str) -> pd.DataFrame:
+    """Retorna ROE (critério Peers) por Ano/Tri para uma instituição."""
+    if df_base is None or df_base.empty:
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    cols_obrig = {"Instituição", "Período", "Lucro Líquido Acumulado YTD", "Patrimônio Líquido"}
+    if not cols_obrig.issubset(df_base.columns):
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    recorte = df_base[df_base["Instituição"] == instituicao].copy()
+    if recorte.empty:
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    periodo_split = recorte["Período"].astype(str).str.split("/", expand=True)
+    recorte["Ano"] = pd.to_numeric(periodo_split[1], errors="coerce")
+    recorte["Tri"] = pd.to_numeric(periodo_split[0], errors="coerce").map(_parte_periodo_para_trimestre_idx)
+    recorte = recorte.dropna(subset=["Ano", "Tri"]).copy()
+    if recorte.empty:
+        return pd.DataFrame(columns=["Ano", "Tri", "ROE Ac. Anualizado (%)"])
+
+    recorte["Ano"] = recorte["Ano"].astype(int)
+    recorte["Tri"] = recorte["Tri"].astype(int)
+
+    idx_ult = recorte.groupby(["Ano", "Tri"], observed=False).tail(1).index
+    recorte = recorte.loc[idx_ult].sort_values(["Ano", "Tri"]).copy()
+
+    ll = pd.to_numeric(recorte["Lucro Líquido Acumulado YTD"], errors="coerce")
+    pl_t = pd.to_numeric(recorte["Patrimônio Líquido"], errors="coerce")
+
+    pl_dez_prev = (
+        recorte.assign(_pl=pl_t)
+        .loc[recorte["Tri"] == 4]
+        .groupby("Ano", observed=False)["_pl"]
+        .last()
+        .shift(1)
+        .rename("_pl_dez_prev")
+    )
+    recorte = recorte.merge(pl_dez_prev, left_on="Ano", right_index=True, how="left")
+
+    mes = pd.to_numeric(recorte["Tri"], errors="coerce").map({1: 3, 2: 6, 3: 9, 4: 12})
+    recorte["ROE Ac. Anualizado (%)"] = pd.to_numeric(
+        _calcular_roe_anualizado(ll, pl_t, recorte["_pl_dez_prev"], mes),
+        errors="coerce",
+    )
+
+    return recorte[["Ano", "Tri", "ROE Ac. Anualizado (%)"]]
+
+
 def _build_peers_lookup(df: Optional[pd.DataFrame]) -> dict:
     """Cria índice rápido (Instituição, Período) -> linha para lookups repetidos.
 
@@ -6420,15 +6468,6 @@ elif menu == "Evolução":
         map_mes = {1: "mar", 2: "jun", 3: "set", 4: "dez"}
         df_ano["LabelPeriodo"] = df_ano.apply(lambda r: f"{map_mes.get(int(r['Tri']), str(r['Tri']))}-{str(int(r['Ano']))[-2:]}", axis=1)
 
-        def _calc_roe_anualizado(row):
-            ll = pd.to_numeric(row.get("Lucro Líquido Acumulado YTD"), errors="coerce")
-            pl = pd.to_numeric(row.get("Patrimônio Líquido"), errors="coerce")
-            tri = pd.to_numeric(row.get("Tri"), errors="coerce")
-            if pd.isna(ll) or pd.isna(pl) or pd.isna(tri) or float(pl) == 0:
-                return np.nan
-            meses = {1: 3, 2: 6, 3: 9, 4: 12}.get(int(tri), 12)
-            return float(ll) * (12 / meses) / float(pl)
-
         def _numeric_series(dataframe, coluna):
             if coluna in dataframe.columns:
                 return pd.to_numeric(dataframe[coluna], errors="coerce")
@@ -6443,7 +6482,22 @@ elif menu == "Evolução":
             .combine_first(carteira_classificada_2025)
             .combine_first(carteira_credito_base)
         )
-        df_ano["ROE anualizado"] = df_ano.apply(_calc_roe_anualizado, axis=1)
+        # ROE na Evolução: cálculo único e definitivo pelo mesmo critério da Peers.
+        roe_peers_inst = _calcular_roe_alinhado_peers_para_instituicao(df_ev, instituicao)
+        if not roe_peers_inst.empty:
+            df_ano = df_ano.merge(
+                roe_peers_inst.rename(columns={"ROE Ac. Anualizado (%)": "_roe_peers"}),
+                on=["Ano", "Tri"],
+                how="left",
+            )
+            df_ano["ROE anualizado"] = pd.to_numeric(df_ano["_roe_peers"], errors="coerce")
+            df_ano = df_ano.drop(columns=["_roe_peers"], errors="ignore")
+        else:
+            # Fallback operacional: usa coluna já disponibilizada no dataset, se houver.
+            col_roe = "ROE Ac. Anualizado (%)" if "ROE Ac. Anualizado (%)" in df_ano.columns else (
+                "ROE Ac. YTD an. (%)" if "ROE Ac. YTD an. (%)" in df_ano.columns else None
+            )
+            df_ano["ROE anualizado"] = pd.to_numeric(df_ano[col_roe], errors="coerce") if col_roe else np.nan
         df_ano["Crédito 2.682 / PL"] = np.where(
             pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce") != 0,
             pd.to_numeric(df_ano["Carteira Classificada"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
@@ -6677,7 +6731,7 @@ elif menu == "Evolução":
         tabela_html = _render_evolucao_table_html(df_show, periodos_cols)
         st.markdown(tabela_html, unsafe_allow_html=True)
 
-        col_export1, col_export2, col_export3, col_export4 = st.columns(4)
+        col_export1, col_export2, col_export3 = st.columns(3)
         buffer_excel_visual = _gerar_excel_evolucao_tabela_visual(
             df_show=df_show,
             periodos_cols=periodos_cols,
@@ -6714,26 +6768,6 @@ elif menu == "Evolução":
             )
 
         with col_export3:
-            csv_metric = df_metric.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="exportar csv",
-                data=csv_metric,
-                file_name=f"evolucao_tabela_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key="evolucao_csv",
-                use_container_width=True,
-            )
-
-        with col_export4:
-            st.download_button(
-                label="exportar html (visual)",
-                data=tabela_html,
-                file_name=f"evolucao_tabela_visual_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-                mime="text/html",
-                key="evolucao_html",
-                use_container_width=True,
-            )
-
             png_bytes = _plotly_fig_to_png_bytes(fig_ev)
             if png_bytes:
                 st.download_button(
