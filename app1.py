@@ -7049,7 +7049,7 @@ elif menu == "Rankings":
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
         st.markdown("### ranking")
-        opcoes_grafico = ["Ranking (barras)", "Deltas (barras)", "Deltas (pontos)"]
+        opcoes_grafico = ["Ranking (barras)", "Deltas (barras)"]
         if st.session_state.get("grafico_rankings_toggle_v2") not in opcoes_grafico:
             st.session_state["grafico_rankings_toggle_v2"] = opcoes_grafico[0]
         grafico_escolhido = st.radio(
@@ -7060,13 +7060,6 @@ elif menu == "Rankings":
             horizontal=True
         )
         grafico_base = "Ranking" if grafico_escolhido.startswith("Ranking") else "Deltas (antes e depois)"
-        modo_visualizacao_deltas = None
-        if grafico_base == "Deltas (antes e depois)":
-            modo_visualizacao_deltas = (
-                "Barras (delta)"
-                if grafico_escolhido == "Deltas (barras)"
-                else "Pontos (antes/depois)"
-            )
 
         indicadores_config = {
             'Ativo Total': ['Ativo Total'],
@@ -7579,59 +7572,6 @@ elif menu == "Rankings":
                     df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
                     df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
 
-                    if modo_visualizacao_deltas == "Pontos (antes/depois)":
-                        st.markdown("---")
-                        col_escala1, col_escala2, col_escala3 = st.columns([1, 1, 2])
-
-                        with col_escala1:
-                            if 'delta_escala_modo' not in st.session_state:
-                                st.session_state['delta_escala_modo'] = 'Auto (zoom)'
-
-                            modo_escala = st.radio(
-                                "escala do eixo Y",
-                                ["Auto (zoom)", "Zero baseline", "Manual"],
-                                index=["Auto (zoom)", "Zero baseline", "Manual"].index(st.session_state['delta_escala_modo']),
-                                key="delta_escala_modo_radio",
-                                horizontal=True
-                            )
-                            st.session_state['delta_escala_modo'] = modo_escala
-
-                        with col_escala2:
-                            if 'delta_escala_margem' not in st.session_state:
-                                st.session_state['delta_escala_margem'] = 10
-
-                            if modo_escala == "Auto (zoom)":
-                                margem_pct = st.slider(
-                                    "margem (%)",
-                                    0, 50, st.session_state['delta_escala_margem'],
-                                    key="delta_margem_slider",
-                                    help="Margem adicional acima/abaixo dos valores"
-                                )
-                                st.session_state['delta_escala_margem'] = margem_pct
-
-                        with col_escala3:
-                            if modo_escala == "Manual":
-                                col_min, col_max = st.columns(2)
-                                with col_min:
-                                    if 'delta_y_min' not in st.session_state:
-                                        st.session_state['delta_y_min'] = 0.0
-                                    y_min_manual = st.number_input(
-                                        "Y mínimo",
-                                        value=st.session_state['delta_y_min'],
-                                        key="delta_y_min_input"
-                                    )
-                                    st.session_state['delta_y_min'] = y_min_manual
-                                with col_max:
-                                    if 'delta_y_max' not in st.session_state:
-                                        st.session_state['delta_y_max'] = 100.0
-                                    y_max_manual = st.number_input(
-                                        "Y máximo",
-                                        value=st.session_state['delta_y_max'],
-                                        key="delta_y_max_input"
-                                    )
-                                    st.session_state['delta_y_max'] = y_max_manual
-
-                        st.markdown("---")
 
                     for variavel in variaveis_selecionadas_delta:
                         coluna_variavel = delta_colunas_map.get(variavel, variavel)
@@ -7705,185 +7645,86 @@ elif menu == "Rankings":
                         else:
                             dados_grafico = sorted(dados_grafico, key=lambda x: x['delta'], reverse=True)
 
-                        if modo_visualizacao_deltas == "Pontos (antes/depois)":
-                            fig_delta = go.Figure()
-                            todos_y = []
-                            for dado in dados_grafico:
-                                todos_y.append(_normalizar_valor_indicador(dado['valor_ini'], coluna_variavel) * format_info['multiplicador'])
-                                todos_y.append(_normalizar_valor_indicador(dado['valor_sub'], coluna_variavel) * format_info['multiplicador'])
-
-                            for i, dado in enumerate(dados_grafico):
-                                inst = dado['instituicao']
-                                y_ini = _normalizar_valor_indicador(dado['valor_ini'], coluna_variavel) * format_info['multiplicador']
-                                y_sub = _normalizar_valor_indicador(dado['valor_sub'], coluna_variavel) * format_info['multiplicador']
-                                delta_positivo = dado['delta'] > 0
-
-                                cor_sub = '#2E7D32' if delta_positivo else '#7B1E3A'
-
-                                fig_delta.add_trace(go.Scatter(
-                                    x=[inst, inst],
-                                    y=[y_ini, y_sub],
-                                    mode='lines',
-                                    line=dict(color='#9E9E9E', width=2),
-                                    showlegend=False,
-                                    hoverinfo='skip'
-                                ))
-
-                                fig_delta.add_trace(go.Scatter(
-                                    x=[inst],
-                                    y=[y_ini],
-                                    mode='markers',
-                                    marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
-                                    name=periodo_inicial_delta if i == 0 else None,
-                                    showlegend=(i == 0),
-                                    legendgroup='inicial',
-                                    hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
-                                ))
-
-                                fig_delta.add_trace(go.Scatter(
-                                    x=[inst],
-                                    y=[y_sub],
-                                    mode='markers',
-                                    marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
-                                    name=periodo_subsequente_delta if i == 0 else None,
-                                    showlegend=(i == 0),
-                                    legendgroup='subsequente',
-                                    customdata=[[dado['delta_texto'], dado['variacao_texto'], dado['memoria_calculo']]],
-                                    hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<br>%{{customdata[2]}}<extra></extra>'
-                                ))
-
-                            titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
-
-                            yaxis_config = dict(
-                                showgrid=True,
-                                gridcolor='#e0e0e0',
-                                tickformat=format_info['tickformat'],
-                                ticksuffix=format_info['ticksuffix'],
-                                title=variavel
-                            )
-
-                            if todos_y:
-                                y_min_dados = min(todos_y)
-                                y_max_dados = max(todos_y)
-                                y_range = y_max_dados - y_min_dados if y_max_dados != y_min_dados else abs(y_max_dados) * 0.1 or 1
-
-                                if modo_escala == "Zero baseline":
-                                    yaxis_config['range'] = [min(0, y_min_dados - y_range * 0.05), max(0, y_max_dados + y_range * 0.05)]
-                                elif modo_escala == "Auto (zoom)":
-                                    margem = y_range * (margem_pct / 100)
-                                    yaxis_config['range'] = [y_min_dados - margem, y_max_dados + margem]
-                                elif modo_escala == "Manual":
-                                    yaxis_config['range'] = [y_min_manual, y_max_manual]
-
-                            fig_delta.update_layout(
-                                title=dict(
-                                    text=titulo_delta,
-                                    font=dict(size=16, family='IBM Plex Sans')
-                                ),
-                                height=max(400, len(dados_grafico) * 25 + 150),
-                                plot_bgcolor='#f8f9fa',
-                                paper_bgcolor='white',
-                                showlegend=True,
-                                legend=dict(
-                                    orientation="h",
-                                    yanchor="bottom",
-                                    y=1.02,
-                                    xanchor="left",
-                                    x=0
-                                ),
-                                xaxis=dict(
-                                    showgrid=False,
-                                    tickangle=45 if len(dados_grafico) > 10 else 0,
-                                    tickfont=dict(size=10)
-                                ),
-                                yaxis=yaxis_config,
-                                font=dict(family='IBM Plex Sans'),
-                                margin=dict(l=60, r=20, t=80, b=100)
-                            )
-
-                            st.markdown(f"### {variavel}")
-                            st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
-                        else:
-                            valores_finitos = []
-                            for dado in dados_grafico:
-                                if tipo_variacao == "Δ %":
-                                    if np.isfinite(dado['variacao_pct']):
-                                        valores_finitos.append(abs(dado['variacao_pct']))
-
-                            cap_visual = (max(valores_finitos) * 1.2) if valores_finitos else 1
-
-                            for dado in dados_grafico:
-                                if tipo_variacao == "Δ %":
-                                    if np.isfinite(dado['variacao_pct']):
-                                        dado['valor_plot'] = dado['variacao_pct']
-                                    else:
-                                        dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
-                                else:
-                                    dado['valor_plot'] = _normalizar_valor_indicador(dado['delta'], coluna_variavel) * format_info['multiplicador']
-
-                            n_bancos = len(dados_grafico)
-                            orientacao_horizontal = n_bancos > 15
-
-                            insts = [d['instituicao'] for d in dados_grafico]
-                            valores_plot = [d['valor_plot'] for d in dados_grafico]
-                            cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
-
-                            eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
-                            eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
+                        valores_finitos = []
+                        for dado in dados_grafico:
                             if tipo_variacao == "Δ %":
-                                eixo_titulo = "Δ %"
-                            elif _is_variavel_percentual(coluna_variavel):
-                                eixo_titulo = "Δ absoluto (%)"
+                                if np.isfinite(dado['variacao_pct']):
+                                    valores_finitos.append(abs(dado['variacao_pct']))
+
+                        cap_visual = (max(valores_finitos) * 1.2) if valores_finitos else 1
+
+                        for dado in dados_grafico:
+                            if tipo_variacao == "Δ %":
+                                if np.isfinite(dado['variacao_pct']):
+                                    dado['valor_plot'] = dado['variacao_pct']
+                                else:
+                                    dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
                             else:
-                                eixo_titulo = "Δ absoluto"
+                                dado['valor_plot'] = _normalizar_valor_indicador(dado['delta'], coluna_variavel) * format_info['multiplicador']
 
-                            fig_barras = go.Figure()
-                            fig_barras.add_trace(go.Bar(
-                                x=valores_plot if orientacao_horizontal else insts,
-                                y=insts if orientacao_horizontal else valores_plot,
-                                orientation='h' if orientacao_horizontal else 'v',
-                                marker=dict(color=cores_barras, opacity=0.9),
-                                customdata=np.stack([
-                                    [d['delta_texto'] for d in dados_grafico],
-                                    [d['variacao_texto'] for d in dados_grafico],
-                                    [d['memoria_calculo'] for d in dados_grafico],
-                                ], axis=-1),
-                                hovertemplate=(
-                                    "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
-                                ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<br>%{customdata[2]}<extra></extra>"
-                            ))
+                        n_bancos = len(dados_grafico)
+                        orientacao_horizontal = n_bancos > 15
 
-                            fig_barras.update_layout(
-                                title=dict(
-                                    text=f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}",
-                                    font=dict(size=16, family='IBM Plex Sans')
-                                ),
-                                height=max(450, len(dados_grafico) * 25 + 160),
-                                plot_bgcolor='#f8f9fa',
-                                paper_bgcolor='white',
-                                showlegend=False,
-                                xaxis=dict(
-                                    showgrid=True if not orientacao_horizontal else True,
-                                    zeroline=True,
-                                    zerolinecolor='#444',
-                                    tickformat=eixo_tickformat if orientacao_horizontal else None,
-                                    ticksuffix=eixo_ticksuffix if orientacao_horizontal else None,
-                                    title=eixo_titulo if orientacao_horizontal else None
-                                ),
-                                yaxis=dict(
-                                    showgrid=False if orientacao_horizontal else True,
-                                    zeroline=True,
-                                    zerolinecolor='#444',
-                                    tickformat=eixo_tickformat if not orientacao_horizontal else None,
-                                    ticksuffix=eixo_ticksuffix if not orientacao_horizontal else None,
-                                    title=eixo_titulo if not orientacao_horizontal else None
-                                ),
-                                font=dict(family='IBM Plex Sans'),
-                                margin=dict(l=60, r=20, t=80, b=100)
-                            )
+                        insts = [d['instituicao'] for d in dados_grafico]
+                        valores_plot = [d['valor_plot'] for d in dados_grafico]
+                        cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
 
-                            st.markdown(f"### {variavel}")
-                            st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
+                        eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
+                        eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
+                        if tipo_variacao == "Δ %":
+                            eixo_titulo = "Δ %"
+                        elif _is_variavel_percentual(coluna_variavel):
+                            eixo_titulo = "Δ absoluto (%)"
+                        else:
+                            eixo_titulo = "Δ absoluto"
+
+                        fig_barras = go.Figure()
+                        fig_barras.add_trace(go.Bar(
+                            x=valores_plot if orientacao_horizontal else insts,
+                            y=insts if orientacao_horizontal else valores_plot,
+                            orientation='h' if orientacao_horizontal else 'v',
+                            marker=dict(color=cores_barras, opacity=0.9),
+                            customdata=np.stack([
+                                [d['delta_texto'] for d in dados_grafico],
+                                [d['variacao_texto'] for d in dados_grafico],
+                                [d['memoria_calculo'] for d in dados_grafico],
+                            ], axis=-1),
+                            hovertemplate=(
+                                "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
+                            ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<br>%{customdata[2]}<extra></extra>"
+                        ))
+
+                        fig_barras.update_layout(
+                            title=dict(
+                                text=f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}",
+                                font=dict(size=16, family='IBM Plex Sans')
+                            ),
+                            height=max(450, len(dados_grafico) * 25 + 160),
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            showlegend=False,
+                            xaxis=dict(
+                                showgrid=True if not orientacao_horizontal else True,
+                                zeroline=True,
+                                zerolinecolor='#444',
+                                tickformat=eixo_tickformat if orientacao_horizontal else None,
+                                ticksuffix=eixo_ticksuffix if orientacao_horizontal else None,
+                                title=eixo_titulo if orientacao_horizontal else None
+                            ),
+                            yaxis=dict(
+                                showgrid=False if orientacao_horizontal else True,
+                                zeroline=True,
+                                zerolinecolor='#444',
+                                tickformat=eixo_tickformat if not orientacao_horizontal else None,
+                                ticksuffix=eixo_ticksuffix if not orientacao_horizontal else None,
+                                title=eixo_titulo if not orientacao_horizontal else None
+                            ),
+                            font=dict(family='IBM Plex Sans'),
+                            margin=dict(l=60, r=20, t=80, b=100)
+                        )
+
+                        st.markdown(f"### {variavel}")
+                        st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
 
                         if bancos_selecionados_delta:
                             idx_ini_hist = periodos_disponiveis.index(periodo_inicial_delta)
