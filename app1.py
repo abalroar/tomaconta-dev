@@ -1647,12 +1647,27 @@ CARGOS_CHAVE_DIRETORIA = (
 CARGOS_CHAVE_CONSELHO = (
     "CONSELHO", "CONSELHEIRO", "CONSELHEIRA"
 )
+ORGAOS_CHAVE_DIRETORIA = ("DIRETORIA",)
+ORGAOS_CHAVE_CONSELHO = ("CONSELHO",)
 PADROES_RUIDO_ORGAOS = (
     "HTTP://", "HTTPS://", "WWW.", "CEP", "ENDERECO", "LOGRADOURO", "BAIRRO", "CIDADE", "PAIS", "UF"
 )
 
 
-def _classificar_orgao(cargo: str) -> str:
+def _classificar_orgao_por_nome(nome_orgao: str) -> str:
+    orgao_norm = _normalizar_texto_sem_acento(nome_orgao)
+    if any(ch in orgao_norm for ch in ORGAOS_CHAVE_CONSELHO):
+        return "Conselho"
+    if any(ch in orgao_norm for ch in ORGAOS_CHAVE_DIRETORIA):
+        return "Diretoria"
+    return "Outros"
+
+
+def _classificar_orgao(cargo: str, nome_orgao: str = "") -> str:
+    orgao_por_nome = _classificar_orgao_por_nome(nome_orgao)
+    if orgao_por_nome in {"Conselho", "Diretoria"}:
+        return orgao_por_nome
+
     cargo_norm = _normalizar_texto_sem_acento(cargo)
     if any(ch in cargo_norm for ch in CARGOS_CHAVE_CONSELHO):
         return "Conselho"
@@ -1712,7 +1727,7 @@ def _extrair_nome_cargo_de_texto(texto: str) -> tuple[str, str, str]:
 def _extrair_orgaos_do_json(payload) -> pd.DataFrame:
     linhas = []
 
-    def _registrar(nome: str, cargo: str):
+    def _registrar(nome: str, cargo: str, nome_orgao: str = ""):
         nome_limpo = _normalizar_texto_sem_acento(re.sub(r"\d{11}", "", str(nome)).strip())
         cargo_limpo = _normalizar_texto_sem_acento(str(cargo))
         if not nome_limpo or not cargo_limpo:
@@ -1722,32 +1737,38 @@ def _extrair_orgaos_do_json(payload) -> pd.DataFrame:
         if not _nome_pessoa_valido(nome_limpo):
             return
 
-        orgao = _classificar_orgao(cargo_limpo)
+        orgao = _classificar_orgao(cargo_limpo, nome_orgao)
         if orgao not in {"Conselho", "Diretoria"}:
             return
 
         linhas.append({"Nome": nome_limpo, "Cargo": cargo_limpo, "Órgão": orgao})
 
-    def _visitar(no, chave_pai: str = ""):
+    def _visitar(no, chave_pai: str = "", orgao_contexto: str = ""):
         if isinstance(no, dict):
             normalizadas = {_normalizar_texto_sem_acento(k): v for k, v in no.items()}
             nome = normalizadas.get("NOME") or normalizadas.get("NOMEPESSOA")
             cargo = normalizadas.get("CARGO") or normalizadas.get("CARGONOME")
+            nome_orgao = orgao_contexto
+            if "ADMINISTRADORES" in normalizadas and normalizadas.get("NOME"):
+                nome_orgao = str(normalizadas.get("NOME"))
+            elif normalizadas.get("NOMEORGAO"):
+                nome_orgao = str(normalizadas.get("NOMEORGAO"))
             if nome and cargo:
-                _registrar(nome, cargo)
+                _registrar(nome, cargo, nome_orgao)
 
             for k, valor in no.items():
                 chave = _normalizar_texto_sem_acento(k)
                 if isinstance(valor, (dict, list)):
-                    _visitar(valor, chave)
+                    proximo_orgao = nome_orgao if chave in {"ADMINISTRADORES", "ORGAOS"} else orgao_contexto
+                    _visitar(valor, chave, proximo_orgao)
                 elif isinstance(valor, str):
                     if "ORGAO" in chave or "ESTATUT" in chave or "CONSEL" in chave or "DIRETOR" in chave:
                         nome2, cargo2, _ = _extrair_nome_cargo_de_texto(valor)
                         if nome2 and cargo2:
-                            _registrar(nome2, cargo2)
+                            _registrar(nome2, cargo2, nome_orgao)
         elif isinstance(no, list):
             for item in no:
-                _visitar(item, chave_pai)
+                _visitar(item, chave_pai, orgao_contexto)
 
     _visitar(payload)
     if not linhas:
