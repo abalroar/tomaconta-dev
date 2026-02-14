@@ -6410,7 +6410,7 @@ elif menu == "Evolução":
                 x=ano_labels,
                 y=df_graph["Lucro Líquido"],
                 name="Lucro Líquido",
-                marker_color="#9B9B9B",
+                marker_color="#111111",
                 yaxis="y",
             )
         )
@@ -6419,7 +6419,7 @@ elif menu == "Evolução":
                 x=ano_labels,
                 y=df_graph["Patrimônio Líquido"],
                 name="Patrimônio Líquido",
-                marker_color="#102A83",
+                marker_color="#6E6E6E",
                 yaxis="y",
             )
         )
@@ -6429,8 +6429,8 @@ elif menu == "Evolução":
                 y=df_graph["Carteira Classificada"],
                 mode="lines+markers",
                 name="Carteira Classificada",
-                line=dict(color="#FF6B35", width=2, shape="spline", smoothing=1.15),
-                marker=dict(size=8, color="#FF6B35"),
+                line=dict(color="#ff5a00", width=2, shape="spline", smoothing=1.15),
+                marker=dict(size=8, color="#ff5a00"),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -6441,8 +6441,8 @@ elif menu == "Evolução":
                 y=df_graph["Core Funding"],
                 mode="lines+markers",
                 name="Core Funding",
-                line=dict(color="#1F1F1F", width=2, shape="spline", smoothing=1.15),
-                marker=dict(size=8, color="#1F1F1F"),
+                line=dict(color="#222222", width=2, shape="spline", smoothing=1.15),
+                marker=dict(size=8, color="#222222"),
                 connectgaps=True,
                 yaxis="y2",
             )
@@ -6472,10 +6472,10 @@ elif menu == "Evolução":
                     )
                 )
 
-        _add_label_annotations(df_graph["Lucro Líquido"], "y", "#4A4A4A", "rgba(255,255,255,0.88)", 14)
-        _add_label_annotations(df_graph["Patrimônio Líquido"], "y", "#102A83", "rgba(234,240,255,0.92)", 14)
-        _add_label_annotations(df_graph["Carteira Classificada"], "y2", "#FF6B35", "rgba(255,245,240,0.9)", 16)
-        _add_label_annotations(df_graph["Core Funding"], "y2", "#000000", "rgba(245,245,245,0.92)", -16)
+        _add_label_annotations(df_graph["Lucro Líquido"], "y", "#FFFFFF", "rgba(17,17,17,0.94)", 14)
+        _add_label_annotations(df_graph["Patrimônio Líquido"], "y", "#111111", "rgba(232,232,232,0.96)", 14)
+        _add_label_annotations(df_graph["Carteira Classificada"], "y2", "#ff5a00", "rgba(255,243,236,0.96)", 16)
+        _add_label_annotations(df_graph["Core Funding"], "y2", "#FFFFFF", "rgba(34,34,34,0.94)", -16)
 
         fig_ev.update_layout(
             barmode="group",
@@ -6486,6 +6486,8 @@ elif menu == "Evolução":
             xaxis=dict(type="category", categoryorder="array", categoryarray=ano_labels),
             legend=dict(orientation="v", y=0.5, x=0.01),
             margin=dict(t=30, b=20),
+            plot_bgcolor="#f2f2f2",
+            paper_bgcolor="#f2f2f2",
             annotations=annotations_ev,
         )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
@@ -7272,10 +7274,11 @@ elif menu == "Rankings":
                             )
 
                             n_bancos = len(df_selecionado_cap)
+                            # Paleta inspirada no Itaú BBA: laranja, preto/grafite e cinza.
                             cores_componentes = {
-                                'CET1 (%)': '#1f77b4',
-                                'AT1 (%)': '#ff7f0e',
-                                'T2 (%)': '#2ca02c'
+                                'CET1 (%)': '#ff5a00',  # laranja base
+                                'AT1 (%)': '#111111',   # preto/grafite
+                                'T2 (%)': '#b7b7b7'     # cinza intermediário
                             }
 
                             fig_basileia = go.Figure()
