@@ -8132,6 +8132,19 @@ elif menu == "DRE":
             return [p for p in parts if p]
         return []
 
+    # Etapa 0 (mapeamento COSIF no tooltip): estrutura inicial para
+    # explicitar, por linha DRE, quais contas entram no cálculo conforme
+    # nomenclatura IFData. As contas abaixo foram validadas para o caso
+    # "Resultado com Derivativos (i)" (exemplo solicitado).
+    DRE_COSIF_MAP_ETAPA0 = {
+        "Res. Derivativos": {
+            "ifdata_label": "Resultado com Derivativos (i)",
+            "contas": ["7158000003", "8155000005"],
+            "formula": "Somatório das contas COSIF [7158000003] + [8155000005]",
+            "status": "validado_exemplo",
+        }
+    }
+
     def load_dre_mapping():
         return [
             {
@@ -8885,6 +8898,14 @@ elif menu == "DRE":
                 tooltip_parts.append(f"Fontes: {fontes_fmt}")
             if entry.get("ytd_note"):
                 tooltip_parts.append("Nota YTD: no BC o DRE é semestral acumulado; aqui exibimos acumulado do ano (YTD).")
+
+            cosif_info = DRE_COSIF_MAP_ETAPA0.get(entry["label"])
+            if cosif_info:
+                if cosif_info.get("ifdata_label"):
+                    tooltip_parts.append(f"IFData (referência): {cosif_info['ifdata_label']}")
+                if cosif_info.get("formula"):
+                    tooltip_parts.append(cosif_info["formula"])
+
             tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
 
             label_exib = entry["label"]
@@ -9096,6 +9117,7 @@ elif menu == "DRE":
                 <strong>mini-glossário DRE:</strong><br>
                 <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
                 <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
+                <strong>Etapa 0 (mapeamento COSIF):</strong> piloto implementado para "Res. Derivativos": Resultado com Derivativos (i) = [7158000003] + [8155000005].<br>
                 <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
                 <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
             </div>
