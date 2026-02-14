@@ -2146,6 +2146,36 @@ def _normalizar_basileia_display(serie: pd.Series) -> pd.Series:
         return serie_num
 
 
+def _normalizar_capital_principal_display(serie: pd.Series) -> pd.Series:
+    """Converte CET1/Capital Principal para display percentual (0-100) de forma robusta.
+
+    Resolve o cenário recorrente de alternância 0.15% vs 15.00% quando há
+    dupla divisão residual por 100 em alguma etapa do pipeline.
+
+    Regras (para séries de capital regulatório):
+    - q95 < 0.03 e med < 0.02  -> provável dupla divisão -> multiplicar por 10.000
+    - med < 1                   -> base decimal normal -> multiplicar por 100
+    - med >= 1                  -> já em 0-100         -> manter
+    """
+    serie_num = pd.to_numeric(serie, errors="coerce")
+    if serie_num.empty:
+        return serie_num
+
+    serie_valid = serie_num.dropna().abs()
+    if serie_valid.empty:
+        return serie_num
+
+    q95 = float(serie_valid.quantile(0.95))
+    med = float(serie_valid.median())
+
+    if q95 < 0.03 and med < 0.02:
+        print(f"[DIAG][PCT][CET1] Reescala 10.000 aplicada: med={med:.6f}, q95={q95:.6f}")
+        return serie_num * 10000
+    if med < 1:
+        return serie_num * 100
+    return serie_num
+
+
 def _normalizar_valor_indicador(valor, variavel: Optional[str]):
     """Normaliza valor bruto para escala interna consistente antes do display.
 
@@ -2197,6 +2227,8 @@ def _delta_percentual_em_bps(variavel: Optional[str]) -> bool:
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
     if variavel and "Basileia" in variavel:
         return _normalizar_basileia_display(serie)
+    if variavel and ("Capital Principal" in variavel or "CET1" in variavel):
+        return _normalizar_capital_principal_display(serie)
     if _is_variavel_percentual(variavel):
         return _normalizar_percentual_display(serie, variavel)
     return serie * format_info['multiplicador']
@@ -7187,7 +7219,7 @@ elif menu == "Rankings":
 
             format_info = get_axis_format(indicador_col)
             if indicador_label == "Índice de Capital Principal (CET1)":
-                format_info = {**format_info, 'tickformat': '.1f'}
+                format_info = {**format_info, 'tickformat': '.2f'}
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False, variavel_ref: Optional[str] = None):
                 _ = variavel_ref
