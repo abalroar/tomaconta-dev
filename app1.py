@@ -8132,6 +8132,53 @@ elif menu == "DRE":
             return [p for p in parts if p]
         return []
 
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_dre_cosif_mapping():
+        """Carrega mapeamento COSIF da DRE (etapa 0+) a partir de arquivo versionado."""
+        caminho = Path("data/dre_cosif_mapping.json")
+        if not caminho.exists():
+            return {}
+        try:
+            payload = json.loads(caminho.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+        mappings = payload.get("mappings", []) if isinstance(payload, dict) else []
+        mapa = {}
+        for item in mappings:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            if not label:
+                continue
+            contas = [
+                str(c).strip() for c in item.get("cosif_accounts", [])
+                if str(c).strip()
+            ]
+            depara = []
+            for linha in item.get("cosif_depara", []) if isinstance(item.get("cosif_depara", []), list) else []:
+                if not isinstance(linha, dict):
+                    continue
+                conta = str(linha.get("account") or "").strip()
+                desc = str(linha.get("description") or "").strip()
+                if not conta:
+                    continue
+                depara.append({"account": conta, "description": desc})
+
+            # Backward compatibility: se vier apenas cosif_accounts, converte para de-para sem descrição.
+            if not depara and contas:
+                depara = [{"account": c, "description": ""} for c in contas]
+
+            mapa[label] = {
+                "ifdata_label": str(item.get("ifdata_label") or "").strip(),
+                "contas": contas,
+                "depara": depara,
+                "formula": str(item.get("cosif_formula") or "").strip(),
+                "status": str(item.get("status") or "").strip(),
+                "source": str(item.get("source") or "").strip(),
+            }
+        return mapa
+
     def load_dre_mapping():
         return [
             {
@@ -8867,6 +8914,7 @@ elif menu == "DRE":
                 _entry["is_ratio_footer"] = True
 
         formato_por_label = {entry["label"]: entry.get("format", "num") for entry in mapping_entries_ordenado}
+        dre_cosif_map = load_dre_cosif_mapping()
         tooltip_por_label = {}
         entradas_com_label = []
         for entry in mapping_entries_ordenado:
@@ -8885,7 +8933,32 @@ elif menu == "DRE":
                 tooltip_parts.append(f"Fontes: {fontes_fmt}")
             if entry.get("ytd_note"):
                 tooltip_parts.append("Nota YTD: no BC o DRE é semestral acumulado; aqui exibimos acumulado do ano (YTD).")
-            tooltip_por_label[entry["label"]] = " | ".join(tooltip_parts)
+
+            cosif_info = dre_cosif_map.get(entry["label"])
+            if cosif_info:
+                if cosif_info.get("ifdata_label"):
+                    tooltip_parts.append(f"IFData (reconciliação): {cosif_info['ifdata_label']}")
+
+                depara = cosif_info.get("depara") or []
+                if depara:
+                    tooltip_parts.append("De-para COSIF (conta → descrição):")
+                    for item_depara in depara:
+                        conta = str(item_depara.get("account") or "").strip()
+                        desc = str(item_depara.get("description") or "").strip()
+                        if conta and desc:
+                            tooltip_parts.append(f"[{conta}] {desc}")
+                        elif conta:
+                            tooltip_parts.append(f"[{conta}]")
+                elif cosif_info.get("contas"):
+                    contas_txt = " + ".join([f"[{c}]" for c in cosif_info["contas"]])
+                    tooltip_parts.append(f"Contas COSIF (IFData): {contas_txt}")
+
+                if cosif_info.get("formula"):
+                    tooltip_parts.append(cosif_info["formula"])
+                if cosif_info.get("status"):
+                    tooltip_parts.append(f"Status do mapeamento: {cosif_info['status']}")
+
+            tooltip_por_label[entry["label"]] = "\n".join(tooltip_parts)
 
             label_exib = entry["label"]
             entrada_copy = entry.copy()
@@ -9091,11 +9164,13 @@ elif menu == "DRE":
         )
 
         st.markdown(
-            """
+            f"""
             <div style="font-size: 12px; color: #666; margin-top: 12px;">
                 <strong>mini-glossário DRE:</strong><br>
                 <strong>Base BC (Rel. 4):</strong> o Banco Central divulga o DRE de forma semestral acumulada; nesta aba exibimos o acumulado no ano (YTD) por período.<br>
                 <strong>Memória de cálculo por conceito:</strong> passe o cursor no ícone ⓘ de cada linha para ver conceito, fórmula e fontes usadas.<br>
+                <strong>Cobertura COSIF atual:</strong> {len(dre_cosif_map)} linha(s) com mapeamento explícito no arquivo versionado.<br>
+                <strong>Etapa 0 (mapeamento COSIF):</strong> o tooltip ⓘ exibe o de-para IFData ↔ COSIF (conta e descrição) para as linhas já reconciliadas no arquivo <code>data/dre_cosif_mapping.json</code>.<br>
                 <strong>Marcadores ▲/▼:</strong> indicam crescimento ou queda em relação ao mesmo período acumulado do ano imediatamente anterior.<br>
                 <strong>Set/Dez:</strong> quando necessário, o acumulado considera a composição semestral publicada pelo BC para manter comparabilidade anual.<br>
             </div>
