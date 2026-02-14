@@ -2183,6 +2183,17 @@ def _selecionar_valor_delta(df_periodo: pd.DataFrame, instituicao: str, coluna_v
     return _normalizar_valor_indicador(serie.loc[idx], coluna_variavel)
 
 
+def _delta_percentual_em_bps(variavel: Optional[str]) -> bool:
+    """Indica se o delta percentual deve ser exibido em bps para a variável."""
+    if not variavel:
+        return False
+    return variavel in {
+        "Índice de Basileia",
+        "Índice de Capital Principal",
+        "Índice de Capital Principal (CET1)",
+    }
+
+
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
     if variavel and "Basileia" in variavel:
         return _normalizar_basileia_display(serie)
@@ -7163,6 +7174,8 @@ elif menu == "Rankings":
                 )
 
             format_info = get_axis_format(indicador_col)
+            if indicador_label == "Índice de Capital Principal (CET1)":
+                format_info = {**format_info, 'tickformat': '.1f'}
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False, variavel_ref: Optional[str] = None):
                 valor_norm = _normalizar_valor_indicador(valor, variavel_ref)
@@ -7592,7 +7605,11 @@ elif menu == "Rankings":
                             delta_absoluto = v_sub - v_ini
 
                             if _is_variavel_percentual(coluna_variavel):
-                                delta_texto = f"{delta_absoluto * 100:+.2f}%"
+                                if _delta_percentual_em_bps(coluna_variavel):
+                                    delta_bps = delta_absoluto * 10000
+                                    delta_texto = f"{delta_bps:+.0f} bps"
+                                else:
+                                    delta_texto = f"{delta_absoluto * 100:+.2f}%"
                             elif coluna_variavel in VARS_MOEDAS:
                                 delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
                             else:
@@ -7659,8 +7676,14 @@ elif menu == "Rankings":
                                     dado['valor_plot'] = dado['variacao_pct']
                                 else:
                                     dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
+                                if _delta_percentual_em_bps(coluna_variavel):
+                                    dado['valor_plot'] = dado['valor_plot'] * 100
                             else:
-                                dado['valor_plot'] = _normalizar_valor_indicador(dado['delta'], coluna_variavel) * format_info['multiplicador']
+                                delta_plot = _normalizar_valor_indicador(dado['delta'], coluna_variavel)
+                                if _delta_percentual_em_bps(coluna_variavel):
+                                    dado['valor_plot'] = delta_plot * 10000
+                                else:
+                                    dado['valor_plot'] = delta_plot * format_info['multiplicador']
 
                         n_bancos = len(dados_grafico)
                         orientacao_horizontal = n_bancos > 15
@@ -7669,13 +7692,27 @@ elif menu == "Rankings":
                         valores_plot = [d['valor_plot'] for d in dados_grafico]
                         cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
 
-                        eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
-                        eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
                         if tipo_variacao == "Δ %":
-                            eixo_titulo = "Δ %"
+                            if _delta_percentual_em_bps(coluna_variavel):
+                                eixo_tickformat = ',.0f'
+                                eixo_ticksuffix = ' bps'
+                                eixo_titulo = "Δ (bps)"
+                            else:
+                                eixo_tickformat = '.1f'
+                                eixo_ticksuffix = '%'
+                                eixo_titulo = "Δ %"
                         elif _is_variavel_percentual(coluna_variavel):
-                            eixo_titulo = "Δ absoluto (%)"
+                            if _delta_percentual_em_bps(coluna_variavel):
+                                eixo_tickformat = ',.0f'
+                                eixo_ticksuffix = ' bps'
+                                eixo_titulo = "Δ absoluto (bps)"
+                            else:
+                                eixo_tickformat = '.2f'
+                                eixo_ticksuffix = '%'
+                                eixo_titulo = "Δ absoluto (%)"
                         else:
+                            eixo_tickformat = format_info['tickformat']
+                            eixo_ticksuffix = format_info['ticksuffix']
                             eixo_titulo = "Δ absoluto"
 
                         fig_barras = go.Figure()
