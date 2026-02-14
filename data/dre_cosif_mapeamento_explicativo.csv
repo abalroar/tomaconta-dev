@@ -1,0 +1,47 @@
+conta_dre_atual,linha_ifdata,ordem_componente,descricao_componente_cosif,formula_referencia_ifdata
+Rec. Aplicações Interfinanceiras Liquidez,Receita de Juros com Aplicações Interfinanceiras de Liquidez (a1),1,RENDAS DE APLICAÇÕES EM OPERAÇÕES COMPROMISSADAS,Somatório das contas COSIF [7141000003]+[7142000002]+[8115020001]
+Rec. Aplicações Interfinanceiras Liquidez,Receita de Juros com Aplicações Interfinanceiras de Liquidez (a1),2,RENDAS DE APLICAÇÕES EM DEPÓSITOS INTERFINANCEIROS,Somatório das contas COSIF [7141000003]+[7142000002]+[8115020001]
+Rec. Aplicações Interfinanceiras Liquidez,Receita de Juros com Aplicações Interfinanceiras de Liquidez (a1),3,(-) DESPESAS DE OPERAÇÕES COMPROMISSADAS (subconta COSIF informada no IFData),Somatório das contas COSIF [7141000003]+[7142000002]+[8115020001]
+Rec. TVMs,Rendas de Títulos e Valores Mobiliários (b),1,RENDAS DE TÍTULOS DE RENDA FIXA,Somatório das contas COSIF [7151000000]+[7151300009]+[7151500005]+[7152000009]+[7154000007]+[7155000006]+[7157500009]
+Rec. TVMs,Rendas de Títulos e Valores Mobiliários (b),2,RENDAS DE CERTIFICADOS DE OPERAÇÕES ESTRUTURADAS,Somatório das contas COSIF [7151000000]+[7151300009]+[7151500005]+[7152000009]+[7154000007]+[7155000006]+[7157500009]
+Rec. TVMs,Rendas de Títulos e Valores Mobiliários (b),3,RENDAS DE TÍTULOS E VALORES MOBILIÁRIOS NO EXTERIOR,Somatório das contas COSIF [7151000000]+[7151300009]+[7151500005]+[7152000009]+[7154000007]+[7155000006]+[7157500009]
+Rec. TVMs,Rendas de Títulos e Valores Mobiliários (b),4,RENDAS DE TÍTULOS DE RENDA VARIÁVEL,Somatório das contas COSIF [7151000000]+[7151300009]+[7151500005]+[7152000009]+[7154000007]+[7155000006]+[7157500009]
+Rec. TVMs,Rendas de Títulos e Valores Mobiliários (b),5,RENDAS DE APLICAÇÕES EM FUNDOS DE INVESTIMENTO,Somatório das contas COSIF [7151000000]+[7151300009]+[7151500005]+[7152000009]+[7154000007]+[7155000006]+[7157500009]
+Rec. TVMs,Rendas de Títulos e Valores Mobiliários (b),6,RENDAS DE APLICAÇÕES NO FUNDO DE DESENVOLVIMENTO SOCIAL,Somatório das contas COSIF [7151000000]+[7151300009]+[7151500005]+[7152000009]+[7154000007]+[7155000006]+[7157500009]
+Rec. TVMs,Rendas de Títulos e Valores Mobiliários (b),7,LUCROS COM TÍTULOS DE RENDA FIXA,Somatório das contas COSIF [7151000000]+[7151300009]+[7151500005]+[7152000009]+[7154000007]+[7155000006]+[7157500009]
+Rec. Crédito,Rendas de Operações de Crédito (c),1,Rendas de Operações de Crédito,Somatório das contas COSIF [7110000003]
+Rec. Arrendamento Financeiro,Rendas de Arrendamento Financeiro (d),1,Rendas de Arrendamento,Somatório das contas COSIF [7120000000]
+Rec. Outras Operações c/ Características de Crédito,Rendas de Outras Operações com Características de Concessão de Crédito (e),1,Rendas de Outras Operações Com Características de Crédito,Somatório das contas COSIF [7160000008]
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,1,Rendas de Aplicações Interfinanceiras de Liquidez,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,2,RENDAS DE TÍTULOS DE RENDA FIXA,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,3,RENDAS DE CERTIFICADOS DE OPERAÇÕES ESTRUTURADAS,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,4,RENDAS DE TÍTULOS E VALORES MOBILIÁRIOS NO EXTERIOR,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,5,RENDAS DE TÍTULOS DE RENDA VARIÁVEL,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,6,RENDAS DE APLICAÇÕES EM FUNDOS DE INVESTIMENTO,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,7,RENDAS DE APLICAÇÕES NO FUNDO DE DESENVOLVIMENTO SOCIAL,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,8,LUCROS COM TÍTULOS DE RENDA FIXA,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,9,Rendas de Operações de Crédito,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,10,Rendas de Arrendamento,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Resultado de Intermediação Financeira Bruto,Resultado de Intermediação Financeira Bruto,11,Rendas de Outras Operações Com Características de Crédito,Somatório das contas COSIF de (a)+(b)+(c)+(d)+(e)
+Desp. Captação,Despesas de Captações (g),1,(-) Despesas de Captação,Somatório das contas COSIF [8110000002]
+Desp. Dívida Elegível a Capital,Despesas de Instrumentos de Dívida Elegíveis a Capital (h),1,(-) DESPESAS DE INSTRUMENTOS COM CLÁUSULAS DE SUBORDINAÇÃO,Somatório das contas COSIF [8119100006]
+Res. Derivativos,Resultado com Derivativos (i),1,RENDAS EM OPERAÇÕES COM DERIVATIVOS,Somatório das contas COSIF [7158000003] + [8155000005]
+Res. Derivativos,Resultado com Derivativos (i),2,(-) DESPESAS EM OPERAÇÕES COM DERIVATIVOS,Somatório das contas COSIF [7158000003] + [8155000005]
+Resultado Transações Pgto,Resultado com Transações de Pagamento (l),1,RECEITAS POR SERVIÇOS DE PAGAMENTO,Somatório das contas COSIF [7170500000]+[7191800002]+[8191800001]+[8191900004]
+Resultado Transações Pgto,Resultado com Transações de Pagamento (l),2,RENDAS POR ANTECIPAÇÃO DE OBRIGAÇÕES DE TRANSAÇÕES DE PAGAMENTO,Somatório das contas COSIF [7170500000]+[7191800002]+[8191800001]+[8191900004]
+Resultado Transações Pgto,Resultado com Transações de Pagamento (l),3,(-) DESPESAS PELO RECEBIMENTO ANTECIPADO DE VALORES RELATIVOS A TRANSAÇÕES DE PAGAMENTO,Somatório das contas COSIF [7170500000]+[7191800002]+[8191800001]+[8191900004]
+Resultado Transações Pgto,Resultado com Transações de Pagamento (l),4,(-) DESPESAS COM SERVIÇOS ASSOCIADOS A TRANSAÇÕES DE PAGAMENTO,Somatório das contas COSIF [7170500000]+[7191800002]+[8191800001]+[8191900004]
+Renda Tarifas Bancárias,Rendas de Tarifas Bancárias (m),1,RECEITA DE TARIFAS - PN E MEI,Somatório das contas COSIF [7170100008] + [7170200001]
+Renda Tarifas Bancárias,Rendas de Tarifas Bancárias (m),2,RECEITA DE TARIFAS - PJ,Somatório das contas COSIF [7170100008] + [7170200001]
+Desp. Pessoal,Despesas de Pessoal (o),1,(-) DESPESAS DE PESSOAL - BENEFÍCIOS,Somatório das contas COSIF de despesas de pessoal
+Desp. Pessoal,Despesas de Pessoal (o),2,(-) DESPESAS DE PESSOAL - ENCARGOS SOCIAIS,Somatório das contas COSIF de despesas de pessoal
+Desp. Pessoal,Despesas de Pessoal (o),3,(-) DESPESAS DE PESSOAL - PROVENTOS,Somatório das contas COSIF de despesas de pessoal
+Desp. Pessoal,Despesas de Pessoal (o),4,(-) DESPESAS DE PESSOAL - TREINAMENTO,Somatório das contas COSIF de despesas de pessoal
+Desp. Pessoal,Despesas de Pessoal (o),5,(-) DESPESAS DE REMUNERAÇÃO DE ESTAGIÁRIOS,Somatório das contas COSIF de despesas de pessoal
+Desp. Adm,Despesas Administrativas (p),1,(-) Despesas Administrativas,Somatório das contas COSIF [8170000004]
+Desp. Tributárias,Despesas Tributárias (s),1,(-) DESPESAS TRIBUTÁRIAS,Somatório das contas COSIF [8176900005]
+Outras Receitas,Outras Receitas (u),1,Outras Receitas Operacionais,Somatório das contas COSIF [7190000009]
+Outras Despesas,Outras Despesas (v),1,(-) Outras Despesas Operacionais,Somatório das contas COSIF [8190000008]
+IR/CSLL,Imposto de Renda e Contribuição Social (y),1,Tributos sobre o Lucro,Somatório das contas COSIF [7940000008] + [8940000007]
+IR/CSLL,Imposto de Renda e Contribuição Social (y),2,(-) Tributos sobre o Lucro,Somatório das contas COSIF [7940000008] + [8940000007]
+Res. Participação Lucro,Participações no Lucro (z),1,(-) Participações no Lucro,Somatório das contas COSIF [8970000008]
