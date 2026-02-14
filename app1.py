@@ -2183,6 +2183,17 @@ def _selecionar_valor_delta(df_periodo: pd.DataFrame, instituicao: str, coluna_v
     return _normalizar_valor_indicador(serie.loc[idx], coluna_variavel)
 
 
+def _delta_percentual_em_bps(variavel: Optional[str]) -> bool:
+    """Indica se o delta percentual deve ser exibido em bps para a variável."""
+    if not variavel:
+        return False
+    return variavel in {
+        "Índice de Basileia",
+        "Índice de Capital Principal",
+        "Índice de Capital Principal (CET1)",
+    }
+
+
 def _calcular_valores_display(serie: pd.Series, variavel: str, format_info: dict) -> pd.Series:
     if variavel and "Basileia" in variavel:
         return _normalizar_basileia_display(serie)
@@ -4902,11 +4913,10 @@ with col_header:
 MENU_PRINCIPAL = [
     "Rankings",
     "Peers (Tabela)",
-    "Órgãos Estatutários",
+    "Conselho e Diretoria",
     "Evolução",
     "Scatter Plot",
     "DRE",
-    "DRE (Balancetes)",
     "Carteira 4.966",
     "Taxas de Juros por Produto",
     "Crie sua métrica!",
@@ -6076,8 +6086,8 @@ elif menu == "Peers (Tabela)":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Órgãos Estatutários":
-    st.markdown("### Órgãos Estatutários")
+elif menu == "Conselho e Diretoria":
+    st.markdown("### Conselho e Diretoria")
 
     try:
         dados_conglomerados = carregar_conglomerados()
@@ -6139,7 +6149,7 @@ elif menu == "Órgãos Estatutários":
             inst_obj = next((x for x in instituicoes if x["label"] == inst_sel), None)
 
             if inst_obj:
-                st.markdown(f"### Órgãos Estatutários - {inst_obj['nome']}")
+                st.markdown(f"### Conselho e Diretoria - {inst_obj['nome']}")
 
                 aliases_df = obter_aliases_orgaos()
                 cor_linha = "#F4F1EA"
@@ -6198,7 +6208,7 @@ elif menu == "Órgãos Estatutários":
                             data_extracao = datetime.now().strftime('%d/%m/%Y')
                             excel_bytes = gerar_excel_orgaos_estatutarios(
                                 df_filtrado,
-                                titulo=f"Órgãos Estatutários - {inst_obj['nome']} ({orgao_sel})",
+                                titulo=f"Conselho e Diretoria - {inst_obj['nome']} ({orgao_sel})",
                                 cor_fundo=cor_linha,
                                 data_extracao=data_extracao,
                             )
@@ -7050,7 +7060,7 @@ elif menu == "Rankings":
         periodos_dropdown = ordenar_periodos(df['Período'].dropna().unique(), reverso=True)
 
         st.markdown("### ranking")
-        opcoes_grafico = ["Ranking (barras)", "Deltas (barras)", "Deltas (pontos)"]
+        opcoes_grafico = ["Ranking (barras)", "Deltas (barras)"]
         if st.session_state.get("grafico_rankings_toggle_v2") not in opcoes_grafico:
             st.session_state["grafico_rankings_toggle_v2"] = opcoes_grafico[0]
         grafico_escolhido = st.radio(
@@ -7061,13 +7071,6 @@ elif menu == "Rankings":
             horizontal=True
         )
         grafico_base = "Ranking" if grafico_escolhido.startswith("Ranking") else "Deltas (antes e depois)"
-        modo_visualizacao_deltas = None
-        if grafico_base == "Deltas (antes e depois)":
-            modo_visualizacao_deltas = (
-                "Barras (delta)"
-                if grafico_escolhido == "Deltas (barras)"
-                else "Pontos (antes/depois)"
-            )
 
         indicadores_config = {
             'Ativo Total': ['Ativo Total'],
@@ -7171,6 +7174,8 @@ elif menu == "Rankings":
                 )
 
             format_info = get_axis_format(indicador_col)
+            if indicador_label == "Índice de Capital Principal (CET1)":
+                format_info = {**format_info, 'tickformat': '.1f'}
 
             def formatar_numero(valor, fmt_info, incluir_sinal=False, variavel_ref: Optional[str] = None):
                 valor_norm = _normalizar_valor_indicador(valor, variavel_ref)
@@ -7580,59 +7585,6 @@ elif menu == "Rankings":
                     df_inicial = df[df['Período'] == periodo_inicial_delta].copy()
                     df_subsequente = df[df['Período'] == periodo_subsequente_delta].copy()
 
-                    if modo_visualizacao_deltas == "Pontos (antes/depois)":
-                        st.markdown("---")
-                        col_escala1, col_escala2, col_escala3 = st.columns([1, 1, 2])
-
-                        with col_escala1:
-                            if 'delta_escala_modo' not in st.session_state:
-                                st.session_state['delta_escala_modo'] = 'Auto (zoom)'
-
-                            modo_escala = st.radio(
-                                "escala do eixo Y",
-                                ["Auto (zoom)", "Zero baseline", "Manual"],
-                                index=["Auto (zoom)", "Zero baseline", "Manual"].index(st.session_state['delta_escala_modo']),
-                                key="delta_escala_modo_radio",
-                                horizontal=True
-                            )
-                            st.session_state['delta_escala_modo'] = modo_escala
-
-                        with col_escala2:
-                            if 'delta_escala_margem' not in st.session_state:
-                                st.session_state['delta_escala_margem'] = 10
-
-                            if modo_escala == "Auto (zoom)":
-                                margem_pct = st.slider(
-                                    "margem (%)",
-                                    0, 50, st.session_state['delta_escala_margem'],
-                                    key="delta_margem_slider",
-                                    help="Margem adicional acima/abaixo dos valores"
-                                )
-                                st.session_state['delta_escala_margem'] = margem_pct
-
-                        with col_escala3:
-                            if modo_escala == "Manual":
-                                col_min, col_max = st.columns(2)
-                                with col_min:
-                                    if 'delta_y_min' not in st.session_state:
-                                        st.session_state['delta_y_min'] = 0.0
-                                    y_min_manual = st.number_input(
-                                        "Y mínimo",
-                                        value=st.session_state['delta_y_min'],
-                                        key="delta_y_min_input"
-                                    )
-                                    st.session_state['delta_y_min'] = y_min_manual
-                                with col_max:
-                                    if 'delta_y_max' not in st.session_state:
-                                        st.session_state['delta_y_max'] = 100.0
-                                    y_max_manual = st.number_input(
-                                        "Y máximo",
-                                        value=st.session_state['delta_y_max'],
-                                        key="delta_y_max_input"
-                                    )
-                                    st.session_state['delta_y_max'] = y_max_manual
-
-                        st.markdown("---")
 
                     for variavel in variaveis_selecionadas_delta:
                         coluna_variavel = delta_colunas_map.get(variavel, variavel)
@@ -7653,7 +7605,11 @@ elif menu == "Rankings":
                             delta_absoluto = v_sub - v_ini
 
                             if _is_variavel_percentual(coluna_variavel):
-                                delta_texto = f"{delta_absoluto * 100:+.2f}%"
+                                if _delta_percentual_em_bps(coluna_variavel):
+                                    delta_bps = delta_absoluto * 10000
+                                    delta_texto = f"{delta_bps:+.0f} bps"
+                                else:
+                                    delta_texto = f"{delta_absoluto * 100:+.2f}%"
                             elif coluna_variavel in VARS_MOEDAS:
                                 delta_texto = f"R$ {delta_absoluto/1e6:+,.0f}MM".replace(",", ".")
                             else:
@@ -7706,185 +7662,106 @@ elif menu == "Rankings":
                         else:
                             dados_grafico = sorted(dados_grafico, key=lambda x: x['delta'], reverse=True)
 
-                        if modo_visualizacao_deltas == "Pontos (antes/depois)":
-                            fig_delta = go.Figure()
-                            todos_y = []
-                            for dado in dados_grafico:
-                                todos_y.append(_normalizar_valor_indicador(dado['valor_ini'], coluna_variavel) * format_info['multiplicador'])
-                                todos_y.append(_normalizar_valor_indicador(dado['valor_sub'], coluna_variavel) * format_info['multiplicador'])
-
-                            for i, dado in enumerate(dados_grafico):
-                                inst = dado['instituicao']
-                                y_ini = _normalizar_valor_indicador(dado['valor_ini'], coluna_variavel) * format_info['multiplicador']
-                                y_sub = _normalizar_valor_indicador(dado['valor_sub'], coluna_variavel) * format_info['multiplicador']
-                                delta_positivo = dado['delta'] > 0
-
-                                cor_sub = '#2E7D32' if delta_positivo else '#7B1E3A'
-
-                                fig_delta.add_trace(go.Scatter(
-                                    x=[inst, inst],
-                                    y=[y_ini, y_sub],
-                                    mode='lines',
-                                    line=dict(color='#9E9E9E', width=2),
-                                    showlegend=False,
-                                    hoverinfo='skip'
-                                ))
-
-                                fig_delta.add_trace(go.Scatter(
-                                    x=[inst],
-                                    y=[y_ini],
-                                    mode='markers',
-                                    marker=dict(size=12, color='#424242', line=dict(width=1, color='white')),
-                                    name=periodo_inicial_delta if i == 0 else None,
-                                    showlegend=(i == 0),
-                                    legendgroup='inicial',
-                                    hovertemplate=f'<b>{inst}</b><br>{periodo_inicial_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<extra></extra>'
-                                ))
-
-                                fig_delta.add_trace(go.Scatter(
-                                    x=[inst],
-                                    y=[y_sub],
-                                    mode='markers',
-                                    marker=dict(size=12, color=cor_sub, line=dict(width=1, color='white')),
-                                    name=periodo_subsequente_delta if i == 0 else None,
-                                    showlegend=(i == 0),
-                                    legendgroup='subsequente',
-                                    customdata=[[dado['delta_texto'], dado['variacao_texto'], dado['memoria_calculo']]],
-                                    hovertemplate=f'<b>{inst}</b><br>{periodo_subsequente_delta}: %{{y:{format_info["tickformat"]}}}{format_info["ticksuffix"]}<br>Δ: %{{customdata[0]}}<br>Variação: %{{customdata[1]}}<br>%{{customdata[2]}}<extra></extra>'
-                                ))
-
-                            titulo_delta = f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}"
-
-                            yaxis_config = dict(
-                                showgrid=True,
-                                gridcolor='#e0e0e0',
-                                tickformat=format_info['tickformat'],
-                                ticksuffix=format_info['ticksuffix'],
-                                title=variavel
-                            )
-
-                            if todos_y:
-                                y_min_dados = min(todos_y)
-                                y_max_dados = max(todos_y)
-                                y_range = y_max_dados - y_min_dados if y_max_dados != y_min_dados else abs(y_max_dados) * 0.1 or 1
-
-                                if modo_escala == "Zero baseline":
-                                    yaxis_config['range'] = [min(0, y_min_dados - y_range * 0.05), max(0, y_max_dados + y_range * 0.05)]
-                                elif modo_escala == "Auto (zoom)":
-                                    margem = y_range * (margem_pct / 100)
-                                    yaxis_config['range'] = [y_min_dados - margem, y_max_dados + margem]
-                                elif modo_escala == "Manual":
-                                    yaxis_config['range'] = [y_min_manual, y_max_manual]
-
-                            fig_delta.update_layout(
-                                title=dict(
-                                    text=titulo_delta,
-                                    font=dict(size=16, family='IBM Plex Sans')
-                                ),
-                                height=max(400, len(dados_grafico) * 25 + 150),
-                                plot_bgcolor='#f8f9fa',
-                                paper_bgcolor='white',
-                                showlegend=True,
-                                legend=dict(
-                                    orientation="h",
-                                    yanchor="bottom",
-                                    y=1.02,
-                                    xanchor="left",
-                                    x=0
-                                ),
-                                xaxis=dict(
-                                    showgrid=False,
-                                    tickangle=45 if len(dados_grafico) > 10 else 0,
-                                    tickfont=dict(size=10)
-                                ),
-                                yaxis=yaxis_config,
-                                font=dict(family='IBM Plex Sans'),
-                                margin=dict(l=60, r=20, t=80, b=100)
-                            )
-
-                            st.markdown(f"### {variavel}")
-                            st.plotly_chart(fig_delta, width='stretch', config={'displayModeBar': False})
-                        else:
-                            valores_finitos = []
-                            for dado in dados_grafico:
-                                if tipo_variacao == "Δ %":
-                                    if np.isfinite(dado['variacao_pct']):
-                                        valores_finitos.append(abs(dado['variacao_pct']))
-
-                            cap_visual = (max(valores_finitos) * 1.2) if valores_finitos else 1
-
-                            for dado in dados_grafico:
-                                if tipo_variacao == "Δ %":
-                                    if np.isfinite(dado['variacao_pct']):
-                                        dado['valor_plot'] = dado['variacao_pct']
-                                    else:
-                                        dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
-                                else:
-                                    dado['valor_plot'] = _normalizar_valor_indicador(dado['delta'], coluna_variavel) * format_info['multiplicador']
-
-                            n_bancos = len(dados_grafico)
-                            orientacao_horizontal = n_bancos > 15
-
-                            insts = [d['instituicao'] for d in dados_grafico]
-                            valores_plot = [d['valor_plot'] for d in dados_grafico]
-                            cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
-
-                            eixo_tickformat = '.1f' if tipo_variacao == "Δ %" else format_info['tickformat']
-                            eixo_ticksuffix = '%' if tipo_variacao == "Δ %" else format_info['ticksuffix']
+                        valores_finitos = []
+                        for dado in dados_grafico:
                             if tipo_variacao == "Δ %":
-                                eixo_titulo = "Δ %"
-                            elif _is_variavel_percentual(coluna_variavel):
-                                eixo_titulo = "Δ absoluto (%)"
+                                if np.isfinite(dado['variacao_pct']):
+                                    valores_finitos.append(abs(dado['variacao_pct']))
+
+                        cap_visual = (max(valores_finitos) * 1.2) if valores_finitos else 1
+
+                        for dado in dados_grafico:
+                            if tipo_variacao == "Δ %":
+                                if np.isfinite(dado['variacao_pct']):
+                                    dado['valor_plot'] = dado['variacao_pct']
+                                else:
+                                    dado['valor_plot'] = cap_visual if dado['variacao_pct'] > 0 else -cap_visual
+                                if _delta_percentual_em_bps(coluna_variavel):
+                                    dado['valor_plot'] = dado['valor_plot'] * 100
                             else:
-                                eixo_titulo = "Δ absoluto"
+                                delta_plot = _normalizar_valor_indicador(dado['delta'], coluna_variavel)
+                                if _delta_percentual_em_bps(coluna_variavel):
+                                    dado['valor_plot'] = delta_plot * 10000
+                                else:
+                                    dado['valor_plot'] = delta_plot * format_info['multiplicador']
 
-                            fig_barras = go.Figure()
-                            fig_barras.add_trace(go.Bar(
-                                x=valores_plot if orientacao_horizontal else insts,
-                                y=insts if orientacao_horizontal else valores_plot,
-                                orientation='h' if orientacao_horizontal else 'v',
-                                marker=dict(color=cores_barras, opacity=0.9),
-                                customdata=np.stack([
-                                    [d['delta_texto'] for d in dados_grafico],
-                                    [d['variacao_texto'] for d in dados_grafico],
-                                    [d['memoria_calculo'] for d in dados_grafico],
-                                ], axis=-1),
-                                hovertemplate=(
-                                    "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
-                                ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<br>%{customdata[2]}<extra></extra>"
-                            ))
+                        n_bancos = len(dados_grafico)
+                        orientacao_horizontal = n_bancos > 15
 
-                            fig_barras.update_layout(
-                                title=dict(
-                                    text=f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}",
-                                    font=dict(size=16, family='IBM Plex Sans')
-                                ),
-                                height=max(450, len(dados_grafico) * 25 + 160),
-                                plot_bgcolor='#f8f9fa',
-                                paper_bgcolor='white',
-                                showlegend=False,
-                                xaxis=dict(
-                                    showgrid=True if not orientacao_horizontal else True,
-                                    zeroline=True,
-                                    zerolinecolor='#444',
-                                    tickformat=eixo_tickformat if orientacao_horizontal else None,
-                                    ticksuffix=eixo_ticksuffix if orientacao_horizontal else None,
-                                    title=eixo_titulo if orientacao_horizontal else None
-                                ),
-                                yaxis=dict(
-                                    showgrid=False if orientacao_horizontal else True,
-                                    zeroline=True,
-                                    zerolinecolor='#444',
-                                    tickformat=eixo_tickformat if not orientacao_horizontal else None,
-                                    ticksuffix=eixo_ticksuffix if not orientacao_horizontal else None,
-                                    title=eixo_titulo if not orientacao_horizontal else None
-                                ),
-                                font=dict(family='IBM Plex Sans'),
-                                margin=dict(l=60, r=20, t=80, b=100)
-                            )
+                        insts = [d['instituicao'] for d in dados_grafico]
+                        valores_plot = [d['valor_plot'] for d in dados_grafico]
+                        cores_barras = ['#2E7D32' if d['delta'] > 0 else '#7B1E3A' for d in dados_grafico]
 
-                            st.markdown(f"### {variavel}")
-                            st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
+                        if tipo_variacao == "Δ %":
+                            if _delta_percentual_em_bps(coluna_variavel):
+                                eixo_tickformat = ',.0f'
+                                eixo_ticksuffix = ' bps'
+                                eixo_titulo = "Δ (bps)"
+                            else:
+                                eixo_tickformat = '.1f'
+                                eixo_ticksuffix = '%'
+                                eixo_titulo = "Δ %"
+                        elif _is_variavel_percentual(coluna_variavel):
+                            if _delta_percentual_em_bps(coluna_variavel):
+                                eixo_tickformat = ',.0f'
+                                eixo_ticksuffix = ' bps'
+                                eixo_titulo = "Δ absoluto (bps)"
+                            else:
+                                eixo_tickformat = '.2f'
+                                eixo_ticksuffix = '%'
+                                eixo_titulo = "Δ absoluto (%)"
+                        else:
+                            eixo_tickformat = format_info['tickformat']
+                            eixo_ticksuffix = format_info['ticksuffix']
+                            eixo_titulo = "Δ absoluto"
+
+                        fig_barras = go.Figure()
+                        fig_barras.add_trace(go.Bar(
+                            x=valores_plot if orientacao_horizontal else insts,
+                            y=insts if orientacao_horizontal else valores_plot,
+                            orientation='h' if orientacao_horizontal else 'v',
+                            marker=dict(color=cores_barras, opacity=0.9),
+                            customdata=np.stack([
+                                [d['delta_texto'] for d in dados_grafico],
+                                [d['variacao_texto'] for d in dados_grafico],
+                                [d['memoria_calculo'] for d in dados_grafico],
+                            ], axis=-1),
+                            hovertemplate=(
+                                "<b>%{y}</b><br>" if orientacao_horizontal else "<b>%{x}</b><br>"
+                            ) + "Δ: %{customdata[0]}<br>Variação: %{customdata[1]}<br>%{customdata[2]}<extra></extra>"
+                        ))
+
+                        fig_barras.update_layout(
+                            title=dict(
+                                text=f"{variavel}: {periodo_inicial_delta} → {periodo_subsequente_delta}",
+                                font=dict(size=16, family='IBM Plex Sans')
+                            ),
+                            height=max(450, len(dados_grafico) * 25 + 160),
+                            plot_bgcolor='#f8f9fa',
+                            paper_bgcolor='white',
+                            showlegend=False,
+                            xaxis=dict(
+                                showgrid=True if not orientacao_horizontal else True,
+                                zeroline=True,
+                                zerolinecolor='#444',
+                                tickformat=eixo_tickformat if orientacao_horizontal else None,
+                                ticksuffix=eixo_ticksuffix if orientacao_horizontal else None,
+                                title=eixo_titulo if orientacao_horizontal else None
+                            ),
+                            yaxis=dict(
+                                showgrid=False if orientacao_horizontal else True,
+                                zeroline=True,
+                                zerolinecolor='#444',
+                                tickformat=eixo_tickformat if not orientacao_horizontal else None,
+                                ticksuffix=eixo_ticksuffix if not orientacao_horizontal else None,
+                                title=eixo_titulo if not orientacao_horizontal else None
+                            ),
+                            font=dict(family='IBM Plex Sans'),
+                            margin=dict(l=60, r=20, t=80, b=100)
+                        )
+
+                        st.markdown(f"### {variavel}")
+                        st.plotly_chart(fig_barras, width='stretch', config={'displayModeBar': False})
 
                         if bancos_selecionados_delta:
                             idx_ini_hist = periodos_disponiveis.index(periodo_inicial_delta)
@@ -9129,309 +9006,6 @@ elif menu == "DRE":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dre_download_excel"
         )
-
-
-elif menu == "DRE (Balancetes)":
-    if not _garantir_dados_principais("DRE (Balancetes)"):
-        st.stop()
-    st.markdown("### DRE (Balancetes BC — Cadoc 4060)")
-    st.caption("Demonstrações Contábeis do Banco Central com dados cacheados para acesso rápido e análise de múltiplos bancos.")
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def load_balancetes_data():
-        """Carrega dados de balancetes do cache."""
-        manager = get_cache_manager()
-        resultado = manager.carregar("balancetes")
-        if resultado.sucesso and resultado.dados is not None:
-            return resultado.dados, None
-        return None, resultado.mensagem
-
-    def _balancetes_normalizar_nome(valor: str) -> str:
-        """Normaliza nome de instituição para mapeamento de CNPJ."""
-        if valor is None:
-            return ""
-        txt = str(valor).strip().upper()
-        txt = txt.replace("Á", "A").replace("À", "A").replace("Ã", "A").replace("Â", "A")
-        txt = txt.replace("É", "E").replace("Ê", "E")
-        txt = txt.replace("Í", "I")
-        txt = txt.replace("Ó", "O").replace("Õ", "O").replace("Ô", "O")
-        txt = txt.replace("Ú", "U").replace("Ç", "C")
-        txt = " ".join(txt.split())
-        return txt
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _balancetes_obter_cnpj_por_instituicao(instituicoes_ref: tuple, principal_token: str) -> dict:
-        """Obtém mapeamento de instituições para CNPJs."""
-        _ = principal_token
-        mapa = {}
-
-        # 1) Varrer caches já existentes
-        manager = get_cache_manager()
-        candidatos = ["principal", "dre", "ativo", "passivo", "carteira_pf", "carteira_pj", "carteira_instrumentos"]
-        for tipo in candidatos:
-            try:
-                resultado = manager.carregar(tipo)
-                if not resultado or not resultado.sucesso or resultado.dados is None or resultado.dados.empty:
-                    continue
-                df_tmp = resultado.dados
-                col_inst = next((c for c in ["Instituição", "Instituicao", "NomeInstituicao"] if c in df_tmp.columns), None)
-                col_cnpj = next((c for c in ["CNPJ", "Cnpj", "cnpj", "CNPJ_Instituicao"] if c in df_tmp.columns), None)
-                if col_inst and col_cnpj:
-                    df_map = df_tmp[[col_inst, col_cnpj]].dropna().drop_duplicates()
-                    for _, row in df_map.iterrows():
-                        nome = _balancetes_normalizar_nome(row[col_inst])
-                        cnpj = re.sub(r"\D", "", str(row[col_cnpj]))
-                        if nome and cnpj and nome not in mapa:
-                            mapa[nome] = cnpj
-            except Exception:
-                pass
-
-        # 2) Fallback estático
-        try:
-            fallback_path = Path(__file__).parent / "data" / "instituicoes_fallback.json"
-            if fallback_path.exists():
-                fb = json.loads(fallback_path.read_text(encoding="utf-8"))
-                if isinstance(fb, dict):
-                    for k, v in fb.items():
-                        if str(k).startswith("_"):
-                            continue
-                        cnpj = re.sub(r"\D", "", str(k))
-                        nome = _balancetes_normalizar_nome(v)
-                        if nome and len(cnpj) >= 8 and nome not in mapa:
-                            mapa[nome] = cnpj
-        except Exception:
-            pass
-
-        # 3) Mapear para nomes da UI
-        out = {}
-        for inst in instituicoes_ref:
-            n = _balancetes_normalizar_nome(inst)
-            out[inst] = mapa.get(n)
-        return out
-
-    # Carregar dados do cache
-    df_balancetes, erro_balancetes = load_balancetes_data()
-
-    # Obter lista de instituições
-    manager_bal = get_cache_manager()
-    resultado_principal_bal = manager_bal.carregar("principal")
-    df_principal_bal = resultado_principal_bal.dados if (resultado_principal_bal and resultado_principal_bal.sucesso) else None
-
-    if df_principal_bal is None or df_principal_bal.empty or "Instituição" not in df_principal_bal.columns:
-        st.warning("Não foi possível carregar lista de instituições a partir do cache principal.")
-    else:
-        _dict_aliases_bal = st.session_state.get('dict_aliases', {})
-        instituicoes_bal = ordenar_bancos_com_alias(
-            df_principal_bal["Instituição"].dropna().unique().tolist(), _dict_aliases_bal
-        )
-
-        # Mapear CNPJs
-        cnpj_map = _balancetes_obter_cnpj_por_instituicao(tuple(instituicoes_bal), _cache_version_token("principal"))
-        instituicoes_com_cnpj = [i for i in instituicoes_bal if cnpj_map.get(i)]
-
-        # Status do cache
-        col_status, col_acoes = st.columns([3, 1])
-
-        with col_status:
-            if df_balancetes is not None and not df_balancetes.empty:
-                n_registros = len(df_balancetes)
-                periodos_unicos = df_balancetes["Período"].nunique() if "Período" in df_balancetes.columns else 0
-                instituicoes_cache = df_balancetes["Instituição"].nunique() if "Instituição" in df_balancetes.columns else 0
-                st.success(f"✓ Cache carregado: {n_registros:,} registros | {periodos_unicos} períodos | {instituicoes_cache} instituições")
-            else:
-                st.info("Cache vazio ou não disponível. Use o botão 'Atualizar Cache' para extrair dados.")
-
-        with col_acoes:
-            if st.button("🔄 Atualizar Cache", help="Extrair novos dados do BCB e atualizar cache"):
-                st.session_state["balancetes_modo_atualizacao"] = True
-                st.rerun()
-
-        # Modo de atualização do cache
-        if st.session_state.get("balancetes_modo_atualizacao", False):
-            st.markdown("---")
-            st.markdown("### 🔄 Atualizar Cache de Balancetes")
-            st.caption("Esta operação irá extrair dados de balancetes de TODAS as instituições com CNPJ mapeado.")
-
-            col_config1, col_config2 = st.columns(2)
-
-            with col_config1:
-                ano_inicial = st.number_input(
-                    "Ano Inicial",
-                    min_value=2015,
-                    max_value=datetime.now().year,
-                    value=2023,
-                    key="bal_ano_inicial"
-                )
-
-            with col_config2:
-                ano_final = st.number_input(
-                    "Ano Final",
-                    min_value=2015,
-                    max_value=datetime.now().year,
-                    value=datetime.now().year,
-                    key="bal_ano_final"
-                )
-
-            documentos_selecionados = st.multiselect(
-                "Documentos COSIF",
-                options=["4060", "4066"],
-                default=["4060"],
-                help="4060 = Balancete Analítico | 4066 = Balancete Sintético",
-                key="bal_documentos"
-            )
-
-            st.caption(f"Serão extraídos dados de {len(instituicoes_com_cnpj)} instituições com CNPJ mapeado.")
-
-            col_btn1, col_btn2 = st.columns(2)
-
-            with col_btn1:
-                if st.button("▶️ Iniciar Extração", type="primary", disabled=not documentos_selecionados):
-                    # Gerar lista de períodos trimestrais
-                    periodos_extrair = []
-                    for ano in range(ano_inicial, ano_final + 1):
-                        for mes in ["03", "06", "09", "12"]:
-                            periodos_extrair.append(f"{ano}{mes}")
-
-                    # Criar mapeamento CNPJ
-                    instituicoes_cnpj = {nome: cnpj_map[nome] for nome in instituicoes_com_cnpj}
-
-                    # Exibir progresso
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-
-                    # Usar dicionário mutável para contadores (evita problemas com nonlocal em Streamlit)
-                    contadores = {"total": len(periodos_extrair), "processados": 0}
-
-                    def callback_progresso(periodo, df):
-                        contadores["processados"] += 1
-                        progresso = contadores["processados"] / contadores["total"]
-                        progress_bar.progress(progresso)
-                        status_text.text(f"Processando {periodo} ({contadores['processados']}/{contadores['total']})...")
-
-                    try:
-                        # Obter cache de balancetes
-                        cache_bal = manager_bal.obter("balancetes")
-
-                        # Extrair dados
-                        status_text.text("Iniciando extração...")
-                        resultado = cache_bal.extrair_todos_periodos(
-                            periodos=periodos_extrair,
-                            instituicoes_cnpj=instituicoes_cnpj,
-                            documentos=documentos_selecionados,
-                            callback_progresso=callback_progresso
-                        )
-
-                        if resultado.sucesso:
-                            progress_bar.progress(1.0)
-                            status_text.text("✓ Extração concluída!")
-                            st.success(f"✓ Cache atualizado com sucesso! {resultado.mensagem}")
-                            st.session_state["balancetes_modo_atualizacao"] = False
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error(f"Erro na extração: {resultado.mensagem}")
-
-                    except Exception as e:
-                        st.error(f"Erro durante extração: {str(e)}")
-
-            with col_btn2:
-                if st.button("✖️ Cancelar"):
-                    st.session_state["balancetes_modo_atualizacao"] = False
-                    st.rerun()
-
-            st.markdown("---")
-
-        # Visualização de dados
-        if df_balancetes is not None and not df_balancetes.empty:
-            st.markdown("### 📊 Visualização de Balancetes")
-
-            # Filtros
-            col_filtro1, col_filtro2, col_filtro3 = st.columns(3)
-
-            with col_filtro1:
-                # Filtro de instituições disponíveis no cache
-                instituicoes_disponiveis = sorted(df_balancetes["Instituição"].unique().tolist())
-                instituicoes_selecionadas = st.multiselect(
-                    "Instituições",
-                    options=instituicoes_disponiveis,
-                    default=instituicoes_disponiveis[:3] if len(instituicoes_disponiveis) >= 3 else instituicoes_disponiveis,
-                    key="bal_inst_filtro"
-                )
-
-            with col_filtro2:
-                # Filtro de períodos
-                periodos_disponiveis = sorted(df_balancetes["Período"].unique().tolist(), reverse=True)
-                if periodos_disponiveis:
-                    periodo_selecionado = st.selectbox(
-                        "Período",
-                        options=periodos_disponiveis,
-                        key="bal_periodo_filtro"
-                    )
-                else:
-                    periodo_selecionado = None
-                    st.warning("Nenhum período disponível")
-
-            with col_filtro3:
-                # Filtro de documento
-                documentos_disponiveis = sorted(df_balancetes["Documento"].unique().tolist())
-                documento_selecionado = st.selectbox(
-                    "Documento COSIF",
-                    options=documentos_disponiveis,
-                    key="bal_doc_filtro"
-                )
-
-            # Aplicar filtros
-            df_filtrado = df_balancetes.copy()
-
-            if instituicoes_selecionadas:
-                df_filtrado = df_filtrado[df_filtrado["Instituição"].isin(instituicoes_selecionadas)]
-
-            if periodo_selecionado:
-                df_filtrado = df_filtrado[df_filtrado["Período"] == periodo_selecionado]
-
-            if documento_selecionado:
-                df_filtrado = df_filtrado[df_filtrado["Documento"] == documento_selecionado]
-
-            # Exibir dados
-            if not df_filtrado.empty:
-                st.markdown(f"#### Dados Filtrados ({len(df_filtrado):,} registros)")
-                st.dataframe(df_filtrado, width='stretch', hide_index=True)
-
-                # Exportar
-                st.markdown("#### 📥 Exportar Dados")
-                buffer_excel_bal = BytesIO()
-                with pd.ExcelWriter(buffer_excel_bal, engine="xlsxwriter") as writer:
-                    # Aba 1: dados filtrados
-                    df_filtrado.to_excel(writer, index=False, sheet_name="balancetes")
-                    ws1 = writer.sheets["balancetes"]
-                    for i, col in enumerate(df_filtrado.columns):
-                        max_len = max(len(str(col)), df_filtrado[col].astype(str).map(len).max())
-                        ws1.set_column(i, i, min(max_len + 2, 50))
-
-                    # Aba 2: resumo
-                    resumo = pd.DataFrame({
-                        "Instituição": sorted(df_filtrado["Instituição"].unique()),
-                    })
-                    resumo["Registros"] = resumo["Instituição"].apply(
-                        lambda inst: int((df_filtrado["Instituição"] == inst).sum())
-                    )
-                    resumo.to_excel(writer, index=False, sheet_name="resumo")
-                    ws2 = writer.sheets["resumo"]
-                    ws2.set_column(0, 0, 40)
-                    ws2.set_column(1, 1, 12)
-
-                buffer_excel_bal.seek(0)
-                st.download_button(
-                    label="📥 Baixar Excel",
-                    data=buffer_excel_bal,
-                    file_name=f"Balancetes_{documento_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="bal_download_excel"
-                )
-            else:
-                st.warning("Nenhum dado disponível com os filtros selecionados.")
-        else:
-            st.info("💡 O cache está vazio. Use o botão 'Atualizar Cache' acima para extrair dados do BCB.")
 
 
 elif menu == "Carteira 4.966":
