@@ -4048,6 +4048,83 @@ def _gerar_excel_peers_dados_puros(
     return output
 
 
+def _gerar_excel_evolucao_tabela_visual(
+    df_show: pd.DataFrame,
+    periodos_cols: list[str],
+    instituicao: str,
+    periodo_inicio: str,
+    periodo_final: str,
+) -> BytesIO:
+    """Exporta a tabela de Evolução em layout visual (similar ao Excel visual de Peers)."""
+    output = BytesIO()
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    worksheet = workbook.add_worksheet("evolucao_visual")
+
+    n_cols = 1 + len(periodos_cols)
+    border = {"border": 1, "border_color": "#dddddd"}
+
+    title_fmt = workbook.add_format({
+        "bold": True,
+        "align": "left",
+        "valign": "vcenter",
+        "bg_color": "#111111",
+        "font_color": "white",
+        "font_size": 11,
+        **border,
+    })
+    header_first_fmt = workbook.add_format({
+        "bold": True,
+        "align": "left",
+        "valign": "vcenter",
+        "bg_color": "#111111",
+        "font_color": "white",
+        **border,
+    })
+    header_period_fmt = workbook.add_format({
+        "bold": True,
+        "align": "center",
+        "valign": "vcenter",
+        "bg_color": "#6E6E6E",
+        "font_color": "white",
+        **border,
+    })
+    row_even_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+    row_odd_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#ffffff", **border})
+    row_even_val = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
+    row_odd_val = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", **border})
+
+    worksheet.set_column(0, 0, 40)
+    worksheet.set_column(1, max(1, n_cols - 1), 16)
+
+    row_idx = 0
+    titulo = f"Evolução - {instituicao} | {periodo_para_exibicao(periodo_inicio)} a {periodo_para_exibicao(periodo_final)}"
+    worksheet.merge_range(row_idx, 0, row_idx, n_cols - 1, titulo, title_fmt)
+    row_idx += 1
+
+    worksheet.write(row_idx, 0, "Métrica", header_first_fmt)
+    col_idx = 1
+    for periodo in periodos_cols:
+        worksheet.write(row_idx, col_idx, periodo, header_period_fmt)
+        col_idx += 1
+    row_idx += 1
+
+    for i, (_, row) in enumerate(df_show.iterrows()):
+        is_even = i % 2 == 0
+        fmt_label = row_even_label if is_even else row_odd_label
+        fmt_val = row_even_val if is_even else row_odd_val
+        worksheet.write(row_idx, 0, str(row.get("Métrica", "")), fmt_label)
+        col_idx = 1
+        for periodo in periodos_cols:
+            worksheet.write(row_idx, col_idx, str(row.get(periodo, "-")), fmt_val)
+            col_idx += 1
+        row_idx += 1
+
+    worksheet.freeze_panes(2, 1)
+    workbook.close()
+    output.seek(0)
+    return output
+
+
 def _mapear_colunas_capital(df_capital: pd.DataFrame):
     mapa_colunas_capital = {
         'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
@@ -6600,7 +6677,15 @@ elif menu == "Evolução":
         tabela_html = _render_evolucao_table_html(df_show, periodos_cols)
         st.markdown(tabela_html, unsafe_allow_html=True)
 
-        col_export1, col_export2, col_export3 = st.columns(3)
+        col_export1, col_export2, col_export3, col_export4 = st.columns(4)
+        buffer_excel_visual = _gerar_excel_evolucao_tabela_visual(
+            df_show=df_show,
+            periodos_cols=periodos_cols,
+            instituicao=instituicao,
+            periodo_inicio=periodo_inicio,
+            periodo_final=periodo_final,
+        )
+
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
             df_graph.to_excel(writer, index=False, sheet_name='grafico_dados')
@@ -6610,7 +6695,17 @@ elif menu == "Evolução":
 
         with col_export1:
             st.download_button(
-                label="exportar excel",
+                label="excel visual (tabela)",
+                data=buffer_excel_visual.getvalue(),
+                file_name=f"evolucao_tabela_visual_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="evolucao_excel_visual",
+                use_container_width=True,
+            )
+
+        with col_export2:
+            st.download_button(
+                label="excel (dados brutos)",
                 data=buffer_excel.getvalue(),
                 file_name=f"evolucao_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6618,7 +6713,7 @@ elif menu == "Evolução":
                 use_container_width=True,
             )
 
-        with col_export2:
+        with col_export3:
             csv_metric = df_metric.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="exportar csv",
@@ -6629,7 +6724,7 @@ elif menu == "Evolução":
                 use_container_width=True,
             )
 
-        with col_export3:
+        with col_export4:
             st.download_button(
                 label="exportar html (visual)",
                 data=tabela_html,
