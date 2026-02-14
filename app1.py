@@ -4541,13 +4541,23 @@ def anexar_metricas_derivadas_periodo(df_periodo: pd.DataFrame, periodo: str):
 
 @st.cache_data(ttl=900, show_spinner=False)
 def get_scatter_periodo_df(periodo: str, principal_token: str, derived_token: str, alias_sig: tuple, capital_mesclado: bool):
-    """Carrega dataframe de um período do Scatter já com métricas derivadas anexadas."""
+    """Carrega dataframe de um período do Scatter já com métricas derivadas anexadas.
+
+    Diagnóstico definitivo de Basileia no Scatter:
+    - garante a coluna canônica ``Índice de Basileia``;
+    - normaliza para base decimal (0-1);
+    - corrige casos residuais de dupla divisão por 100.
+
+    Isso evita o erro recorrente de exibir 0.15% quando o correto é 15.00%.
+    """
     _ = derived_token
     df_base = _get_analise_base_df(principal_token, alias_sig, capital_mesclado)
     if df_base is None or df_base.empty or 'Período' not in df_base.columns:
         return pd.DataFrame(), {"tempo_s": 0.0, "linhas": 0, "mem_mb": 0.0}
 
     df_periodo = df_base[df_base['Período'] == periodo].copy()
+    df_periodo = _garantir_indice_basileia_coluna(df_periodo)
+    df_periodo = _ajustar_basileia_para_scatter(df_periodo)
     return anexar_metricas_derivadas_periodo(df_periodo, periodo)
 
 
