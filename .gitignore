@@ -29,3 +29,6 @@ env/
 
 # Cache BLOPRUDENCIAL (arquivos brutos BCB)
 data/cache/bcb_bloprudencial/
+
+# Artefato gerado localmente (não versionar binário)
+data/DRE_COSIF_mapeamento_explicativo.xlsx
