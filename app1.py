@@ -5390,7 +5390,7 @@ if menu == "Sobre":
     st.markdown("""
     ## sobre a plataforma
 
-    o **toma.conta** é uma plataforma completa de análise financeira do sistema bancário brasileiro. com dados oficiais do banco central, oferece visualizações interativas, comparações entre instituições, análise de capital regulatório e ferramentas para criação de métricas customizadas — tudo em uma interface intuitiva e com exportação profissional.
+    o **toma.conta** consolida dados oficiais do banco central para análise comparativa de instituições financeiras brasileiras, com foco em leitura rápida, filtros reproduzíveis e exportação.
     """)
 
     st.markdown("### módulos de análise")
@@ -5400,112 +5400,110 @@ if menu == "Sobre":
     with col1:
         st.markdown("""
         <div class="feature-card">
-            <h4>ranking comparativo</h4>
-            <p>rankings e gráficos de composição para comparar instituições em um período específico. inclui médias ponderadas do grupo e diferenças calculadas automaticamente.</p>
+            <h4>rankings</h4>
+            <p>ordenação por indicador e período, com comparação direta entre instituições, média do grupo selecionado e variação anual (Δ).</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>histórico individual</h4>
-            <p>análise detalhada de uma instituição ao longo do tempo com mini-gráficos de tendência. exportação em pdf scorecard com visão de 4 anos.</p>
+            <h4>peers (tabela)</h4>
+            <p>comparativo multi-bancos com até 5 instituições e até 3 períodos por visão, incluindo variação versus ano anterior.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>histórico peers</h4>
-            <p>séries temporais comparativas entre múltiplas instituições. ideal para acompanhar a evolução de concorrentes ao longo dos trimestres.</p>
+            <h4>evolução</h4>
+            <p>séries temporais por instituição e indicador para analisar tendência, aceleração/desaceleração e mudança de patamar.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
             <h4>scatter plot</h4>
-            <p>gráficos de dispersão com 3 dimensões (eixo x, eixo y e tamanho da bolha). visualize relações entre variáveis e movimentação entre períodos.</p>
+            <p>análise de relação entre dois indicadores (x/y), com dimensão adicional por tamanho da bolha e filtros por período/grupo.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
         <div class="feature-card">
-            <h4>deltas (antes e depois)</h4>
-            <p>análise de variações absolutas e percentuais entre dois períodos. identifique rapidamente quem cresceu, encolheu ou mudou de patamar.</p>
+            <h4>dre</h4>
+            <p>visão de resultado com estrutura de receitas, despesas e lucro, com apoio para leitura de margem e composição.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>capital regulatório</h4>
-            <p>dados do relatório 5 do bcb: capital principal, complementar, nível ii, rwa por tipo de risco, razão de alavancagem e índices de capital.</p>
+            <h4>carteira 4.966</h4>
+            <p>acompanhamento de qualidade da carteira por classificação de risco, com foco em classes críticas e indicadores de cobertura.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>crie sua métrica</h4>
-            <p>construa indicadores customizados combinando variáveis com operações matemáticas. visualize como ranking, scatter plot ou análise de deltas.</p>
+            <h4>taxas de juros por produto</h4>
+            <p>consulta de taxas por modalidade de crédito (pf/pj), permitindo comparação entre instituições e períodos.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
-            <h4>glossário técnico</h4>
-            <p>definições detalhadas de todas as variáveis, métricas calculadas e informações sobre consolidação prudencial (visão conglomerado).</p>
+            <h4>crie sua métrica + glossário</h4>
+            <p>criação de indicadores customizados com operadores matemáticos e documentação técnica das variáveis disponíveis.</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("---")
 
-    st.markdown("### indicadores disponíveis")
+    st.markdown("### indicadores e métricas disponíveis")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
         st.markdown("""
-        **variáveis de balanço**
+        **estrutura patrimonial**
         - ativo total
-        - carteira de crédito (líquida)
+        - ativos líquidos
+        - carteira de crédito bruta e líquida
         - títulos e valores mobiliários
-        - passivo exigível
-        - captações
+        - depósitos e captações
         - patrimônio líquido
-        - lucro líquido ac. ytd
-        - patrimônio de referência
+        - lucro líquido acumulado (ytd)
         """)
 
     with col2:
         st.markdown("""
-        **capital regulatório**
+        **capital e prudencial**
         - capital principal (tier 1)
         - capital complementar
         - capital nível ii
         - rwa total / crédito / mercado / operacional
         - exposição total
-        - índices de capital
+        - índices de capital (cet1 e basileia)
         - razão de alavancagem
         """)
 
     with col3:
         st.markdown("""
-        **métricas calculadas**
-        - roe anualizado (%)
+        **métricas derivadas**
+        - roe acumulado anualizado (%)
+        - ativo / pl
         - crédito / pl (%)
         - crédito / captações (%)
-        - crédito / ativo (%)
+        - perda esperada / carteira
+        - pdd total e coberturas
 
-        **índices**
-        - índice de basileia
-        - índice de imobilização
-        - número de agências e pacs
-
-        **taxas de juros**
-        - taxa de juros por produto e modalidade (pf e pj)
+        **outros blocos**
+        - carteira 4.966 por classe de risco
+        - taxas de juros por produto (pf e pj)
+        - conselho e diretoria por conglomerado
         """)
 
     st.markdown("---")
 
-    st.markdown("### recursos avançados")
+    st.markdown("### recursos operacionais")
 
     col1, col2, col3 = st.columns(3)
 
@@ -5513,22 +5511,22 @@ if menu == "Sobre":
         st.markdown("""
         <div class="feature-card">
             <h4>filtros inteligentes</h4>
-            <p>selecione instituições por top n (por qualquer indicador) ou lista customizada. 8 opções de ponderação para médias do grupo.</p>
+            <p>seleção por lista customizada e recortes por período, com priorização de carregamento por aba para navegação mais rápida.</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.markdown("""
         <div class="feature-card">
             <h4>nomenclatura personalizada</h4>
-            <p>renomeie instituições com nomes-fantasia e defina cores personalizadas para análises segmentadas.</p>
+            <p>defina aliases e cores por instituição para manter consistência visual entre tabelas e gráficos.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
         <div class="feature-card">
-            <h4>exportação profissional</h4>
-            <p>exporte para excel (multi-abas) ou csv. gere pdf scorecards com histórico de 4 anos para apresentações e relatórios.</p>
+            <h4>exportação</h4>
+            <p>saídas em excel e csv nas análises tabulares, além de artefatos para apoio a relatórios internos.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -5536,7 +5534,7 @@ if menu == "Sobre":
         st.markdown("""
         <div class="feature-card">
             <h4>dados oficiais</h4>
-            <p>fonte única: api if.data e relatório 5 do banco central. dados consolidados (visão conglomerado) com atualização trimestral.</p>
+            <p>integração com bases oficiais do bcb (incluindo if.data, relatório 5 e carteira 4.966), com atualização via aba "Atualizar Base".</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -5545,11 +5543,11 @@ if menu == "Sobre":
     st.markdown("""
     ### como utilizar
 
-    1. **dados pré-carregados**: a plataforma já possui dados históricos prontos para análise imediata
-    2. **navegue pelos módulos**: use o menu superior para acessar rankings, histórico, scatter plot, deltas ou capital regulatório
-    3. **aplique filtros**: selecione instituições por top n ou lista customizada
-    4. **personalize análises**: ajuste variáveis, períodos e ponderações conforme sua necessidade
-    5. **exporte resultados**: baixe em excel, csv ou gere pdf scorecards para compartilhar
+    1. **selecione o módulo**: rankings, peers, evolução, scatter, dre, carteira 4.966, taxas, conselho ou métrica customizada
+    2. **defina período e instituições**: ajuste o recorte conforme o objetivo da análise
+    3. **aplique filtros e aliases**: padronize nomes e cores para leitura comparável
+    4. **consulte definições no glossário**: valide fórmulas e conceitos antes de concluir
+    5. **exporte os resultados**: gere excel/csv quando precisar compartilhar
 
     ---
 
@@ -5571,7 +5569,7 @@ if menu == "Sobre":
     """)
 
     st.markdown("---")
-    st.caption("desenvolvido em 2026 por matheus prates, cfa | ferramenta open-source para análise do sistema financeiro brasileiro")
+    st.caption("desenvolvido por matheus prates, cfa | ferramenta open-source para análise de instituições financeiras brasileiras")
 
 elif False and menu == "Painel":
     st.markdown("## resumo comparativo por período")
