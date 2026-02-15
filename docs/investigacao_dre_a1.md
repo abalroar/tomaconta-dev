@@ -31,9 +31,8 @@ Para instituições com as três linhas, observa-se coerência de composição e
 ## Implementação feita
 1. Atualizado `data/dre_cosif_mapping.json` para refletir o de-para da linha de aplicações interfinanceiras com granularidade de `a1`.
 2. Criado gerador de planilha `tools/generate_dre_cosif_excel.py`.
-3. Gerada localmente a planilha final `data/DRE_COSIF_mapeamento_explicativo.xlsx` (artefato não versionado) com:
-   - Aba `Mapa_DRE_Descricao`: conta DRE atual -> descrições COSIF dos componentes.
-   - Aba `Investigacao_a1`: evidência numérica em amostra local para rastrear origem da composição.
+3. Gerado arquivo de mapeamento simples em `data/dre_cosif_mapeamento_explicativo.csv` (coluna A: nome exato da linha na DRE; coluna B: contas COSIF/composição).
+4. Gerada localmente a planilha final `data/DRE_COSIF_mapeamento_explicativo.xlsx` (artefato não versionado) com uma única aba `DRE_COSIF`, espelhando as colunas A/B do CSV.
 
 ## Limitação registrada
 - Acesso HTTP direto aos domínios do BCB falhou nesta execução com `Tunnel connection failed: 403 Forbidden`.
