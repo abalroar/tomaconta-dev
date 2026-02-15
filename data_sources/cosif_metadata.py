@@ -13,8 +13,11 @@ MANUAL_HTML_CACHE_DIR = Path("data/cache/cosif/manual_html")
 
 # URLs reportadas pelo usuário como origem real de conteúdo no COSIF público
 KNOWN_MANUAL_PAGE_IDS = [
-    "0902177186cfda53",
     "0902177186cfda51",
+    "0902177186cfda43",
+    "0902177186cfda50",
+    "0902177186cfda52",
+    "0902177186cfda53",
 ]
 
 
@@ -143,6 +146,11 @@ def _parse_metadata_from_text(text: str, cosif_code: str) -> Dict[str, str]:
         m_title = re.search(rf"{re.escape(cosif_code)}\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9\-\s]{{8,}})", plain)
         if m_title:
             titulo = m_title.group(1).strip()
+
+    if not funcao:
+        m_func = re.search(r"(?:FUNÇÃO|FUNCAO|FINALIDADE)\s*[:\-]?\s*(.+?)(?=\s(?:BASE\s+NORMATIVA|BASE\s+LEGAL|NORMATIVO|$))", plain, flags=re.IGNORECASE)
+        if m_func:
+            funcao = m_func.group(1).strip(" .;")
 
     return {
         "titulo": titulo,

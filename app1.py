@@ -9336,8 +9336,8 @@ elif menu == "DRE":
                         "Contas COSIF": f"[{conta}]" + (f" ({conta_cosif_formatada})" if conta_cosif_formatada else ""),
                         "Descrição COSIF": desc_final or "N/D",
                         "Fórmula COSIF": "N/D",
-                        "Título": str(meta.get("titulo") or "").strip(),
-                        "Função": str(meta.get("funcao") or "").strip(),
+                        "Título": str(meta.get("titulo") or "").strip() or (desc_final or "N/D"),
+                        "Função": str(meta.get("funcao") or "").strip() or "N/D",
                         "Base normativa": str(meta.get("base_normativa") or "").strip(),
                         "Status Mapeamento": "metadata_ok" if str(meta.get("source_status") or "") == "ok" else "metadata_pendente",
                     })
