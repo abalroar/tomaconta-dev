@@ -6,9 +6,16 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable
 
 CACHE_PATH = Path("data/cache/cosif/cosif_metadata.json")
+MANUAL_HTML_CACHE_DIR = Path("data/cache/cosif/manual_html")
+
+# URLs reportadas pelo usuário como origem real de conteúdo no COSIF público
+KNOWN_MANUAL_PAGE_IDS = [
+    "0902177186cfda53",
+    "0902177186cfda51",
+]
 
 
 def ifdata_to_cosif_code(n: str | int) -> str:
@@ -26,6 +33,7 @@ def normalize_digits(code: str | int) -> str:
 
 def _ensure_cache_dir() -> None:
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MANUAL_HTML_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _load_cache() -> Dict[str, Dict[str, str]]:
@@ -74,7 +82,7 @@ def _strip_tags(html: str) -> str:
 
 def _extract_labeled_field(text: str, labels: Iterable[str]) -> str:
     for label in labels:
-        pattern = rf"(?:^|\s){re.escape(label)}\s*[:\-]\s*(.+?)(?=\s(?:T[íi]tulo|Fun[cç][aã]o|Base normativa|Observa[cç][õo]es?|Conta|$)\b|$)"
+        pattern = rf"(?:^|\s){re.escape(label)}\s*[:\-]\s*(.+?)(?=\s(?:T[íi]tulo|Fun[cç][aã]o|Base normativa|Base legal|Normativo|Observa[cç][õo]es?|Conta|$)\b|$)"
         m = re.search(pattern, text, flags=re.IGNORECASE)
         if m:
             return m.group(1).strip(" .;")
@@ -83,13 +91,64 @@ def _extract_labeled_field(text: str, labels: Iterable[str]) -> str:
 
 def _candidate_urls(cosif_code: str) -> list[str]:
     q = urllib.parse.quote(cosif_code)
-    return [
+    urls = []
+    # padrão explícito informado pelo usuário (manual + âncora da conta)
+    for page_id in KNOWN_MANUAL_PAGE_IDS:
+        urls.append(f"https://www3.bcb.gov.br/aplica/cosif/manual/{page_id}.htm#{q}")
+
+    # candidatos genéricos públicos
+    urls.extend([
         f"https://www3.bcb.gov.br/aplica/cosif/conta/{q}",
         f"https://www3.bcb.gov.br/aplica/cosif/manual/contas/{q}.htm",
         f"https://www3.bcb.gov.br/aplica/cosif/manual/contas/{q}.html",
         f"https://www3.bcb.gov.br/aplica/cosif?conta={q}",
         f"https://www3.bcb.gov.br/aplica/cosif?codigo={q}",
-    ]
+    ])
+    return urls
+
+
+def _manual_page_url(page_id: str) -> str:
+    return f"https://www3.bcb.gov.br/aplica/cosif/manual/{page_id}.htm"
+
+
+def _load_or_fetch_manual_page(page_id: str) -> str:
+    _ensure_cache_dir()
+    path = MANUAL_HTML_CACHE_DIR / f"{page_id}.htm"
+    if path.exists():
+        return path.read_text(encoding="utf-8", errors="ignore")
+
+    html = _request_text(_manual_page_url(page_id))
+    path.write_text(html, encoding="utf-8")
+    return html
+
+
+def _extract_account_block_from_manual(html: str, cosif_code: str) -> str:
+    """Extrai janela textual da conta no HTML manual usando a âncora/código."""
+    normalized_html = html.replace("\r", "")
+    idx = normalized_html.find(cosif_code)
+    if idx < 0:
+        return ""
+    start = max(0, idx - 1500)
+    end = min(len(normalized_html), idx + 5000)
+    return normalized_html[start:end]
+
+
+def _parse_metadata_from_text(text: str, cosif_code: str) -> Dict[str, str]:
+    plain = _strip_tags(text)
+    titulo = _extract_labeled_field(plain, ["Título", "Titulo"]) or ""
+    funcao = _extract_labeled_field(plain, ["Função", "Funcao", "Finalidade"]) or ""
+    base_normativa = _extract_labeled_field(plain, ["Base normativa", "Base legal", "Normativo"]) or ""
+
+    if not titulo:
+        m_title = re.search(rf"{re.escape(cosif_code)}\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9\-\s]{{8,}})", plain)
+        if m_title:
+            titulo = m_title.group(1).strip()
+
+    return {
+        "titulo": titulo,
+        "funcao": funcao,
+        "base_normativa": base_normativa,
+    }
 
 
 def fetch_cosif_metadata(cosif_code: str) -> Dict[str, str]:
@@ -100,6 +159,29 @@ def fetch_cosif_metadata(cosif_code: str) -> Dict[str, str]:
 
     code = ifdata_to_cosif_code(normalized)
     last_error = ""
+
+    # 1) tentativa priorizada no padrão do manual informado pelo usuário
+    for page_id in KNOWN_MANUAL_PAGE_IDS:
+        source_url = f"{_manual_page_url(page_id)}#{urllib.parse.quote(code)}"
+        try:
+            html = _load_or_fetch_manual_page(page_id)
+            block = _extract_account_block_from_manual(html, code)
+            if not block:
+                continue
+            parsed = _parse_metadata_from_text(block, code)
+            if parsed["titulo"] or parsed["funcao"] or parsed["base_normativa"]:
+                return {
+                    "cosif_code": code,
+                    "titulo": parsed["titulo"],
+                    "funcao": parsed["funcao"],
+                    "base_normativa": parsed["base_normativa"],
+                    "source_url": source_url,
+                    "source_status": "ok",
+                }
+        except Exception as exc:
+            last_error = str(exc)
+
+    # 2) fallback para URLs públicas candidatas
     for url in _candidate_urls(code):
         try:
             html = _request_text(url)
@@ -107,23 +189,13 @@ def fetch_cosif_metadata(cosif_code: str) -> Dict[str, str]:
             last_error = str(exc)
             continue
 
-        text = _strip_tags(html)
-        titulo = _extract_labeled_field(text, ["Título", "Titulo"]) or ""
-        funcao = _extract_labeled_field(text, ["Função", "Funcao", "Finalidade"]) or ""
-        base_normativa = _extract_labeled_field(text, ["Base normativa", "Base legal", "Normativo"]) or ""
-
-        # fallback: se não tiver label explícito para título, usa descrição central quando houver
-        if not titulo:
-            m_title = re.search(rf"{re.escape(code)}\s+([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9\-\s]{{8,}})", text)
-            if m_title:
-                titulo = m_title.group(1).strip()
-
-        if titulo or funcao or base_normativa:
+        parsed = _parse_metadata_from_text(html, code)
+        if parsed["titulo"] or parsed["funcao"] or parsed["base_normativa"]:
             return {
                 "cosif_code": code,
-                "titulo": titulo,
-                "funcao": funcao,
-                "base_normativa": base_normativa,
+                "titulo": parsed["titulo"],
+                "funcao": parsed["funcao"],
+                "base_normativa": parsed["base_normativa"],
                 "source_url": url,
                 "source_status": "ok",
             }
