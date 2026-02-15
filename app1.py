@@ -38,6 +38,10 @@ from utils.cosif_pdf_mapping import (
     get_cosif_description_map_cached,
     normalize_cosif_code_digits,
 )
+from data_sources.cosif_metadata import (
+    ifdata_to_cosif_code,
+    get_cosif_metadata_for_accounts,
+)
 
 from utils.ifdata_extractor import (
     gerar_periodos,
@@ -8192,6 +8196,14 @@ elif menu == "DRE":
         except Exception:
             return {}
 
+    @st.cache_data(ttl=86400, show_spinner=False)
+    def load_cosif_metadata_batch_cached(accounts_tuple):
+        """Carrega metadados COSIF (título/função/base normativa) com cache persistido em disco."""
+        try:
+            return get_cosif_metadata_for_accounts(list(accounts_tuple), force_refresh=False)
+        except Exception:
+            return {}
+
     def load_dre_mapping():
         return [
             {
@@ -9244,6 +9256,17 @@ elif menu == "DRE":
             rows = []
             mapa_entries = {e.get("label"): e for e in mapping_entries_ordenado if e.get("label")}
 
+            all_accounts = []
+            for label_export in DRE_GLOSSARIO_EXPORT_ORDER:
+                label_lookup = DRE_GLOSSARIO_LABEL_ALIAS.get(label_export, label_export)
+                cosif_info = dre_cosif_map.get(label_lookup, {})
+                for item_depara in (cosif_info.get("depara") or []):
+                    conta = str(item_depara.get("account") or "").strip()
+                    if conta:
+                        all_accounts.append(conta)
+
+            cosif_metadata_map = load_cosif_metadata_batch_cached(tuple(sorted(set(all_accounts))))
+
             for ordem, label_export in enumerate(DRE_GLOSSARIO_EXPORT_ORDER, start=1):
                 label_lookup = DRE_GLOSSARIO_LABEL_ALIAS.get(label_export, label_export)
                 entry = mapa_entries.get(label_lookup, {})
@@ -9272,6 +9295,9 @@ elif menu == "DRE":
                 elif entry.get("is_ratio_footer"):
                     nivel = "Rodapé (ratio)"
 
+                status_mapeamento = str(cosif_info.get("status") or "").strip() or ("mapeado" if depara else "não mapeado")
+
+                # linha mãe
                 rows.append({
                     "Ordem": ordem,
                     "Nível": nivel,
@@ -9280,8 +9306,41 @@ elif menu == "DRE":
                     "Contas COSIF": " | ".join(contas) if contas else "N/D",
                     "Descrição COSIF": " | ".join(descricoes) if descricoes else "N/D",
                     "Fórmula COSIF": str(cosif_info.get("formula") or "").strip() or "N/D",
-                    "Status Mapeamento": str(cosif_info.get("status") or "").strip() or ("mapeado" if depara else "não mapeado"),
+                    "Título": "",
+                    "Função": "",
+                    "Base normativa": "",
+                    "Status Mapeamento": status_mapeamento,
                 })
+
+                # sublinhas filhas (uma por conta)
+                for item_depara in depara:
+                    conta = str(item_depara.get("account") or "").strip()
+                    if not conta:
+                        continue
+                    desc = str(item_depara.get("description") or "").strip()
+                    desc_pdf = cosif_desc_pdf_map.get(normalize_cosif_code_digits(conta), "") if conta else ""
+                    desc_final = desc_pdf or desc
+                    meta = cosif_metadata_map.get(normalize_cosif_code_digits(conta), {}) if cosif_metadata_map else {}
+
+                    conta_cosif_formatada = ""
+                    try:
+                        conta_cosif_formatada = ifdata_to_cosif_code(conta)
+                    except Exception:
+                        conta_cosif_formatada = ""
+
+                    rows.append({
+                        "Ordem": ordem,
+                        "Nível": "Filho COSIF",
+                        "Linha DRE": f"↳ [{conta}]",
+                        "Referência IFData": ifdata_ref or "N/D",
+                        "Contas COSIF": f"[{conta}]" + (f" ({conta_cosif_formatada})" if conta_cosif_formatada else ""),
+                        "Descrição COSIF": desc_final or "N/D",
+                        "Fórmula COSIF": "N/D",
+                        "Título": str(meta.get("titulo") or "").strip() or (desc_final or "N/D"),
+                        "Função": str(meta.get("funcao") or "").strip() or "N/D",
+                        "Base normativa": str(meta.get("base_normativa") or "").strip(),
+                        "Status Mapeamento": "metadata_ok" if str(meta.get("source_status") or "") == "ok" else "metadata_pendente",
+                    })
 
             return rows
 
@@ -9348,6 +9407,9 @@ elif menu == "DRE":
                 "Contas COSIF",
                 "Descrição COSIF",
                 "Fórmula COSIF",
+                "Título",
+                "Função",
+                "Base normativa",
                 "Status Mapeamento",
             ]
             for col_idx, head in enumerate(gloss_headers):
@@ -9362,7 +9424,10 @@ elif menu == "DRE":
                 ws_gloss.write(row_idx_gl, 4, row_data["Contas COSIF"])
                 ws_gloss.write(row_idx_gl, 5, row_data["Descrição COSIF"])
                 ws_gloss.write(row_idx_gl, 6, row_data["Fórmula COSIF"])
-                ws_gloss.write(row_idx_gl, 7, row_data["Status Mapeamento"])
+                ws_gloss.write(row_idx_gl, 7, row_data["Título"])
+                ws_gloss.write(row_idx_gl, 8, row_data["Função"])
+                ws_gloss.write(row_idx_gl, 9, row_data["Base normativa"])
+                ws_gloss.write(row_idx_gl, 10, row_data["Status Mapeamento"])
 
             ws_gloss.set_column(0, 0, 8)
             ws_gloss.set_column(1, 1, 18)
@@ -9371,7 +9436,10 @@ elif menu == "DRE":
             ws_gloss.set_column(4, 4, 45)
             ws_gloss.set_column(5, 5, 90)
             ws_gloss.set_column(6, 6, 55)
-            ws_gloss.set_column(7, 7, 20)
+            ws_gloss.set_column(7, 7, 45)
+            ws_gloss.set_column(8, 8, 80)
+            ws_gloss.set_column(9, 9, 22)
+            ws_gloss.set_column(10, 10, 22)
             ws_gloss.freeze_panes(1, 0)
             ws_gloss.autofilter(0, 0, max(1, len(gloss_rows)), len(gloss_headers) - 1)
 
