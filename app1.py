@@ -5230,6 +5230,7 @@ with col_header:
 # Lista de opções do menu principal (análise)
 MENU_PRINCIPAL = [
     "Rankings",
+    "Contribuições FGC",
     "Peers (Tabela)",
     "Conselho e Diretoria",
     "Evolução",
@@ -5254,6 +5255,8 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
         st.session_state['menu_atual'] = "Atualizar Base"
     elif st.session_state['menu_atual'] == "Painel":
         st.session_state['menu_atual'] = "Rankings"
+    elif st.session_state['menu_atual'] == "Contribuições FGC":
+        st.session_state['menu_atual'] = "Contribuições FGC/FGCoop"
     else:
         st.session_state['menu_atual'] = "Sobre"
 
