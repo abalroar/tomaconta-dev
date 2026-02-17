@@ -5239,7 +5239,7 @@ MENU_PRINCIPAL = [
     "Carteira 4.966",
     "Taxas de Juros por Produto",
     "Crie sua métrica!",
-    "Contribuições FGC",
+    "Contribuições FGC/FGCoop",
 ]
 
 # Lista de opções do menu secundário (utilitários)
@@ -5255,6 +5255,8 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
         st.session_state['menu_atual'] = "Atualizar Base"
     elif st.session_state['menu_atual'] == "Painel":
         st.session_state['menu_atual'] = "Rankings"
+    elif st.session_state['menu_atual'] == "Contribuições FGC":
+        st.session_state['menu_atual'] = "Contribuições FGC/FGCoop"
     else:
         st.session_state['menu_atual'] = "Sobre"
 
@@ -8278,7 +8280,7 @@ elif menu == "Rankings":
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
-elif menu == "Contribuições FGC":
+elif menu == "Contribuições FGC/FGCoop":
     st.markdown("### contribuições fgc")
     st.caption("Conta COSIF 8118500009 (-( ) Desp. de Contribuição ao FGC) com YTD semestral customizado (Opção B).")
 
@@ -8378,7 +8380,7 @@ elif menu == "Contribuições FGC":
                         df_top = df_rank.head(int(top_n)).copy()
                         df_top["Ranking"] = range(1, len(df_top) + 1)
 
-                        titulo = f"Contribuições FGC (abs) - {_yyyymm_para_periodo_exibicao(end_period)}"
+                        titulo = f"Contribuições FGC/FGCoop (abs) - {_yyyymm_para_periodo_exibicao(end_period)}"
                         fig_fgc = px.bar(
                             df_top.sort_values("FGC YTD (abs)", ascending=True),
                             x="FGC YTD (abs)",
