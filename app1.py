@@ -8398,7 +8398,7 @@ elif menu == "Contribuições FGC/FGCoop":
                             marker_color="#FF6200",
                             texttemplate="%{text:,.0f}",
                             textposition="outside",
-                            textfont=dict(size=24),
+                            textfont=dict(size=18),
                             cliponaxis=False,
                         )
                         fig_fgc.update_layout(
