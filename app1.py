@@ -8282,7 +8282,7 @@ elif menu == "Rankings":
 
 elif menu == "Contribuições FGC/FGCoop":
     st.markdown("### contribuições fgc")
-    st.caption("Conta COSIF 8118500009 (-( ) Desp. de Contribuição ao FGC) com YTD semestral customizado (Opção B).")
+    st.caption("Conta COSIF 8118500009: usamos o acumulado até o mês final e, no 2º semestre, somamos também o valor de junho do mesmo ano.")
 
     periodos_yyyymm = _listar_periodos_bloprudencial_disponiveis(_cache_version_token("bloprudencial"))
     if not periodos_yyyymm:
@@ -8378,6 +8378,11 @@ elif menu == "Contribuições FGC/FGCoop":
                     else:
                         df_rank = df_rank.sort_values("FGC YTD (abs)", ascending=False)
                         df_top = df_rank.head(int(top_n)).copy()
+                        total_exibido = float(df_top["FGC YTD (abs)"].sum())
+                        if total_exibido > 0:
+                            df_top["% do Total Exibido"] = (df_top["FGC YTD (abs)"] / total_exibido) * 100.0
+                        else:
+                            df_top["% do Total Exibido"] = 0.0
                         df_top["Ranking"] = range(1, len(df_top) + 1)
 
                         titulo = f"Contribuições FGC/FGCoop (abs) - {_yyyymm_para_periodo_exibicao(end_period)}"
@@ -8389,6 +8394,13 @@ elif menu == "Contribuições FGC/FGCoop":
                             text="FGC YTD (abs)",
                             title=titulo,
                         )
+                        fig_fgc.update_traces(
+                            marker_color="#FF6200",
+                            texttemplate="%{text:,.0f}",
+                            textposition="outside",
+                            textfont=dict(size=24),
+                            cliponaxis=False,
+                        )
                         fig_fgc.update_layout(
                             xaxis_title="Contribuição FGC YTD (abs)",
                             yaxis_title="Instituição",
@@ -8396,41 +8408,76 @@ elif menu == "Contribuições FGC/FGCoop":
                             plot_bgcolor="#f8f9fa",
                             paper_bgcolor="white",
                             font=dict(family="IBM Plex Sans"),
+                            margin=dict(r=160),
                         )
-                        fig_fgc.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
                         st.plotly_chart(fig_fgc, width='stretch', config={'displayModeBar': False})
 
-                        col_a, col_b = st.columns([2, 3])
-                        with col_a:
-                            st.markdown("#### validação rápida")
-                            amostra = df_top.iloc[0]
+                        st.markdown("#### validação rápida")
+                        amostra = df_top.iloc[0]
+                        st.caption(
+                            f"Instituição amostra: {amostra['Instituição']} | "
+                            f"End={amostra['Componente End']:.2f} | "
+                            f"Jun={amostra['Componente Junho'] if pd.notna(amostra['Componente Junho']) else 'N/A'} | "
+                            f"YTD={amostra['FGC YTD']:.2f} | abs={amostra['FGC YTD (abs)']:.2f}"
+                        )
+                        if end_period == "202509":
+                            row_25 = df_rank.iloc[0]
                             st.caption(
-                                f"Instituição amostra: {amostra['Instituição']} | "
-                                f"End={amostra['Componente End']:.2f} | "
-                                f"Jun={amostra['Componente Junho'] if pd.notna(amostra['Componente Junho']) else 'N/A'} | "
-                                f"YTD={amostra['FGC YTD']:.2f} | abs={amostra['FGC YTD (abs)']:.2f}"
+                                "Teste 9M25 (regra): 202506 + 202509 => "
+                                f"{row_25['Componente Junho']} + {row_25['Componente End']} = {row_25['FGC YTD']}"
                             )
-                            if end_period == "202509":
-                                row_25 = df_rank.iloc[0]
-                                st.caption(
-                                    "Teste 9M25 (regra): 202506 + 202509 => "
-                                    f"{row_25['Componente Junho']} + {row_25['Componente End']} = {row_25['FGC YTD']}"
-                                )
-                            if end_period == "202505":
-                                row_25 = df_rank.iloc[0]
-                                st.caption(
-                                    "Teste 5M25 (regra): usa apenas 202505 => "
-                                    f"{row_25['Componente End']}"
-                                )
-                        with col_b:
-                            st.markdown("#### tabela")
-                            df_show = df_top[["Ranking", "Instituição", "FGC YTD", "FGC YTD (abs)", "Componente End", "Componente Junho"]].copy()
-                            st.dataframe(df_show, use_container_width=True)
+                        if end_period == "202505":
+                            row_25 = df_rank.iloc[0]
+                            st.caption(
+                                "Teste 5M25 (regra): usa apenas 202505 => "
+                                f"{row_25['Componente End']}"
+                            )
+
+                        st.markdown("#### tabela")
+                        df_show = df_top[["Ranking", "Instituição", "FGC YTD", "FGC YTD (abs)", "% do Total Exibido", "Componente End", "Componente Junho"]].copy()
+                        st.dataframe(
+                            df_show,
+                            use_container_width=True,
+                            column_config={
+                                "% do Total Exibido": st.column_config.NumberColumn(format="%.2f%%"),
+                                "FGC YTD": st.column_config.NumberColumn(format="%0.0f"),
+                                "FGC YTD (abs)": st.column_config.NumberColumn(format="%0.0f"),
+                                "Componente End": st.column_config.NumberColumn(format="%0.0f"),
+                                "Componente Junho": st.column_config.NumberColumn(format="%0.0f"),
+                            },
+                        )
 
                         with st.expander("exportar dados (excel)"):
                             buffer_excel = BytesIO()
                             with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
                                 df_show.to_excel(writer, index=False, sheet_name='fgc_ranking')
+                                workbook = writer.book
+                                worksheet = writer.sheets['fgc_ranking']
+
+                                fmt_header = workbook.add_format({
+                                    'bold': True,
+                                    'bg_color': '#F2F2F2',
+                                    'border': 1,
+                                    'align': 'center',
+                                    'valign': 'vcenter'
+                                })
+                                fmt_num = workbook.add_format({'num_format': '#,##0'})
+                                fmt_pct = workbook.add_format({'num_format': '0.00"%"'})
+                                fmt_text = workbook.add_format({'align': 'left'})
+
+                                for col_idx, col_name in enumerate(df_show.columns):
+                                    worksheet.write(0, col_idx, col_name, fmt_header)
+                                    tamanho_base = max(len(str(col_name)), 12)
+                                    if col_name == "Instituição":
+                                        largura = max(tamanho_base, int(df_show[col_name].astype(str).str.len().max()) + 2)
+                                        worksheet.set_column(col_idx, col_idx, min(largura, 45), fmt_text)
+                                    elif col_name == "% do Total Exibido":
+                                        worksheet.set_column(col_idx, col_idx, max(tamanho_base, 18), fmt_pct)
+                                    else:
+                                        worksheet.set_column(col_idx, col_idx, max(tamanho_base, 16), fmt_num)
+
+                                worksheet.freeze_panes(1, 0)
+                                worksheet.autofilter(0, 0, len(df_show), len(df_show.columns) - 1)
                             buffer_excel.seek(0)
                             st.download_button(
                                 label="exportar excel",
