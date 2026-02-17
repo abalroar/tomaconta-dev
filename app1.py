@@ -5262,6 +5262,14 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
 
 menu_atual = st.session_state['menu_atual']
 
+# Higienizar estado legado para evitar exibir rótulos antigos no menu
+if st.session_state.get('menu_atual') == 'Contribuições FGC':
+    st.session_state['menu_atual'] = 'Contribuições FGC/FGCoop'
+if st.session_state.get('nav_main') == 'Contribuições FGC':
+    st.session_state['nav_main'] = 'Contribuições FGC/FGCoop'
+if st.session_state.get('nav_sec') == 'Contribuições FGC':
+    st.session_state['nav_sec'] = None
+
 # Modo de navegação rápida: evita pré-carregamento pesado na troca de menus
 # e permite renderização imediata da tela antes de carregar datasets grandes.
 if 'modo_navegacao_rapida' not in st.session_state:
