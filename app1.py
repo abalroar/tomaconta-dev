@@ -5230,7 +5230,6 @@ with col_header:
 # Lista de opções do menu principal (análise)
 MENU_PRINCIPAL = [
     "Rankings",
-    "Contribuições FGC",
     "Peers (Tabela)",
     "Conselho e Diretoria",
     "Evolução",
