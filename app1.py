@@ -8398,7 +8398,7 @@ elif menu == "Contribuições FGC/FGCoop":
                             marker_color="#FF6200",
                             texttemplate="%{text:,.0f}",
                             textposition="outside",
-                            textfont=dict(size=18),
+                            textfont=dict(size=16),
                             cliponaxis=False,
                         )
                         fig_fgc.update_layout(
@@ -8433,19 +8433,7 @@ elif menu == "Contribuições FGC/FGCoop":
                                 f"{row_25['Componente End']}"
                             )
 
-                        st.markdown("#### tabela")
                         df_show = df_top[["Ranking", "Instituição", "FGC YTD", "FGC YTD (abs)", "% do Total Exibido", "Componente End", "Componente Junho"]].copy()
-                        st.dataframe(
-                            df_show,
-                            use_container_width=True,
-                            column_config={
-                                "% do Total Exibido": st.column_config.NumberColumn(format="%.2f%%"),
-                                "FGC YTD": st.column_config.NumberColumn(format="%0.0f"),
-                                "FGC YTD (abs)": st.column_config.NumberColumn(format="%0.0f"),
-                                "Componente End": st.column_config.NumberColumn(format="%0.0f"),
-                                "Componente Junho": st.column_config.NumberColumn(format="%0.0f"),
-                            },
-                        )
 
                         with st.expander("exportar dados (excel)"):
                             buffer_excel = BytesIO()
