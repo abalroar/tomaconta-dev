@@ -8281,7 +8281,7 @@ elif menu == "Rankings":
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
 
 elif menu == "Contribuições FGC/FGCoop":
-    st.markdown("### contribuições fgc")
+    st.markdown("### contribuições fgc/fgcoop")
     st.caption("Conta COSIF 8118500009: usamos o acumulado até o mês final e, no 2º semestre, somamos também o valor de junho do mesmo ano.")
 
     periodos_yyyymm = _listar_periodos_bloprudencial_disponiveis(_cache_version_token("bloprudencial"))
