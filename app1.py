@@ -2512,6 +2512,188 @@ def _periodo_mesma_estrutura(periodo: str, novo_parte: int) -> Optional[str]:
     return f"{nova_parte}/{ano}"
 
 
+def _validar_yyyymm_str(valor: str) -> Optional[str]:
+    txt = str(valor or "").strip()
+    if not re.fullmatch(r"\d{6}", txt):
+        return None
+    ano = int(txt[:4])
+    mes = int(txt[4:6])
+    if ano < 1900 or mes < 1 or mes > 12:
+        return None
+    return txt
+
+
+def _yyyymm_para_periodo_exibicao(valor: str) -> str:
+    yyyymm = _validar_yyyymm_str(valor)
+    if not yyyymm:
+        return str(valor)
+    return f"{yyyymm[4:6]}/{yyyymm[:4]}"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _listar_periodos_bloprudencial_disponiveis(_cache_token_bloprud: str) -> list[str]:
+    """Lista competências YYYYMM disponíveis para BLOPRUDENCIAL.
+
+    Prioriza o parquet do cache manager (coluna DATA_BASE); fallback em arquivos
+    locais *BLOPRUDENCIAL*.CSV no diretório do app.
+    """
+    _ = _cache_token_bloprud
+    periodos: set[str] = set()
+
+    try:
+        manager = get_cache_manager()
+        cache = manager.get_cache("bloprudencial") if manager else None
+        if cache and cache.arquivo_dados.exists():
+            import pyarrow.dataset as ds
+
+            dataset = ds.dataset(cache.arquivo_dados)
+            tabela = dataset.to_table(columns=["DATA_BASE"])
+            serie = tabela.to_pandas()["DATA_BASE"].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+            periodos.update({v for v in serie.dropna().unique().tolist() if _validar_yyyymm_str(v)})
+    except Exception:
+        pass
+
+    if not periodos:
+        try:
+            for path in APP_DIR.glob("*BLOPRUDENCIAL*.CSV"):
+                match = re.match(r"(\d{6})BLOPRUDENCIAL", path.name.upper())
+                if match:
+                    ym = _validar_yyyymm_str(match.group(1))
+                    if ym:
+                        periodos.add(ym)
+        except Exception:
+            pass
+
+    return sorted(periodos)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _carregar_fgc_8118500009_por_periodos(periodos_yyyymm: tuple[str, ...], loader_version: str = "v1") -> pd.DataFrame:
+    """Carrega/normaliza conta COSIF 8118500009 por competência e instituição."""
+    _ = loader_version
+    if not periodos_yyyymm:
+        return pd.DataFrame(columns=["DATA_BASE", "Instituição", "FGC_8118500009"])
+
+    from utils.ifdata_cache import load_bloprudencial_df_cached
+
+    def _pick_col(df_src: Optional[pd.DataFrame], candidates: list[str]) -> Optional[str]:
+        if df_src is None or df_src.empty:
+            return None
+        cols = list(df_src.columns)
+        lower_map = {str(c).strip().lower(): c for c in cols}
+        for cand in candidates:
+            key = str(cand).strip().lower()
+            if key in lower_map:
+                return lower_map[key]
+        for cand in candidates:
+            key = str(cand).strip().lower()
+            for col in cols:
+                col_l = str(col).strip().lower()
+                if key in col_l or col_l in key:
+                    return col
+        return None
+
+    dfs = []
+    for ym in sorted(set(periodos_yyyymm)):
+        yyyymm = _validar_yyyymm_str(ym)
+        if not yyyymm:
+            continue
+        df_ym = load_bloprudencial_df_cached(
+            yyyymm=yyyymm,
+            cache_dir="data/cache/bcb_bloprudencial",
+            force_refresh=False,
+        )
+        if df_ym is None or df_ym.empty:
+            continue
+
+        col_conta = _pick_col(df_ym, ["CONTA", "Conta", "codigo_conta", "COD_CONTA"])
+        col_saldo = _pick_col(df_ym, ["SALDO", "Saldo", "VALOR", "Valor"])
+        col_data_base = _pick_col(df_ym, ["DATA_BASE", "Data_Base", "data_base"])
+        col_inst = _pick_col(df_ym, ["NOME_INSTITUICAO", "Instituição", "Instituicao"])
+        col_congl = _pick_col(df_ym, ["NOME_CONGL", "Nome_Congl", "nome_congl"])
+
+        if not col_conta or not col_saldo or (not col_inst and not col_congl):
+            continue
+
+        tmp = df_ym.copy()
+        tmp["_conta"] = tmp[col_conta].astype(str).str.replace(r"\D", "", regex=True)
+        tmp = tmp[tmp["_conta"] == "8118500009"].copy()
+        if tmp.empty:
+            continue
+        tmp["FGC_8118500009"] = pd.to_numeric(tmp[col_saldo], errors="coerce")
+
+        if col_data_base:
+            tmp["DATA_BASE"] = tmp[col_data_base].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+        else:
+            tmp["DATA_BASE"] = yyyymm
+
+        if col_inst:
+            inst_series = tmp[col_inst].astype(str).str.strip()
+        else:
+            inst_series = pd.Series([""] * len(tmp), index=tmp.index)
+        if col_congl:
+            congl_series = tmp[col_congl].astype(str).str.strip()
+        else:
+            congl_series = pd.Series([""] * len(tmp), index=tmp.index)
+        tmp["Instituição"] = inst_series.where(inst_series.ne(""), congl_series)
+
+        tmp = tmp[["DATA_BASE", "Instituição", "FGC_8118500009"]].dropna(subset=["DATA_BASE", "Instituição"]) 
+        dfs.append(tmp)
+
+    if not dfs:
+        return pd.DataFrame(columns=["DATA_BASE", "Instituição", "FGC_8118500009"])
+
+    base = pd.concat(dfs, ignore_index=True)
+    base["DATA_BASE"] = base["DATA_BASE"].astype(str).str.replace(r"\D", "", regex=True).str[:6]
+    base = base[base["DATA_BASE"].map(_validar_yyyymm_str).notna()].copy()
+    ag = (
+        base.groupby(["DATA_BASE", "Instituição"], dropna=False)["FGC_8118500009"]
+        .sum(min_count=1)
+        .reset_index()
+    )
+    return ag
+
+
+def _calcular_ytd_customizado_fgc(
+    start_period: str,
+    end_period: str,
+    valores_por_mes: dict[str, float],
+) -> tuple[Optional[float], dict[str, Optional[float]]]:
+    """YTD customizado para conta semestral (Opção B).
+
+    Regra adotada: sempre reconstruir pelo período final.
+      - end em Jan-Jun: YTD = valor(end)
+      - end em Jul-Dez: YTD = valor(end) + valor(junho mesmo ano)
+    """
+    _ = start_period
+    end_ym = _validar_yyyymm_str(end_period)
+    if not end_ym:
+        return None, {"end": None, "jun": None}
+
+    def _valor_mes(ym: str) -> Optional[float]:
+        v = valores_por_mes.get(ym)
+        if v is None or pd.isna(v):
+            return None
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    val_end = _valor_mes(end_ym)
+    if val_end is None:
+        return None, {"end": None, "jun": None}
+
+    mes_end = int(end_ym[4:6])
+    if mes_end <= 6:
+        return val_end, {"end": val_end, "jun": None}
+
+    ym_jun = f"{end_ym[:4]}06"
+    val_jun = _valor_mes(ym_jun)
+    if val_jun is None:
+        return None, {"end": val_end, "jun": None}
+    return val_end + val_jun, {"end": val_end, "jun": val_jun}
+
+
 def _parte_periodo_para_trimestre_idx(valor) -> Optional[int]:
     """Normaliza parte do período para índice trimestral (1..4).
 
@@ -5056,6 +5238,7 @@ MENU_PRINCIPAL = [
     "Carteira 4.966",
     "Taxas de Juros por Produto",
     "Crie sua métrica!",
+    "Contribuições FGC/FGCoop",
 ]
 
 # Lista de opções do menu secundário (utilitários)
@@ -5071,6 +5254,8 @@ if st.session_state['menu_atual'] not in TODOS_MENUS:
         st.session_state['menu_atual'] = "Atualizar Base"
     elif st.session_state['menu_atual'] == "Painel":
         st.session_state['menu_atual'] = "Rankings"
+    elif st.session_state['menu_atual'] == "Contribuições FGC":
+        st.session_state['menu_atual'] = "Contribuições FGC/FGCoop"
     else:
         st.session_state['menu_atual'] = "Sobre"
 
@@ -8093,6 +8278,166 @@ elif menu == "Rankings":
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
+
+elif menu == "Contribuições FGC/FGCoop":
+    st.markdown("### contribuições fgc")
+    st.caption("Conta COSIF 8118500009 (-( ) Desp. de Contribuição ao FGC) com YTD semestral customizado (Opção B).")
+
+    periodos_yyyymm = _listar_periodos_bloprudencial_disponiveis(_cache_version_token("bloprudencial"))
+    if not periodos_yyyymm:
+        st.warning("não foi possível identificar períodos BLOPRUDENCIAL disponíveis.")
+    else:
+        periodos_yyyymm_desc = sorted(periodos_yyyymm, reverse=True)
+        idx_default_end = 0
+        idx_default_start = min(2, len(periodos_yyyymm_desc) - 1)
+
+        col_start, col_end, col_topn = st.columns([1.2, 1.2, 1])
+        with col_start:
+            start_period = st.selectbox(
+                "período inicial (yyyymm)",
+                periodos_yyyymm_desc,
+                index=idx_default_start,
+                format_func=_yyyymm_para_periodo_exibicao,
+                key="fgc_start_period",
+            )
+        with col_end:
+            end_period = st.selectbox(
+                "período final (yyyymm)",
+                periodos_yyyymm_desc,
+                index=idx_default_end,
+                format_func=_yyyymm_para_periodo_exibicao,
+                key="fgc_end_period",
+            )
+        with col_topn:
+            top_n = st.selectbox("top n", [10, 20, 50], index=0, key="fgc_top_n")
+
+        if start_period > end_period:
+            st.error("o período inicial deve ser menor ou igual ao período final.")
+        else:
+            mes_end = int(end_period[4:6])
+            periodos_necessarios = {start_period, end_period}
+            if mes_end > 6:
+                periodos_necessarios.add(f"{end_period[:4]}06")
+
+            st.caption(
+                "LOG regra aplicada: Opção B (YTD reconstruído sempre pelo período final). "
+                f"Meses carregados: {', '.join(sorted(periodos_necessarios))}."
+            )
+
+            df_fgc = _carregar_fgc_8118500009_por_periodos(tuple(sorted(periodos_necessarios)), loader_version="v1")
+            if df_fgc.empty:
+                st.warning("sem dados da conta 8118500009 para os períodos selecionados.")
+            else:
+                df_fgc = _aplicar_aliases_df(df_fgc, st.session_state.get("dict_aliases", {}))
+
+                bancos_todos = sorted(df_fgc["Instituição"].dropna().astype(str).unique().tolist())
+                bancos_todos = ordenar_bancos_com_alias(bancos_todos, st.session_state.get("dict_aliases", {}))
+                default_bancos = _encontrar_bancos_default(bancos_todos)
+                bancos_selecionados = st.multiselect(
+                    "selecionar instituições",
+                    bancos_todos,
+                    default=default_bancos,
+                    key="fgc_bancos",
+                    max_selections=60,
+                )
+
+                if bancos_selecionados:
+                    df_fgc = df_fgc[df_fgc["Instituição"].isin(bancos_selecionados)].copy()
+
+                if df_fgc.empty:
+                    st.info("selecione instituições para visualizar o ranking.")
+                else:
+                    piv = (
+                        df_fgc.pivot_table(index="Instituição", columns="DATA_BASE", values="FGC_8118500009", aggfunc="sum")
+                        .reset_index()
+                    )
+
+                    linhas = []
+                    for _, row in piv.iterrows():
+                        inst = row["Instituição"]
+                        valores_por_mes = {
+                            c: row[c]
+                            for c in piv.columns
+                            if c != "Instituição"
+                        }
+                        ytd_val, componentes = _calcular_ytd_customizado_fgc(start_period, end_period, valores_por_mes)
+                        if ytd_val is None:
+                            continue
+                        linhas.append({
+                            "Instituição": inst,
+                            "FGC YTD": float(ytd_val),
+                            "FGC YTD (abs)": abs(float(ytd_val)),
+                            "Componente End": componentes.get("end"),
+                            "Componente Junho": componentes.get("jun"),
+                        })
+
+                    df_rank = pd.DataFrame(linhas)
+                    if df_rank.empty:
+                        st.warning("não há instituições com dados suficientes para cálculo do YTD customizado.")
+                    else:
+                        df_rank = df_rank.sort_values("FGC YTD (abs)", ascending=False)
+                        df_top = df_rank.head(int(top_n)).copy()
+                        df_top["Ranking"] = range(1, len(df_top) + 1)
+
+                        titulo = f"Contribuições FGC/FGCoop (abs) - {_yyyymm_para_periodo_exibicao(end_period)}"
+                        fig_fgc = px.bar(
+                            df_top.sort_values("FGC YTD (abs)", ascending=True),
+                            x="FGC YTD (abs)",
+                            y="Instituição",
+                            orientation="h",
+                            text="FGC YTD (abs)",
+                            title=titulo,
+                        )
+                        fig_fgc.update_layout(
+                            xaxis_title="Contribuição FGC YTD (abs)",
+                            yaxis_title="Instituição",
+                            height=max(420, min(980, 34 * len(df_top) + 220)),
+                            plot_bgcolor="#f8f9fa",
+                            paper_bgcolor="white",
+                            font=dict(family="IBM Plex Sans"),
+                        )
+                        fig_fgc.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+                        st.plotly_chart(fig_fgc, width='stretch', config={'displayModeBar': False})
+
+                        col_a, col_b = st.columns([2, 3])
+                        with col_a:
+                            st.markdown("#### validação rápida")
+                            amostra = df_top.iloc[0]
+                            st.caption(
+                                f"Instituição amostra: {amostra['Instituição']} | "
+                                f"End={amostra['Componente End']:.2f} | "
+                                f"Jun={amostra['Componente Junho'] if pd.notna(amostra['Componente Junho']) else 'N/A'} | "
+                                f"YTD={amostra['FGC YTD']:.2f} | abs={amostra['FGC YTD (abs)']:.2f}"
+                            )
+                            if end_period == "202509":
+                                row_25 = df_rank.iloc[0]
+                                st.caption(
+                                    "Teste 9M25 (regra): 202506 + 202509 => "
+                                    f"{row_25['Componente Junho']} + {row_25['Componente End']} = {row_25['FGC YTD']}"
+                                )
+                            if end_period == "202505":
+                                row_25 = df_rank.iloc[0]
+                                st.caption(
+                                    "Teste 5M25 (regra): usa apenas 202505 => "
+                                    f"{row_25['Componente End']}"
+                                )
+                        with col_b:
+                            st.markdown("#### tabela")
+                            df_show = df_top[["Ranking", "Instituição", "FGC YTD", "FGC YTD (abs)", "Componente End", "Componente Junho"]].copy()
+                            st.dataframe(df_show, use_container_width=True)
+
+                        with st.expander("exportar dados (excel)"):
+                            buffer_excel = BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                df_show.to_excel(writer, index=False, sheet_name='fgc_ranking')
+                            buffer_excel.seek(0)
+                            st.download_button(
+                                label="exportar excel",
+                                data=buffer_excel,
+                                file_name=f"fgc_ranking_{end_period}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="exportar_fgc_excel",
+                            )
 
 elif menu == "DRE":
     st.markdown("### Demonstração de Resultado (DRE)")
