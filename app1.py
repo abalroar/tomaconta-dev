@@ -5239,6 +5239,7 @@ MENU_PRINCIPAL = [
     "Carteira 4.966",
     "Taxas de Juros por Produto",
     "Crie sua métrica!",
+    "Contribuições FGC",
 ]
 
 # Lista de opções do menu secundário (utilitários)
