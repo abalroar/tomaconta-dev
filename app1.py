@@ -9863,7 +9863,29 @@ elif menu == "Balanço 4060":
         return df
 
     def formatar_valor_br_local(valor, decimais=0):
-        if pd.isna(valor) or valor is None:
+        if valor is None:
+            return "-"
+        if isinstance(valor, pd.Series):
+            if valor.empty:
+                return "-"
+            if len(valor) == 1:
+                valor = valor.iloc[0]
+            else:
+                valor = valor.sum(min_count=1)
+        elif isinstance(valor, (pd.Index, list, tuple)):
+            if len(valor) == 0:
+                return "-"
+            if len(valor) == 1:
+                valor = valor[0]
+            else:
+                valor = pd.Series(valor).sum(min_count=1)
+
+        if not pd.api.types.is_scalar(valor):
+            try:
+                valor = pd.Series(valor).sum(min_count=1)
+            except Exception:
+                return "-"
+        if pd.api.types.is_scalar(valor) and pd.isna(valor):
             return "-"
         try:
             if decimais == 0:
@@ -9927,28 +9949,35 @@ elif menu == "Balanço 4060":
 
         bal = build_balanco_padronizado(df_blo, schema, cod_congl, data_base_sel)
 
-        top_rows = bal[bal["level"] == 1].set_index("section")
+        top_rows = (
+            bal[bal["level"] == 1]
+            .groupby("section", as_index=False)["saldo"]
+            .sum(min_count=1)
+            .set_index("section")
+        )
+        def _metric_val(section_name: str):
+            if section_name not in top_rows.index:
+                return pd.NA
+            v = top_rows.loc[section_name, "saldo"]
+            if isinstance(v, pd.Series):
+                v = v.sum(min_count=1)
+            return v
+
         col_m1, col_m2, col_m3 = st.columns(3)
         with col_m1:
             st.metric(
                 "Ativo",
-                formatar_valor_br_local(top_rows.loc["Ativo", "saldo"])
-                if "Ativo" in top_rows.index
-                else "-",
+                formatar_valor_br_local(_metric_val("Ativo")),
             )
         with col_m2:
             st.metric(
                 "Passivo",
-                formatar_valor_br_local(top_rows.loc["Passivo", "saldo"])
-                if "Passivo" in top_rows.index
-                else "-",
+                formatar_valor_br_local(_metric_val("Passivo")),
             )
         with col_m3:
             st.metric(
                 "Patrimônio Líquido",
-                formatar_valor_br_local(top_rows.loc["Patrimônio Líquido", "saldo"])
-                if "Patrimônio Líquido" in top_rows.index
-                else "-",
+                formatar_valor_br_local(_metric_val("Patrimônio Líquido")),
             )
 
         indent_map = {1: "", 2: "  ", 3: "    "}

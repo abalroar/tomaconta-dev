@@ -1,0 +1,26 @@
+{
+  "timestamp_salvamento": "2026-02-12T00:34:33.130877",
+  "fonte": "github_releases",
+  "total_registros": 4145,
+  "colunas": [
+    "Instituição",
+    "Período",
+    "A Vencer Entre 1081 a 1800 Dias",
+    "A Vencer Entre 1801 a 5400 Dias",
+    "A Vencer Entre 361 a 1080 Dias",
+    "A Vencer Entre 91 a 360 Dias",
+    "A Vencer em até 90 Dias",
+    "A vencer Acima de 5400 Dias",
+    "Total",
+    "Total Exterior Pessoa Jurídica",
+    "Total da Carteira de Pessoa Jurídica",
+    "Vencido a Partir de 15 Dias"
+  ],
+  "formato": "parquet",
+  "periodos": [
+    "1/2025",
+    "2/2025",
+    "3/2025"
+  ],
+  "total_periodos": 3
+}

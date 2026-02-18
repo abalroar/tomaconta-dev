@@ -1,0 +1,49 @@
+{
+  "timestamp_salvamento": "2026-02-12T00:35:13.589346",
+  "fonte": "derivado",
+  "total_registros": 45042,
+  "colunas": [
+    "Instituição",
+    "Período",
+    "Métrica",
+    "Valor",
+    "Unidade"
+  ],
+  "formato": "parquet",
+  "periodos": [
+    "1/2023",
+    "1/2024",
+    "1/2025",
+    "2/2023",
+    "2/2024",
+    "2/2025",
+    "3/2023",
+    "3/2024",
+    "3/2025",
+    "4/2023",
+    "4/2024"
+  ],
+  "total_periodos": 11,
+  "extra": {
+    "denominador_zero_ou_nan": {
+      "Desp PDD / NIM bruta": 11811,
+      "Desp PDD / Resultado Intermediação Fin. Bruto": 11064,
+      "Desp Captação / Captação": 5009
+    },
+    "period_type": "trimestral",
+    "periodos_detectados": [
+      "1/2023",
+      "1/2024",
+      "1/2025",
+      "2/2023",
+      "2/2024",
+      "2/2025",
+      "3/2023",
+      "3/2024",
+      "3/2025",
+      "4/2023",
+      "4/2024"
+    ],
+    "tempo_execucao_s": 0.133
+  }
+}
