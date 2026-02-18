@@ -323,9 +323,9 @@ VARS_PERCENTUAL = [
     'Crédito/Captações (%)',
     'Crédito/Ativo (%)',
     'Índice de Imobilização',
-    'Perda Esperada / Carteira Bruta',
+    'Perda Esperada / Carteira Classificada',
     'Perda Esperada / (Carteira C4 + C5)',
-    'Carteira de Créd. Class. C4+C5 / Carteira Bruta',
+    'Carteira de Créd. Class. C4+C5 / Carteira Classificada',
     'PDD / Estágio 3',
     'Perda Esperada / Estágio 3',
     # Variáveis de Capital (Relatório 5)
@@ -339,7 +339,7 @@ VARS_PERCENTUAL = [
 VARS_RAZAO = ['Crédito/PL (%)', 'Ativo/PL']
 VARS_MOEDAS = [
     'Carteira de Crédito',
-    'Carteira de Crédito Bruta',
+    'Carteira de Crédito Classificada',
     'Ativos Líquidos',
     'Depósitos Totais',
     'Perda Esperada',
@@ -387,9 +387,9 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Ativos Líquidos",
             },
             {
-                "label": "Carteira de Crédito Bruta",
+                "label": "Carteira de Crédito Classificada",
                 "data_keys": [],
-                "format_key": "Carteira de Crédito Bruta",
+                "format_key": "Carteira de Crédito Classificada",
             },
             {
                 "label": "Depósitos Totais",
@@ -457,9 +457,9 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Perda Esperada",
             },
             {
-                "label": "Perda Esperada / Carteira Bruta",
+                "label": "Perda Esperada / Carteira Classificada",
                 "data_keys": [],
-                "format_key": "Perda Esperada / Carteira Bruta",
+                "format_key": "Perda Esperada / Carteira Classificada",
             },
             {
                 "label": "Carteira de Créd. Class. C4+C5",
@@ -467,9 +467,9 @@ PEERS_TABELA_LAYOUT = [
                 "format_key": "Carteira de Créd. Class. C4+C5",
             },
             {
-                "label": "Carteira de Créd. Class. C4+C5 / Carteira Bruta",
+                "label": "Carteira de Créd. Class. C4+C5 / Carteira Classificada",
                 "data_keys": [],
-                "format_key": "Carteira de Créd. Class. C4+C5 / Carteira Bruta",
+                "format_key": "Carteira de Créd. Class. C4+C5 / Carteira Classificada",
             },
             {
                 "label": "Perda Esperada / (Carteira C4 + C5)",
@@ -2456,8 +2456,8 @@ def _tooltip_ratio_peers(label, valor_num, valor_den, valor_ratio):
     _NOMES_COMPONENTES = {
         "Ativo / PL": ("Ativo Total", "PL"),
         "Crédito / PL": ("Carteira de Crédito", "PL"),
-        "Perda Esperada / Carteira Bruta": ("Perda Esperada", "Carteira Bruta"),
-        "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("C4+C5", "Carteira Bruta"),
+        "Perda Esperada / Carteira Classificada": ("Perda Esperada", "Carteira de Crédito Classificada"),
+        "Carteira de Créd. Class. C4+C5 / Carteira Classificada": ("C4+C5", "Carteira de Crédito Classificada"),
         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "C4+C5"),
     }
     lines = []
@@ -3031,13 +3031,27 @@ def _somar_valores(valores: list) -> Optional[float]:
     return float(sum(numeros))
 
 
+def _normalizar_nomes_carteira(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    if df is None or df.empty:
+        return df
+    rename_map = {
+        "Carteira de Crédito Bruta": "Carteira de Crédito Classificada",
+        "Carteira Bruta": "Carteira Classificada",
+        "Perda Esperada / Carteira Bruta": "Perda Esperada / Carteira Classificada",
+        "Carteira de Créd. Class. C4+C5 / Carteira Bruta": "Carteira de Créd. Class. C4+C5 / Carteira Classificada",
+    }
+    rename_cols = {k: v for k, v in rename_map.items() if k in df.columns}
+    if not rename_cols:
+        return df
+    return df.rename(columns=rename_cols)
+
 
 
 def _aplicar_aliases_df(df: Optional[pd.DataFrame], dict_aliases: dict) -> Optional[pd.DataFrame]:
-    if df is None or df.empty or not dict_aliases:
+    if df is None or df.empty:
         return df
-    df_out = df.copy()
-    if "Instituição" in df_out.columns:
+    df_out = _normalizar_nomes_carteira(df.copy())
+    if dict_aliases and "Instituição" in df_out.columns:
         df_out["Instituição"] = df_out["Instituição"].apply(
             lambda nome: dict_aliases.get(nome, dict_aliases.get(normalizar_nome_instituicao(nome), nome))
             if pd.notna(nome) else nome
@@ -3052,7 +3066,7 @@ def _carregar_cache_relatorio(tipo_cache: str) -> Optional[pd.DataFrame]:
         return None
     resultado = manager.carregar(tipo_cache)
     if resultado.sucesso and resultado.dados is not None:
-        return resultado.dados
+        return _normalizar_nomes_carteira(resultado.dados)
     return None
 
 
@@ -3111,7 +3125,7 @@ def _carregar_cache_relatorio_slice(
                 f = ds.field("Instituição").isin(list(instituicoes))
                 filtro = f if filtro is None else filtro & f
             tabela = dataset.to_table(filter=filtro) if filtro is not None else dataset.to_table()
-            return tabela.to_pandas()
+            return _normalizar_nomes_carteira(tabela.to_pandas())
         except Exception:
             pass
 
@@ -3120,7 +3134,7 @@ def _carregar_cache_relatorio_slice(
     if not resultado.sucesso or resultado.dados is None:
         return None
 
-    df = resultado.dados
+    df = _normalizar_nomes_carteira(resultado.dados)
     if periodos:
         if "Período" in df.columns:
             df = df[df["Período"].isin(periodos)]
@@ -3175,13 +3189,13 @@ def _preparar_metricas_extra_peers(
     cache_bloprudencial: Optional[pd.DataFrame] = None,
 ) -> dict:
     extra = {
-        "Carteira de Crédito Bruta": {},
+        "Carteira de Crédito Classificada": {},
         "Ativos Líquidos": {},
         "Depósitos Totais": {},
         "Perda Esperada": {},
-        "Perda Esperada / Carteira Bruta": {},
+        "Perda Esperada / Carteira Classificada": {},
         "Carteira de Créd. Class. C4+C5": {},
-        "Carteira de Créd. Class. C4+C5 / Carteira Bruta": {},
+        "Carteira de Créd. Class. C4+C5 / Carteira Classificada": {},
         "Perda Esperada / (Carteira C4 + C5)": {},
         "Saldo PDD Crédito": {},
         "Saldo PDD Outros Créditos": {},
@@ -3513,8 +3527,8 @@ def _preparar_metricas_extra_peers(
             chave = (banco, periodo)
             valor_pf = _obter_valor_peers(cache_carteira_pf, banco, periodo, col_pf_total)
             valor_pj = _obter_valor_peers(cache_carteira_pj, banco, periodo, col_pj_total)
-            carteira_bruta = _somar_valores([valor_pf, valor_pj])
-            extra["Carteira de Crédito Bruta"][chave] = carteira_bruta
+            carteira_classificada = _somar_valores([valor_pf, valor_pj])
+            extra["Carteira de Crédito Classificada"][chave] = carteira_classificada
 
             # Ativos Líquidos = Disponibilidades (a) + Aplicações Interfinanceiras (b) + TVM (c)
             # do relatório de Ativo (Rel. 2)
@@ -3535,15 +3549,18 @@ def _preparar_metricas_extra_peers(
             ]
             perda_esperada = _somar_valores(perda_vals)
             extra["Perda Esperada"][chave] = perda_esperada
-            extra["Perda Esperada / Carteira Bruta"][chave] = _calcular_ratio_peers(perda_esperada, carteira_bruta)
+            extra["Perda Esperada / Carteira Classificada"][chave] = _calcular_ratio_peers(
+                perda_esperada,
+                carteira_classificada,
+            )
 
             valor_c4 = _obter_valor_peers(cache_carteira_instr, banco, periodo, col_c4)
             valor_c5 = _obter_valor_peers(cache_carteira_instr, banco, periodo, col_c5)
             carteira_c4_c5 = _somar_valores([valor_c4, valor_c5])
             extra["Carteira de Créd. Class. C4+C5"][chave] = carteira_c4_c5
-            extra["Carteira de Créd. Class. C4+C5 / Carteira Bruta"][chave] = _calcular_ratio_peers(
+            extra["Carteira de Créd. Class. C4+C5 / Carteira Classificada"][chave] = _calcular_ratio_peers(
                 carteira_c4_c5,
-                carteira_bruta,
+                carteira_classificada,
             )
             extra["Perda Esperada / (Carteira C4 + C5)"][chave] = _calcular_ratio_peers(
                 perda_esperada,
@@ -3787,8 +3804,8 @@ def _montar_tabela_peers(
                     tip = ""
                     # Mapeamento de ratios → (chave numerador, chave denominador)
                     _RATIO_COMPONENTS = {
-                        "Perda Esperada / Carteira Bruta": ("Perda Esperada", "Carteira de Crédito Bruta"),
-                        "Carteira de Créd. Class. C4+C5 / Carteira Bruta": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Bruta"),
+                        "Perda Esperada / Carteira Classificada": ("Perda Esperada", "Carteira de Crédito Classificada"),
+                        "Carteira de Créd. Class. C4+C5 / Carteira Classificada": ("Carteira de Créd. Class. C4+C5", "Carteira de Crédito Classificada"),
                         "Perda Esperada / (Carteira C4 + C5)": ("Perda Esperada", "Carteira de Créd. Class. C4+C5"),
                         "PDD / Estágio 3": ("PDD Total 4060", "Carteira Estágio 3"),
                         "Perda Esperada / Estágio 3": ("Perda Esperada", "Carteira Estágio 3"),
@@ -5817,7 +5834,7 @@ if menu == "Sobre":
         **estrutura patrimonial**
         - ativo total
         - ativos líquidos
-        - carteira de crédito bruta e líquida
+        - carteira de crédito classificada e líquida
         - títulos e valores mobiliários
         - depósitos e captações
         - patrimônio líquido
@@ -6435,15 +6452,15 @@ elif menu == "Peers (Tabela)":
                             <em>Balanço</em><br>
                             <strong>Ativo Total</strong> = Ativo Total do balanço principal (Rel. 1).<br>
                             <strong>Ativos Líquidos</strong> = Disponibilidades (a) + Aplicações Interfinanceiras de Liquidez (b) + Títulos e Valores Mobiliários (c) no relatório de Ativo (Rel. 2).<br>
-                            <strong>Carteira de Crédito Bruta</strong> = Total da Carteira de Pessoa Física (Rel. 11) + Total da Carteira de Pessoa Jurídica (Rel. 13).<br>
+                            <strong>Carteira de Crédito Classificada</strong> = Total da Carteira de Pessoa Física (Rel. 11) + Total da Carteira de Pessoa Jurídica (Rel. 13).<br>
                             <strong>Depósitos Totais</strong> = Depósitos (a) no relatório de Passivo (Rel. 3).<br>
                             <strong>Patrimônio Líquido (PL)</strong> = Patrimônio Líquido do balanço principal (Rel. 1).<br>
                             <br>
                             <em>Qualidade Carteira</em><br>
                             <strong>Perda Esperada</strong> = Soma das linhas Perda Esperada (e2), Hedge de Valor Justo (e3), Ajuste a Valor Justo (e4), Perda Esperada (f2), Hedge de Valor Justo (f3), Perda Esperada (g2), Hedge de Valor Justo (g3), Ajuste a Valor Justo (g4) e Perda Esperada (h2) no relatório de Ativo (Rel. 2).<br>
-                            <strong>Perda Esperada / Carteira Bruta</strong> = Perda Esperada ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Perda Esperada / Carteira Classificada</strong> = Perda Esperada ÷ Carteira de Crédito Classificada.<br>
                             <strong>Carteira de Créd. Class. C4+C5</strong> = Soma das linhas C4 e C5 do relatório de Carteira 4.966 (Rel. 16).<br>
-                            <strong>Carteira de Créd. Class. C4+C5 / Carteira Bruta</strong> = (C4 + C5) ÷ Carteira de Crédito Bruta.<br>
+                            <strong>Carteira de Créd. Class. C4+C5 / Carteira Classificada</strong> = (C4 + C5) ÷ Carteira de Crédito Classificada.<br>
                             <strong>Perda Esperada / (Carteira C4 + C5)</strong> = Perda Esperada ÷ (C4 + C5).<br>
                             <strong>Saldo PDD Crédito</strong> = Saldo da conta COSIF 1490000004 (Cadoc 4060) para o período selecionado.<br>
                             <strong>Saldo PDD Outros Créditos</strong> = Saldo da conta COSIF 1890000006 (Cadoc 4060) para o período selecionado.<br>
