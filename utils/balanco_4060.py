@@ -194,13 +194,54 @@ def load_name_mapping_xlsx(path: Path = NAME_MAP_PATH) -> Dict[str, str]:
         df = pd.read_excel(path, sheet_name=sheet)
     except Exception:
         df = pd.read_excel(path)
-    if "CONTA" not in df.columns or "NOME_CONTA_CORRIGIDO" not in df.columns:
-        # fallback: tentar nomes originais
-        if "NOME_CONTA" not in df.columns:
+    if "CONTA" not in df.columns:
+        return {}
+    if "NOME_CONTA_CORRIGIDO" not in df.columns:
+        if "NOME_CORRIGIDO" in df.columns:
+            df["NOME_CONTA_CORRIGIDO"] = df["NOME_CORRIGIDO"]
+        elif "NOME_CONTA" in df.columns:
+            df["NOME_CONTA_CORRIGIDO"] = df["NOME_CONTA"]
+        else:
             return {}
-        df["NOME_CONTA_CORRIGIDO"] = df["NOME_CONTA"]
-    df["CONTA"] = df["CONTA"].astype(str).str.replace(r"\D", "", regex=True)
+    df["CONTA"] = df["CONTA"].astype(str).str.replace(r"\D", "", regex=True).str.zfill(10)
     return dict(zip(df["CONTA"], df["NOME_CONTA_CORRIGIDO"].astype(str)))
+
+
+def load_hierarchy_mapping_xlsx(path: Path = NAME_MAP_PATH) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        xls = pd.ExcelFile(path)
+        sheet = "ClassificacaoCompleta4060" if "ClassificacaoCompleta4060" in xls.sheet_names else xls.sheet_names[0]
+        df = pd.read_excel(path, sheet_name=sheet)
+    except Exception:
+        df = pd.read_excel(path)
+    # normalize columns
+    def _norm_prefix(val) -> str:
+        if pd.isna(val):
+            return ""
+        if isinstance(val, (int,)):
+            return str(val)
+        if isinstance(val, float):
+            if val.is_integer():
+                val = int(val)
+                return str(val)
+        s = str(val).strip()
+        if s.endswith(".0"):
+            s = s[:-2]
+        s = re.sub(r"\D", "", s)
+        return s
+
+    for col in ["CONTA", "PREFIXO", "PARENT_PREFIX"]:
+        if col in df.columns:
+            df[col] = df[col].apply(_norm_prefix)
+    if "CONTA" in df.columns:
+        df["CONTA"] = df["CONTA"].astype(str).str.zfill(10)
+    if "NOME_CORRIGIDO" not in df.columns and "NOME_CONTA_CORRIGIDO" in df.columns:
+        df = df.rename(columns={"NOME_CONTA_CORRIGIDO": "NOME_CORRIGIDO"})
+    if "PREFIX_LEN" not in df.columns and "PREFIXO" in df.columns:
+        df["PREFIX_LEN"] = df["PREFIXO"].astype(str).str.len()
+    return df
 
 
 def _normalize_name(val: str) -> str:

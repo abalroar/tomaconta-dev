@@ -79,6 +79,7 @@ from utils.balanco_4060 import (
     load_schema_rules as load_balanco_schema_rules,
     build_hierarchical_lines as build_balanco_hierarchical_lines,
     load_name_mapping_xlsx as load_balanco_name_map,
+    load_hierarchy_mapping_xlsx as load_balanco_hierarchy_map,
     normalize_conta_10 as normalize_balanco_conta_10,
     read_blo_prudencial_csv,
 )
@@ -9852,7 +9853,7 @@ elif menu == "DRE":
 
 elif menu == "Balanço 4060":
     st.markdown("### Balanço 4060 (Conglomerados Prudenciais)")
-    st.caption("Balancete mensal por conglomerado prudencial (BLOPRUDENCIAL). Estrutura padronizada em 3 níveis.")
+    st.caption("Balancete mensal por conglomerado prudencial (BLOPRUDENCIAL). Estrutura hierárquica COSIF.")
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_bloprudencial_file_cached(path_str: str):
@@ -9932,8 +9933,45 @@ elif menu == "Balanço 4060":
     df_blo = normalize_balanco_conta_10(df_blo)
     schema_rules = load_schema_rules_cached()
     name_map = load_balanco_name_map()
-    lines = build_balanco_hierarchical_lines(df_blo, schema_rules, name_map)
-    lines_df = pd.DataFrame(lines)
+    hierarchy_df = load_balanco_hierarchy_map()
+    if hierarchy_df.empty:
+        lines = build_balanco_hierarchical_lines(df_blo, schema_rules, name_map)
+        lines_df = pd.DataFrame(lines)
+    else:
+        lines_df = hierarchy_df.copy()
+        if "NOME_CORRIGIDO" not in lines_df.columns:
+            lines_df["NOME_CORRIGIDO"] = lines_df.get("NOME_CONTA_CORRIGIDO", lines_df.get("NOME_CONTA", ""))
+        lines_df["label"] = lines_df["NOME_CORRIGIDO"].astype(str)
+        lines_df["type"] = lines_df.get("TIPO", "DETAIL")
+        def _infer_section(row):
+            grp = str(row.get("Grupo_Liquidez") or "")
+            if grp in [
+                "Ativos Líquidos",
+                "Operações de Crédito",
+                "Derivativos e Instrumentos Financeiros",
+                "Outros Créditos",
+                "Ativo Permanente",
+            ]:
+                return "Ativo"
+            if grp in [
+                "Depósitos",
+                "Títulos Emitidos",
+                "Captações / Empréstimos e Repasses",
+                "Derivativos",
+                "Outras Obrigações",
+            ]:
+                return "Passivo"
+            conta = str(row.get("CONTA") or "")
+            if conta[:1] in ["1", "2"]:
+                return "Ativo"
+            if conta[:1] == "4":
+                return "Passivo"
+            if conta[:1] == "6":
+                return "Patrimônio Líquido"
+            return "Patrimônio Líquido"
+
+        lines_df["section"] = lines_df.apply(_infer_section, axis=1)
+        lines_df["level"] = (lines_df["PREFIX_LEN"].fillna(0).astype(int) - 1).clip(lower=1).astype(int)
 
     data_bases = sorted(df_blo["DATA_BASE"].astype(str).dropna().unique(), reverse=True)
     if not data_bases:
@@ -9974,54 +10012,146 @@ elif menu == "Balanço 4060":
     cod_congl = df_congl.loc[df_congl["label"] == label_sel, "COD_CONGL"].iloc[0]
 
     # ordenar linhas por liquidez e hierarquia
+    liquidez_order = [
+        "Ativos Líquidos",
+        "Operações de Crédito",
+        "Derivativos e Instrumentos Financeiros",
+        "Outros Créditos",
+        "Ativo Permanente",
+        "Depósitos",
+        "Títulos Emitidos",
+        "Captações / Empréstimos e Repasses",
+        "Derivativos",
+        "Outras Obrigações",
+        "Patrimônio Líquido",
+    ]
+    liquidez_idx = {g: i for i, g in enumerate(liquidez_order, start=1)}
     section_order = {s: i for i, s in enumerate(schema_rules.get("sections_order", []), start=1)}
+    if not section_order:
+        section_order = {"Ativo": 1, "Passivo": 2, "Patrimônio Líquido": 3}
     lines_df["section_order"] = lines_df["section"].map(section_order).fillna(99)
-    lines_df["group_code"] = lines_df.get("group_code")
-    lines_df["conta"] = lines_df.get("conta")
-    lines_df = lines_df.sort_values(
-        ["section_order", "order", "level", "group_code", "conta", "label"],
-        kind="mergesort",
-    )
+    if "Grupo_Liquidez" in lines_df.columns:
+        lines_df["liquidez_order"] = lines_df["Grupo_Liquidez"].map(liquidez_idx).fillna(99)
+    else:
+        lines_df["liquidez_order"] = 99
+    lines_df["conta"] = lines_df.get("CONTA", lines_df.get("conta")).astype(str)
+    if "PREFIXO" in lines_df.columns:
+        lines_df["prefixo"] = lines_df["PREFIXO"].astype(str)
+    else:
+        lines_df["prefixo"] = ""
+    lines_df["tipo_ord"] = lines_df.get("type").map({"HEADER": 0, "DETAIL": 1, "derived": 0, "account": 1}).fillna(2)
 
-    # construir balanço por período (completo e hierárquico)
-    def _compute_balances_for_period(ym: str) -> Dict[str, Optional[float]]:
-        df_sel = df_blo[(df_blo["COD_CONGL"].astype(str) == str(cod_congl)) & (df_blo["DATA_BASE"].astype(str) == str(ym))]
-        if df_sel.empty:
-            return {line_id: pd.NA for line_id in lines_df["id"].tolist()}
-        acc_sums = df_sel.groupby("CONTA_10")["SALDO"].sum(min_count=1)
+    def _build_hierarchy_order(df_group: pd.DataFrame) -> List[int]:
+        if df_group.empty:
+            return []
+        df_group = df_group.copy()
+        df_group["PREFIXO"] = df_group.get("PREFIXO", "").astype(str)
+        df_group["PARENT_PREFIX"] = df_group.get("PARENT_PREFIX", "").astype(str)
 
-        children_map = {}
-        for _, row in lines_df.iterrows():
-            pid = row.get("parent_id")
-            if pid:
-                children_map.setdefault(pid, []).append(row["id"])
+        prefix_to_indices = {}
+        for idx, row in df_group.iterrows():
+            prefix = row.get("PREFIXO", "")
+            if prefix:
+                prefix_to_indices.setdefault(prefix, []).append(idx)
 
-        balances = {}
-        # process in descending level (accounts first)
-        for _, row in lines_df.sort_values("level", ascending=False).iterrows():
-            line_id = row["id"]
-            if row.get("type") == "account":
-                conta = row.get("conta")
-                balances[line_id] = acc_sums.get(conta, pd.NA)
+        def _row_sort_key(row):
+            prefix = str(row.get("PREFIXO") or "")
+            pref_len = len(prefix)
+            pref_num = int(prefix) if prefix.isdigit() else 0
+            conta = str(row.get("CONTA") or "")
+            conta_num = int(conta) if conta.isdigit() else 0
+            tipo_ord = 0 if row.get("type") == "HEADER" else 1
+            return (pref_len, pref_num, tipo_ord, conta_num, str(row.get("label") or ""))
+
+        parent_map = {}
+        for idx, row in df_group.iterrows():
+            parent_prefix = str(row.get("PARENT_PREFIX") or "")
+            if parent_prefix and parent_prefix in prefix_to_indices:
+                parent_idx = sorted(
+                    prefix_to_indices[parent_prefix],
+                    key=lambda i: _row_sort_key(df_group.loc[i]),
+                )[0]
+                parent_map[idx] = parent_idx
             else:
-                children = children_map.get(line_id, [])
-                if not children:
-                    balances[line_id] = pd.NA
+                parent_map[idx] = None
+
+        children = {idx: [] for idx in df_group.index}
+        for child_idx, parent_idx in parent_map.items():
+            if parent_idx is not None:
+                children[parent_idx].append(child_idx)
+
+        roots = [idx for idx, p in parent_map.items() if p is None]
+        roots = sorted(roots, key=lambda i: _row_sort_key(df_group.loc[i]))
+
+        order_list = []
+
+        def _dfs(idx):
+            order_list.append(idx)
+            for child in sorted(children.get(idx, []), key=lambda i: _row_sort_key(df_group.loc[i])):
+                _dfs(child)
+
+        for r in roots:
+            _dfs(r)
+        return order_list
+
+    lines_df["hier_order"] = 999999
+    for (section, grupo), df_group in lines_df.groupby(["section", "Grupo_Liquidez"], dropna=False):
+        order_list = _build_hierarchy_order(df_group)
+        for pos, idx in enumerate(order_list, start=1):
+            lines_df.loc[idx, "hier_order"] = pos
+
+    sort_cols = ["section_order", "liquidez_order", "hier_order", "prefixo", "PREFIX_LEN", "tipo_ord", "conta", "label"]
+    lines_df = lines_df.sort_values(sort_cols, kind="mergesort")
+
+    # construir balanço por período (hierarquia por prefixo)
+    def _compute_balances_for_period(ym: str) -> Dict[str, Optional[float]]:
+        df_sel = df_blo[
+            (df_blo["COD_CONGL"].astype(str) == str(cod_congl))
+            & (df_blo["DATA_BASE"].astype(str) == str(ym))
+        ]
+        if df_sel.empty:
+            return {}
+        acc_sums = df_sel.groupby("CONTA_10")["SALDO"].sum(min_count=1)
+        balances: Dict[str, Optional[float]] = {}
+        detail_accounts = set(
+            lines_df[lines_df["type"] != "HEADER"]["CONTA"].astype(str).tolist()
+        )
+        # base: detail account balances
+        for _, row in lines_df.iterrows():
+            conta = str(row.get("CONTA") or row.get("conta") or "")
+            if not conta:
+                continue
+            if row.get("type") != "HEADER":
+                balances[conta] = acc_sums.get(conta, pd.NA)
+        # headers: sum of detail accounts with prefix
+        for _, row in lines_df.iterrows():
+            if row.get("type") == "HEADER":
+                prefix = str(row.get("PREFIXO") or "")
+                if not prefix:
+                    continue
+                header_key = str(row.get("CONTA") or row.get("conta") or prefix)
+                detail_matches = [
+                    acc_sums.get(k, pd.NA)
+                    for k in detail_accounts
+                    if str(k).startswith(prefix)
+                ]
+                ser = pd.Series(detail_matches).dropna()
+                if not ser.empty:
+                    balances[header_key] = ser.sum(min_count=1)
                 else:
-                    vals = [balances.get(cid) for cid in children]
-                    ser = pd.Series(vals).dropna()
-                    balances[line_id] = ser.sum(min_count=1) if not ser.empty else pd.NA
+                    balances[header_key] = acc_sums.get(header_key, pd.NA)
         return balances
 
     balances = {ym: _compute_balances_for_period(ym) for ym in data_base_sel}
 
     def _get_ativo_total(ym: str) -> Optional[float]:
         bal_map = balances.get(ym, {})
-        if "ativo_total" in bal_map:
-            return bal_map.get("ativo_total")
-        # fallback: soma de linhas Ativo nível 1
-        ids = lines_df[(lines_df["section"] == "Ativo") & (lines_df["level"] == 1)]["id"].tolist()
-        vals = [bal_map.get(i) for i in ids]
+        ativos = lines_df[(lines_df["section"] == "Ativo") & (lines_df["type"] != "HEADER")]
+        vals = []
+        for _, r in ativos.iterrows():
+            conta = str(r.get("CONTA") or r.get("conta") or "")
+            if conta:
+                vals.append(bal_map.get(conta, pd.NA))
         ser = pd.Series(vals).dropna()
         return ser.sum(min_count=1) if not ser.empty else pd.NA
 
@@ -10033,10 +10163,13 @@ elif menu == "Balanço 4060":
         .bal4060-table th, .bal4060-table td { border: 1px solid #d9d9d9; padding: 6px 10px; }
         .bal4060-table th { background: #1f3b63; color: #fff; text-align: center; }
         .bal4060-table td.label { text-align: left; font-weight: 500; }
-        .bal4060-table tr.section-row td { background: #f3f6fb; font-weight: 600; }
+        .bal4060-table tr.section-row td { background: #f3f6fb; font-weight: 700; }
         .bal4060-table tr.total-row td { background: #1f3b63; color: #fff; font-weight: 700; }
-        .bal4060-table .indent-2 { padding-left: 18px; font-weight: 400; }
-        .bal4060-table .indent-3 { padding-left: 32px; font-weight: 400; }
+        .bal4060-table .indent-1 { padding-left: 8px; }
+        .bal4060-table .indent-2 { padding-left: 22px; }
+        .bal4060-table .indent-3 { padding-left: 36px; }
+        .bal4060-table .indent-4 { padding-left: 50px; }
+        .bal4060-table .indent-5 { padding-left: 64px; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -10044,25 +10177,39 @@ elif menu == "Balanço 4060":
 
     # filtrar linhas sem valores (todas as competências)
     def _has_value(line_id: str) -> bool:
-        vals = [balances[ym].get(line_id) for ym in data_base_sel]
+        if not line_id or str(line_id).lower() == "nan":
+            return False
+        vals = [balances.get(ym, {}).get(line_id) for ym in data_base_sel]
         ser = pd.Series(vals).dropna()
         if ser.empty:
             return False
         return (ser != 0).any()
 
-    visible_lines = lines_df[lines_df["id"].map(_has_value)].copy()
+    visible_lines = lines_df[lines_df["conta"].map(_has_value)].copy()
 
     # garantir que pais de linhas visíveis também apareçam
-    parent_ids = set()
-    for pid in visible_lines["parent_id"].dropna().unique().tolist():
-        parent_ids.add(pid)
-    if parent_ids:
-        visible_lines = pd.concat([visible_lines, lines_df[lines_df["id"].isin(parent_ids)]], ignore_index=True)
-        visible_lines = visible_lines.drop_duplicates(subset=["id"])
-        visible_lines = visible_lines.sort_values(
-            ["section_order", "order", "level", "group_code", "conta", "label"],
-            kind="mergesort",
-        )
+    # garantir que headers ancestrais apareçam se houver filhos
+    parent_prefixes = set(visible_lines["PARENT_PREFIX"].dropna().astype(str).tolist())
+    added = True
+    while added and parent_prefixes:
+        added = False
+        parents_df = lines_df[lines_df["PREFIXO"].isin(parent_prefixes)]
+        new_prefixes = set(parents_df["PARENT_PREFIX"].dropna().astype(str).tolist())
+        if not parents_df.empty:
+            visible_lines = pd.concat([visible_lines, parents_df], ignore_index=True)
+            visible_lines = visible_lines.drop_duplicates(subset=["CONTA"])
+            added = True
+        parent_prefixes = new_prefixes
+    # manter ordem cosmética: incluir headers raiz mesmo zerados
+    root_headers = lines_df[
+        (lines_df["type"] == "HEADER")
+        & (lines_df["PARENT_PREFIX"].isna() | (lines_df["PARENT_PREFIX"].astype(str).str.len() == 0))
+    ]
+    if not root_headers.empty:
+        visible_lines = pd.concat([visible_lines, root_headers], ignore_index=True)
+        visible_lines = visible_lines.drop_duplicates(subset=["CONTA"])
+
+    visible_lines = visible_lines.sort_values(sort_cols, kind="mergesort")
 
     # montar HTML da tabela
     header_label = "R$ MM" if escala_mm else "R$"
@@ -10077,16 +10224,16 @@ elif menu == "Balanço 4060":
 
     body = ""
     for _, row in visible_lines.iterrows():
-        line_id = row["id"]
+        conta = str(row.get("conta") or row.get("CONTA") or "")
         label = row["label"]
         level = int(row["level"])
-        is_total = bool(row.get("is_total"))
-        cls = "total-row" if is_total else ("section-row" if level == 1 and row.get("type") == "derived" else "")
-        indent_cls = f"indent-{level}" if level > 1 else ""
+        is_header = row.get("type") == "HEADER"
+        cls = "section-row" if is_header else ""
+        indent_cls = f"indent-{level}" if level >= 1 else "indent-1"
         body += f"<tr class='{cls}'>"
         body += f"<td class='label {indent_cls}' style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{label}</td>"
         for ym in data_base_sel:
-            raw_val = balances[ym].get(line_id, pd.NA)
+            raw_val = balances[ym].get(conta, pd.NA)
             ativo_total = _get_ativo_total(ym)
             pct = pd.NA
             if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
@@ -10106,43 +10253,39 @@ elif menu == "Balanço 4060":
     """
     st.markdown(html, unsafe_allow_html=True)
 
-    st.caption(f"Fonte de dados: {fonte_blo}. Regras determinísticas em data/balanco_4060_schema_rules.json.")
+    st.caption(f"Fonte de dados: {fonte_blo}. Mapeamento: data/ClassificacaoCompleta4060_mapeamento.xlsx.")
 
     with st.expander("Miniglossário das linhas derivadas"):
-        derived = lines_df[(lines_df["type"] == "derived")].copy()
+        derived = lines_df[(lines_df["type"] == "HEADER")].copy()
         if derived.empty:
             st.write("Sem linhas derivadas.")
         else:
             for _, linha in derived.iterrows():
-                if linha.get("parent_id"):
-                    continue
-                filhos = lines_df[lines_df["parent_id"] == linha["id"]]["label"].tolist()
+                prefixo = str(linha.get("PREFIXO") or "")
+                filhos = lines_df[
+                    lines_df["PARENT_PREFIX"].astype(str) == prefixo
+                ]["label"].tolist()
                 if filhos:
                     st.markdown(f"**{linha['label']}** = soma de: {', '.join(filhos)}")
                 else:
                     st.markdown(f"**{linha['label']}** = soma das contas COSIF atribuídas pela regra.")
 
-    # construir mapeamento baseado nas linhas visíveis
-    line_lookup = lines_df.set_index("id")
+    # construir mapeamento completo (todas as linhas)
     map_rows = []
-    for _, row in visible_lines.iterrows():
-        if row.get("type") != "account":
-            continue
-        pid = row.get("parent_id")
-        parent_label = line_lookup.loc[pid, "label"] if pid in line_lookup.index else ""
-        # subir até a linha derivada raiz
-        root_label = parent_label
-        cur = pid
-        while cur in line_lookup.index and line_lookup.loc[cur, "parent_id"]:
-            cur = line_lookup.loc[cur, "parent_id"]
-            root_label = line_lookup.loc[cur, "label"]
+    for _, row in lines_df.iterrows():
+        parent_prefix = row.get("PARENT_PREFIX")
+        parent_label = ""
+        if parent_prefix:
+            parent_row = lines_df[lines_df["PREFIXO"].astype(str) == str(parent_prefix)]
+            parent_label = parent_row["label"].iloc[0] if not parent_row.empty else ""
         map_rows.append(
             {
-                "Linha_Mae": root_label,
-                "Linha_Grupo": parent_label,
-                "CONTA": row.get("conta") or "",
+                "Linha_Mae": parent_label or row.get("Linha_Mae") or "",
+                "Grupo_Liquidez": row.get("Grupo_Liquidez") or "",
+                "CONTA": row.get("CONTA") or "",
                 "Descricao_Corrigida": row.get("label"),
-                "Prefixo": (row.get("conta") or "")[:3],
+                "Prefixo": row.get("PREFIXO"),
+                "Tipo": row.get("type"),
             }
         )
     map_df = pd.DataFrame(map_rows)
@@ -10150,7 +10293,7 @@ elif menu == "Balanço 4060":
     with st.expander("Mapeamento COSIF (contas mãe/filhas)"):
         st.dataframe(map_df, width="stretch", hide_index=True)
 
-    with st.expander("Regras determinísticas (classificação)"):
+    with st.expander("Regras determinísticas (legado, usado apenas sem mapeamento)"):
         regras = []
         for linha in schema_rules.get("lines", []):
             rule = linha.get("rule") or {}
@@ -10176,16 +10319,21 @@ elif menu == "Balanço 4060":
         with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
             # Aba Balanço
             out_rows = []
-            for _, row in visible_lines.iterrows():
-                line_id = row["id"]
+            for _, row in lines_df.iterrows():
+                conta = str(row.get("CONTA") or "")
+                indent_level = int(row.get("level") or 1)
+                indent_spaces = " " * ((indent_level - 1) * 2)
+                label_indent = f"{indent_spaces}{row['label']}"
                 item = {
                     "Seção": row["section"],
                     "Nível": row["level"],
-                    "CONTA": row.get("conta") or "",
+                    "CONTA": conta,
                     "Linha": row["label"],
+                    "Linha_Indentada": label_indent,
+                    "Tipo": row.get("type"),
                 }
                 for ym in data_base_sel:
-                    raw_val = balances[ym].get(line_id, pd.NA)
+                    raw_val = balances[ym].get(conta, pd.NA)
                     ativo_total = _get_ativo_total(ym)
                     pct = pd.NA
                     if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
@@ -10209,6 +10357,7 @@ elif menu == "Balanço 4060":
             fmt_num = workbook.add_format({"num_format": "#,##0"})
             fmt_pct = workbook.add_format({"num_format": "0.0%"})
             fmt_text = workbook.add_format({"align": "left"})
+            fmt_header_line = workbook.add_format({"bold": True, "align": "left"})
             for col_idx, col_name in enumerate(df_out.columns):
                 ws_bal.write(0, col_idx, col_name, fmt_header)
                 if col_name.endswith("%"):
@@ -10217,6 +10366,11 @@ elif menu == "Balanço 4060":
                     ws_bal.set_column(col_idx, col_idx, 16, fmt_num)
                 else:
                     ws_bal.set_column(col_idx, col_idx, 26, fmt_text)
+            # aplicar negrito nas linhas header
+            header_rows = lines_df[lines_df["type"] == "HEADER"].index.tolist()
+            for idx, row in df_out.iterrows():
+                if idx in header_rows:
+                    ws_bal.write(idx + 1, 3, row["Linha"], fmt_header_line)
             ws_bal.freeze_panes(1, 0)
 
             ws_map = writer.sheets["Mapeamento"]
