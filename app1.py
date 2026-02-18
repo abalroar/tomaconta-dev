@@ -10095,12 +10095,21 @@ elif menu == "Balanço 4060":
         return order_list
 
     lines_df["hier_order"] = 999999
-    for (section, grupo), df_group in lines_df.groupby(["section", "Grupo_Liquidez"], dropna=False):
+    if "ord" in lines_df.columns:
+        lines_df["ord"] = pd.to_numeric(lines_df["ord"], errors="coerce")
+        lines_df["sub_ord"] = (lines_df["ord"] % 100).fillna(99)
+    else:
+        lines_df["sub_ord"] = 99
+    if "Subgrupo" not in lines_df.columns:
+        lines_df["Subgrupo"] = ""
+    for (section, grupo, subgrupo), df_group in lines_df.groupby(
+        ["section", "Grupo_Liquidez", "Subgrupo"], dropna=False
+    ):
         order_list = _build_hierarchy_order(df_group)
         for pos, idx in enumerate(order_list, start=1):
             lines_df.loc[idx, "hier_order"] = pos
 
-    sort_cols = ["section_order", "liquidez_order", "hier_order", "prefixo", "PREFIX_LEN", "tipo_ord", "conta", "label"]
+    sort_cols = ["section_order", "liquidez_order", "sub_ord", "hier_order", "prefixo", "PREFIX_LEN", "tipo_ord", "conta", "label"]
     lines_df = lines_df.sort_values(sort_cols, kind="mergesort")
 
     # construir balanço por período (hierarquia por prefixo)
@@ -10211,47 +10220,49 @@ elif menu == "Balanço 4060":
 
     visible_lines = visible_lines.sort_values(sort_cols, kind="mergesort")
 
-    # montar HTML da tabela
-    header_label = "R$ MM" if escala_mm else "R$"
-    max_label_len = int(visible_lines["label"].astype(str).str.len().max()) if not visible_lines.empty else 20
-    header = f"<tr><th style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{header_label}</th>"
-    for ym in data_base_sel:
-        header += f"<th colspan='2'>{_yyyymm_para_periodo_exibicao(ym)}</th>"
-    header += "</tr><tr><th></th>"
-    for _ in data_base_sel:
-        header += "<th>Valor</th><th>%</th>"
-    header += "</tr>"
-
-    body = ""
-    for _, row in visible_lines.iterrows():
-        conta = str(row.get("conta") or row.get("CONTA") or "")
-        label = row["label"]
-        level = int(row["level"])
-        is_header = row.get("type") == "HEADER"
-        cls = "section-row" if is_header else ""
-        indent_cls = f"indent-{level}" if level >= 1 else "indent-1"
-        body += f"<tr class='{cls}'>"
-        body += f"<td class='label {indent_cls}' style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{label}</td>"
+    def _render_balanco_html(lines_render: pd.DataFrame) -> str:
+        header_label = "R$ MM" if escala_mm else "R$"
+        max_label_len = int(lines_render["label"].astype(str).str.len().max()) if not lines_render.empty else 20
+        header = f"<tr><th style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{header_label}</th>"
         for ym in data_base_sel:
-            raw_val = balances[ym].get(conta, pd.NA)
-            ativo_total = _get_ativo_total(ym)
-            pct = pd.NA
-            if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
-                pct = raw_val / ativo_total
-            valor_exib = raw_val / 1_000_000 if (pd.notna(raw_val) and escala_mm) else raw_val
-            body += f"<td>{formatar_valor_br_local(valor_exib)}</td>"
-            body += f"<td>{formatar_percentual(pct) if pd.notna(pct) else '-'}</td>"
-        body += "</tr>"
+            header += f"<th colspan='2'>{_yyyymm_para_periodo_exibicao(ym)}</th>"
+        header += "</tr><tr><th></th>"
+        for _ in data_base_sel:
+            header += "<th>Valor</th><th>%</th>"
+        header += "</tr>"
 
-    html = f"""
-    <div style='overflow-x:auto;'>
-    <table class='bal4060-table'>
-    <thead>{header}</thead>
-    <tbody>{body}</tbody>
-    </table>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
+        body = ""
+        for _, row in lines_render.iterrows():
+            conta = str(row.get("conta") or row.get("CONTA") or "")
+            label = row["label"]
+            level = int(row["level"])
+            is_header = row.get("type") == "HEADER"
+            cls = "section-row" if is_header else ""
+            indent_cls = f"indent-{level}" if level >= 1 else "indent-1"
+            body += f"<tr class='{cls}'>"
+            body += f"<td class='label {indent_cls}' style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{label}</td>"
+            for ym in data_base_sel:
+                raw_val = balances[ym].get(conta, pd.NA)
+                ativo_total = _get_ativo_total(ym)
+                pct = pd.NA
+                if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
+                    pct = raw_val / ativo_total
+                valor_exib = raw_val / 1_000_000 if (pd.notna(raw_val) and escala_mm) else raw_val
+                body += f"<td>{formatar_valor_br_local(valor_exib)}</td>"
+                body += f"<td>{formatar_percentual(pct) if pd.notna(pct) else '-'}</td>"
+            body += "</tr>"
+
+        html = f"""
+        <div style='overflow-x:auto;'>
+        <table class='bal4060-table'>
+        <thead>{header}</thead>
+        <tbody>{body}</tbody>
+        </table>
+        </div>
+        """
+        return html
+
+    st.markdown(_render_balanco_html(visible_lines), unsafe_allow_html=True)
 
     st.caption(f"Fonte de dados: {fonte_blo}. Mapeamento: data/ClassificacaoCompleta4060_mapeamento.xlsx.")
 
@@ -10270,6 +10281,45 @@ elif menu == "Balanço 4060":
                 else:
                     st.markdown(f"**{linha['label']}** = soma das contas COSIF atribuídas pela regra.")
 
+    st.markdown("#### Detalhamento por macrogrupo (expandir para ver linhas completas)")
+    grupos_canonicos = [
+        "Ativos Líquidos",
+        "Operações de Crédito",
+        "Derivativos e Instrumentos Financeiros",
+        "Outros Créditos",
+        "Ativo Permanente",
+        "Depósitos",
+        "Títulos Emitidos",
+        "Captações / Empréstimos e Repasses",
+        "Derivativos",
+        "Outras Obrigações",
+        "Patrimônio Líquido",
+    ]
+    for grp in grupos_canonicos:
+        subset = lines_df[lines_df["Grupo_Liquidez"] == grp].copy()
+        if subset.empty:
+            continue
+        with st.expander(grp):
+            show_zeros = st.checkbox(
+                f"Mostrar linhas zeradas em {grp}",
+                value=False,
+                key=f"bal4060_showzeros_{grp}",
+            )
+            if show_zeros:
+                sub_lines = subset.sort_values(sort_cols, kind="mergesort")
+            else:
+                sub_lines = subset[subset["conta"].map(_has_value)].copy()
+                # garantir headers raiz
+                root_headers = subset[
+                    (subset["type"] == "HEADER")
+                    & (subset["PARENT_PREFIX"].isna() | (subset["PARENT_PREFIX"].astype(str).str.len() == 0))
+                ]
+                if not root_headers.empty:
+                    sub_lines = pd.concat([sub_lines, root_headers], ignore_index=True)
+                    sub_lines = sub_lines.drop_duplicates(subset=["CONTA"])
+                sub_lines = sub_lines.sort_values(sort_cols, kind="mergesort")
+            st.markdown(_render_balanco_html(sub_lines), unsafe_allow_html=True)
+
     # construir mapeamento completo (todas as linhas)
     map_rows = []
     for _, row in lines_df.iterrows():
@@ -10282,10 +10332,12 @@ elif menu == "Balanço 4060":
             {
                 "Linha_Mae": parent_label or row.get("Linha_Mae") or "",
                 "Grupo_Liquidez": row.get("Grupo_Liquidez") or "",
+                "Subgrupo": row.get("Subgrupo") or "",
                 "CONTA": row.get("CONTA") or "",
                 "Descricao_Corrigida": row.get("label"),
                 "Prefixo": row.get("PREFIXO"),
                 "Tipo": row.get("type"),
+                "Ordem": row.get("ord"),
             }
         )
     map_df = pd.DataFrame(map_rows)
@@ -10327,6 +10379,9 @@ elif menu == "Balanço 4060":
                 item = {
                     "Seção": row["section"],
                     "Nível": row["level"],
+                    "Grupo_Liquidez": row.get("Grupo_Liquidez"),
+                    "Subgrupo": row.get("Subgrupo"),
+                    "Ordem": row.get("ord"),
                     "CONTA": conta,
                     "Linha": row["label"],
                     "Linha_Indentada": label_indent,
