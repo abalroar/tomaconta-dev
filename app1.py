@@ -9885,7 +9885,7 @@ elif menu == "Balanço 4060":
                 valor = pd.Series(valor).sum(min_count=1)
             except Exception:
                 return "-"
-        if pd.isna(valor):
+        if pd.api.types.is_scalar(valor) and pd.isna(valor):
             return "-"
         try:
             if decimais == 0:
@@ -9957,7 +9957,7 @@ elif menu == "Balanço 4060":
         )
         def _metric_val(section_name: str):
             if section_name not in top_rows.index:
-                return None
+                return pd.NA
             v = top_rows.loc[section_name, "saldo"]
             if isinstance(v, pd.Series):
                 v = v.sum(min_count=1)
