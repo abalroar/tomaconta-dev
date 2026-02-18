@@ -4234,19 +4234,19 @@ def _gerar_excel_peers_dados_puros(
     n_cols = 1 + len(bancos) * len(periodos)
     border = {"border": 1, "border_color": "#dddddd"}
     header_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#111111", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#111111", "font_color": "white", "font_size": 11, **border}
     )
     subheader_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", "font_size": 10, **border}
     )
     section_fmt = workbook.add_format(
-        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#4a90e2", "font_color": "white", **border}
+        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#ff5a00", "font_color": "white", "font_size": 10, **border}
     )
     label_fmt = workbook.add_format({"align": "left", "valign": "vcenter", **border})
     num_fmt = workbook.add_format({"align": "right", "valign": "vcenter", "num_format": "#.##0", **border})
     empty_fmt = workbook.add_format({"align": "right", "valign": "vcenter", **border})
 
-    worksheet.set_column(0, 0, 34)
+    worksheet.set_column(0, 0, 38)
     worksheet.set_column(1, max(1, n_cols - 1), 18)
 
     # Cabeçalho: bancos
@@ -4287,6 +4287,9 @@ def _gerar_excel_peers_dados_puros(
                         worksheet.write(row_idx, col_idx, "", empty_fmt)
                     col_idx += 1
             row_idx += 1
+
+    # congelar cabeçalho e primeira coluna
+    worksheet.freeze_panes(2, 1)
 
     workbook.close()
     output.seek(0)
