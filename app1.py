@@ -6385,42 +6385,44 @@ elif menu == "Peers (Tabela)":
                     st.markdown(html_tabela, unsafe_allow_html=True)
                     _perf_peers_stage(peers_perf, "f_render_tabela", t_render)
 
-                    with st.expander("📥 exportar"):
-                        col_exp1, col_exp2 = st.columns(2)
-                        with col_exp1:
-                            st.caption("Tabela formatada (layout visual)")
-                            t_export_fmt = time.perf_counter()
-                            excel_buffer = _gerar_excel_peers_tabela(
-                                bancos_selecionados,
-                                periodos_selecionados,
-                                valores,
-                                colunas_usadas,
-                                delta_flags,
-                            )
-                            st.download_button(
-                                label="baixar Excel",
-                                data=excel_buffer,
-                                file_name=f"peers_tabela_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="peers_tabela_excel",
-                            )
-                            _perf_peers_stage(peers_perf, "g_preparo_export", t_export_fmt)
-                        with col_exp2:
-                            st.caption("Dados puros (sem formatação)")
-                            t_export_raw = time.perf_counter()
-                            excel_raw = _gerar_excel_peers_dados_puros(
-                                bancos_selecionados,
-                                periodos_selecionados,
-                                valores,
-                            )
-                            st.download_button(
-                                label="baixar Dados Puros",
-                                data=excel_raw,
-                                file_name=f"peers_dados_puros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="peers_dados_puros_excel",
-                            )
-                            _perf_peers_stage(peers_perf, "g_preparo_export", t_export_raw)
+                    st.markdown("#### Exportar")
+                    col_exp1, col_exp2 = st.columns(2)
+                    with col_exp1:
+                        st.caption("Tabela formatada (layout visual)")
+                        t_export_fmt = time.perf_counter()
+                        excel_buffer = _gerar_excel_peers_tabela(
+                            bancos_selecionados,
+                            periodos_selecionados,
+                            valores,
+                            colunas_usadas,
+                            delta_flags,
+                        )
+                        st.download_button(
+                            label="baixar Excel",
+                            data=excel_buffer,
+                            file_name=f"peers_tabela_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="peers_tabela_excel",
+                            use_container_width=True,
+                        )
+                        _perf_peers_stage(peers_perf, "g_preparo_export", t_export_fmt)
+                    with col_exp2:
+                        st.caption("Dados puros (sem formatação)")
+                        t_export_raw = time.perf_counter()
+                        excel_raw = _gerar_excel_peers_dados_puros(
+                            bancos_selecionados,
+                            periodos_selecionados,
+                            valores,
+                        )
+                        st.download_button(
+                            label="baixar Dados Puros",
+                            data=excel_raw,
+                            file_name=f"peers_dados_puros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="peers_dados_puros_excel",
+                            use_container_width=True,
+                        )
+                        _perf_peers_stage(peers_perf, "g_preparo_export", t_export_raw)
 
                     print("[PEERS_PERF]", {k: round(v, 3) for k, v in sorted(peers_perf.items())})
                     _log_roe_trace(df, "peers_pos_render")
@@ -7858,20 +7860,23 @@ elif menu == "Rankings":
                                     lambda x: round(x, 2) if pd.notna(x) else None
                                 )
 
-                            with st.expander("exportar dados (excel)"):
-                                buffer_excel = BytesIO()
-                                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                    df_export_capital.to_excel(writer, index=False, sheet_name='indice_basileia')
-                                buffer_excel.seek(0)
+                            st.markdown("#### Exportar")
+                            buffer_excel = BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                df_export_capital.to_excel(writer, index=False, sheet_name='indice_basileia')
+                            buffer_excel.seek(0)
 
+                            col_export_a, col_export_b = st.columns(2)
+                            with col_export_a:
                                 st.download_button(
                                     label="exportar excel",
                                     data=buffer_excel,
                                     file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="exportar_resumo_excel_basileia"
+                                    key="exportar_resumo_excel_basileia",
+                                    use_container_width=True,
                                 )
-
+                            with col_export_b:
                                 png_bytes = _plotly_fig_to_png_bytes(fig_basileia)
                                 if png_bytes:
                                     st.download_button(
@@ -7879,10 +7884,9 @@ elif menu == "Rankings":
                                         data=png_bytes,
                                         file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.png",
                                         mime="image/png",
-                                        key="exportar_grafico_png_basileia"
+                                        key="exportar_grafico_png_basileia",
+                                        use_container_width=True,
                                     )
-                                else:
-                                    st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
                 else:
                     if df_selecionado.empty:
                         st.info("selecione instituições ou ajuste os filtros para visualizar o ranking.")
@@ -8016,20 +8020,23 @@ elif menu == "Rankings":
                             'Diferença vs Média'
                         ]].rename(columns={'ranking': 'Ranking'})
 
-                        with st.expander("exportar dados (excel)"):
-                            buffer_excel = BytesIO()
-                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                df_export.to_excel(writer, index=False, sheet_name='ranking')
-                            buffer_excel.seek(0)
+                        st.markdown("#### Exportar")
+                        buffer_excel = BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                            df_export.to_excel(writer, index=False, sheet_name='ranking')
+                        buffer_excel.seek(0)
 
+                        col_export_a, col_export_b = st.columns(2)
+                        with col_export_a:
                             st.download_button(
                                 label="exportar excel",
                                 data=buffer_excel,
                                 file_name=f"ranking_{periodo_resumo.replace('/', '-')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="exportar_resumo_excel"
+                                key="exportar_resumo_excel",
+                                use_container_width=True,
                             )
-
+                        with col_export_b:
                             png_bytes = _plotly_fig_to_png_bytes(fig_resumo)
                             if png_bytes:
                                 st.download_button(
@@ -8037,10 +8044,9 @@ elif menu == "Rankings":
                                     data=png_bytes,
                                     file_name=f"ranking_{periodo_resumo.replace('/', '-')}.png",
                                     mime="image/png",
-                                    key="exportar_grafico_png_ranking"
+                                    key="exportar_grafico_png_ranking",
+                                    use_container_width=True,
                                 )
-                            else:
-                                st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
 
             if grafico_base == "Deltas (antes e depois)":
                 st.markdown("---")
@@ -8388,31 +8394,32 @@ elif menu == "Rankings":
                                     key=f"exportar_historico_delta_{variavel}"
                                 )
 
-                        with st.expander("exportar dados (excel)"):
-                            df_resumo = pd.DataFrame(dados_grafico)
-                            df_resumo = df_resumo.rename(columns={
-                                'instituicao': 'Instituição',
-                                'valor_ini': periodo_inicial_delta,
-                                'valor_sub': periodo_subsequente_delta,
-                                'delta_texto': 'Delta',
-                                'variacao_texto': 'Variação %'
-                            })
-                            df_resumo = df_resumo[['Instituição', periodo_inicial_delta, periodo_subsequente_delta, 'Delta', 'Variação %']]
-                            st.dataframe(df_resumo, use_container_width=True)
+                        st.markdown("#### Exportar")
+                        df_resumo = pd.DataFrame(dados_grafico)
+                        df_resumo = df_resumo.rename(columns={
+                            'instituicao': 'Instituição',
+                            'valor_ini': periodo_inicial_delta,
+                            'valor_sub': periodo_subsequente_delta,
+                            'delta_texto': 'Delta',
+                            'variacao_texto': 'Variação %'
+                        })
+                        df_resumo = df_resumo[['Instituição', periodo_inicial_delta, periodo_subsequente_delta, 'Delta', 'Variação %']]
+                        st.dataframe(df_resumo, use_container_width=True)
 
-                            buffer_excel = BytesIO()
-                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                df_resumo.to_excel(writer, index=False, sheet_name='deltas')
-                            buffer_excel.seek(0)
+                        buffer_excel = BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                            df_resumo.to_excel(writer, index=False, sheet_name='deltas')
+                        buffer_excel.seek(0)
 
-                            nome_variavel = variavel.replace(' ', '_').replace('/', '_')
-                            st.download_button(
-                                label="exportar excel",
-                                data=buffer_excel,
-                                file_name=f"Deltas_{variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"exportar_excel_delta_{variavel}"
-                            )
+                        nome_variavel = variavel.replace(' ', '_').replace('/', '_')
+                        st.download_button(
+                            label="exportar excel",
+                            data=buffer_excel,
+                            file_name=f"Deltas_{variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"exportar_excel_delta_{variavel}",
+                            use_container_width=True,
+                        )
                 elif not periodo_valido:
                     pass  # Já exibiu warning acima
                 elif not variaveis_selecionadas_delta:
@@ -8579,45 +8586,46 @@ elif menu == "Contribuições FGC/FGCoop":
 
                         df_show = df_top[["Ranking", "Instituição", "FGC YTD", "FGC YTD (abs)", "% do Total Exibido", "Componente End", "Componente Junho"]].copy()
 
-                        with st.expander("exportar dados (excel)"):
-                            buffer_excel = BytesIO()
-                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                df_show.to_excel(writer, index=False, sheet_name='fgc_ranking')
-                                workbook = writer.book
-                                worksheet = writer.sheets['fgc_ranking']
+                        st.markdown("#### Exportar")
+                        buffer_excel = BytesIO()
+                        with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                            df_show.to_excel(writer, index=False, sheet_name='fgc_ranking')
+                            workbook = writer.book
+                            worksheet = writer.sheets['fgc_ranking']
 
-                                fmt_header = workbook.add_format({
-                                    'bold': True,
-                                    'bg_color': '#F2F2F2',
-                                    'border': 1,
-                                    'align': 'center',
-                                    'valign': 'vcenter'
-                                })
-                                fmt_num = workbook.add_format({'num_format': '#,##0'})
-                                fmt_pct = workbook.add_format({'num_format': '0.00"%"'})
-                                fmt_text = workbook.add_format({'align': 'left'})
+                            fmt_header = workbook.add_format({
+                                'bold': True,
+                                'bg_color': '#F2F2F2',
+                                'border': 1,
+                                'align': 'center',
+                                'valign': 'vcenter'
+                            })
+                            fmt_num = workbook.add_format({'num_format': '#,##0'})
+                            fmt_pct = workbook.add_format({'num_format': '0.00"%"'})
+                            fmt_text = workbook.add_format({'align': 'left'})
 
-                                for col_idx, col_name in enumerate(df_show.columns):
-                                    worksheet.write(0, col_idx, col_name, fmt_header)
-                                    tamanho_base = max(len(str(col_name)), 12)
-                                    if col_name == "Instituição":
-                                        largura = max(tamanho_base, int(df_show[col_name].astype(str).str.len().max()) + 2)
-                                        worksheet.set_column(col_idx, col_idx, min(largura, 45), fmt_text)
-                                    elif col_name == "% do Total Exibido":
-                                        worksheet.set_column(col_idx, col_idx, max(tamanho_base, 18), fmt_pct)
-                                    else:
-                                        worksheet.set_column(col_idx, col_idx, max(tamanho_base, 16), fmt_num)
+                            for col_idx, col_name in enumerate(df_show.columns):
+                                worksheet.write(0, col_idx, col_name, fmt_header)
+                                tamanho_base = max(len(str(col_name)), 12)
+                                if col_name == "Instituição":
+                                    largura = max(tamanho_base, int(df_show[col_name].astype(str).str.len().max()) + 2)
+                                    worksheet.set_column(col_idx, col_idx, min(largura, 45), fmt_text)
+                                elif col_name == "% do Total Exibido":
+                                    worksheet.set_column(col_idx, col_idx, max(tamanho_base, 18), fmt_pct)
+                                else:
+                                    worksheet.set_column(col_idx, col_idx, max(tamanho_base, 16), fmt_num)
 
-                                worksheet.freeze_panes(1, 0)
-                                worksheet.autofilter(0, 0, len(df_show), len(df_show.columns) - 1)
-                            buffer_excel.seek(0)
-                            st.download_button(
-                                label="exportar excel",
-                                data=buffer_excel,
-                                file_name=f"fgc_ranking_{end_period}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="exportar_fgc_excel",
-                            )
+                            worksheet.freeze_panes(1, 0)
+                            worksheet.autofilter(0, 0, len(df_show), len(df_show.columns) - 1)
+                        buffer_excel.seek(0)
+                        st.download_button(
+                            label="exportar excel",
+                            data=buffer_excel,
+                            file_name=f"fgc_ranking_{end_period}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="exportar_fgc_excel",
+                            use_container_width=True,
+                        )
 
 elif menu == "DRE":
     st.markdown("### Demonstração de Resultado (DRE)")
@@ -10968,51 +10976,53 @@ elif menu == "Crie sua métrica!":
                         st.plotly_chart(fig_scatter_brincar, width='stretch')
 
                         # Tabela e exportação
-                        with st.expander("ver dados e exportar"):
-                            # Prepara dados para exportação
-                            df_export = df_scatter_brincar[['Instituição', eixo_x_brincar, eixo_y_brincar]].copy()
-                            df_export['Período'] = periodo_scatter_brincar
+                        st.markdown("#### Exportar")
+                        # Prepara dados para exportação
+                        df_export = df_scatter_brincar[['Instituição', eixo_x_brincar, eixo_y_brincar]].copy()
+                        df_export['Período'] = periodo_scatter_brincar
 
-                            # Adiciona componentes da fórmula
-                            componentes = list(set([s['variavel'] for s in steps]))
-                            for comp in componentes:
-                                if comp not in df_export.columns:
-                                    df_export[comp] = df_scatter_brincar[comp]
+                        # Adiciona componentes da fórmula
+                        componentes = list(set([s['variavel'] for s in steps]))
+                        for comp in componentes:
+                            if comp not in df_export.columns:
+                                df_export[comp] = df_scatter_brincar[comp]
 
-                            # Reordena colunas
-                            cols_ordem = ['Período', 'Instituição', 'Métrica Derivada'] + [c for c in df_export.columns if c not in ['Período', 'Instituição', 'Métrica Derivada', eixo_x_brincar, eixo_y_brincar]]
-                            if eixo_x_brincar != 'Métrica Derivada':
-                                cols_ordem.append(eixo_x_brincar)
-                            if eixo_y_brincar != 'Métrica Derivada' and eixo_y_brincar not in cols_ordem:
-                                cols_ordem.append(eixo_y_brincar)
+                        # Reordena colunas
+                        cols_ordem = ['Período', 'Instituição', 'Métrica Derivada'] + [c for c in df_export.columns if c not in ['Período', 'Instituição', 'Métrica Derivada', eixo_x_brincar, eixo_y_brincar]]
+                        if eixo_x_brincar != 'Métrica Derivada':
+                            cols_ordem.append(eixo_x_brincar)
+                        if eixo_y_brincar != 'Métrica Derivada' and eixo_y_brincar not in cols_ordem:
+                            cols_ordem.append(eixo_y_brincar)
 
-                            df_export['Métrica Derivada'] = df_scatter_brincar['Métrica Derivada']
-                            df_export = df_export[[c for c in cols_ordem if c in df_export.columns]]
+                        df_export['Métrica Derivada'] = df_scatter_brincar['Métrica Derivada']
+                        df_export = df_export[[c for c in cols_ordem if c in df_export.columns]]
 
-                            st.dataframe(df_export, width='stretch', hide_index=True)
+                        st.dataframe(df_export, width='stretch', hide_index=True)
 
-                            col_excel, col_csv = st.columns(2)
-                            with col_excel:
-                                buffer_excel = BytesIO()
-                                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                    df_export.to_excel(writer, index=False, sheet_name='dados')
-                                buffer_excel.seek(0)
-                                st.download_button(
-                                    label="Exportar Excel",
-                                    data=buffer_excel,
-                                    file_name=f"Brincar_Scatter_{nome_metrica.replace(' ', '_')}_{periodo_scatter_brincar.replace('/', '-')}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="export_excel_scatter_brincar"
-                                )
-                            with col_csv:
-                                csv_data = df_export.to_csv(index=False)
-                                st.download_button(
-                                    label="Exportar CSV",
-                                    data=csv_data,
-                                    file_name=f"Brincar_Scatter_{nome_metrica.replace(' ', '_')}_{periodo_scatter_brincar.replace('/', '-')}.csv",
-                                    mime="text/csv",
-                                    key="export_csv_scatter_brincar"
-                                )
+                        col_excel, col_csv = st.columns(2)
+                        with col_excel:
+                            buffer_excel = BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                df_export.to_excel(writer, index=False, sheet_name='dados')
+                            buffer_excel.seek(0)
+                            st.download_button(
+                                label="exportar Excel",
+                                data=buffer_excel,
+                                file_name=f"Brincar_Scatter_{nome_metrica.replace(' ', '_')}_{periodo_scatter_brincar.replace('/', '-')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="export_excel_scatter_brincar",
+                                use_container_width=True,
+                            )
+                        with col_csv:
+                            csv_data = df_export.to_csv(index=False)
+                            st.download_button(
+                                label="exportar CSV",
+                                data=csv_data,
+                                file_name=f"Brincar_Scatter_{nome_metrica.replace(' ', '_')}_{periodo_scatter_brincar.replace('/', '-')}.csv",
+                                mime="text/csv",
+                                key="export_csv_scatter_brincar",
+                                use_container_width=True,
+                            )
                     else:
                         st.warning("sem dados válidos para exibir no scatter plot")
 
@@ -11221,44 +11231,46 @@ elif menu == "Crie sua métrica!":
                             st.plotly_chart(fig_delta_brincar, width='stretch', config={'displayModeBar': False})
 
                             # Tabela e exportação
-                            with st.expander("ver dados e exportar"):
-                                df_resumo_brincar = pd.DataFrame(dados_grafico_brincar)
-                                df_resumo_brincar = df_resumo_brincar.rename(columns={
-                                    'instituicao': 'Instituição',
-                                    'valor_ini': periodo_inicial_brincar,
-                                    'valor_sub': periodo_subsequente_brincar,
-                                    'delta_texto': 'Delta',
-                                    'variacao_texto': 'Variação %'
-                                })
+                            st.markdown("#### Exportar")
+                            df_resumo_brincar = pd.DataFrame(dados_grafico_brincar)
+                            df_resumo_brincar = df_resumo_brincar.rename(columns={
+                                'instituicao': 'Instituição',
+                                'valor_ini': periodo_inicial_brincar,
+                                'valor_sub': periodo_subsequente_brincar,
+                                'delta_texto': 'Delta',
+                                'variacao_texto': 'Variação %'
+                            })
 
-                                # Adiciona componentes da fórmula
-                                componentes = list(set([s['variavel'] for s in steps]))
-                                df_export_delta = df_resumo_brincar[['Instituição', periodo_inicial_brincar, periodo_subsequente_brincar, 'Delta', 'Variação %']].copy()
+                            # Adiciona componentes da fórmula
+                            componentes = list(set([s['variavel'] for s in steps]))
+                            df_export_delta = df_resumo_brincar[['Instituição', periodo_inicial_brincar, periodo_subsequente_brincar, 'Delta', 'Variação %']].copy()
 
-                                st.dataframe(df_export_delta, width='stretch', hide_index=True)
+                            st.dataframe(df_export_delta, width='stretch', hide_index=True)
 
-                                col_excel, col_csv = st.columns(2)
-                                with col_excel:
-                                    buffer_excel = BytesIO()
-                                    with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                        df_export_delta.to_excel(writer, index=False, sheet_name='deltas')
-                                    buffer_excel.seek(0)
-                                    st.download_button(
-                                        label="Exportar Excel",
-                                        data=buffer_excel,
-                                        file_name=f"Brincar_Deltas_{nome_metrica.replace(' ', '_')}_{periodo_inicial_brincar.replace('/', '-')}_{periodo_subsequente_brincar.replace('/', '-')}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key="export_excel_delta_brincar"
-                                    )
-                                with col_csv:
-                                    csv_data = df_export_delta.to_csv(index=False)
-                                    st.download_button(
-                                        label="Exportar CSV",
-                                        data=csv_data,
-                                        file_name=f"Brincar_Deltas_{nome_metrica.replace(' ', '_')}_{periodo_inicial_brincar.replace('/', '-')}_{periodo_subsequente_brincar.replace('/', '-')}.csv",
-                                        mime="text/csv",
-                                        key="export_csv_delta_brincar"
-                                    )
+                            col_excel, col_csv = st.columns(2)
+                            with col_excel:
+                                buffer_excel = BytesIO()
+                                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                    df_export_delta.to_excel(writer, index=False, sheet_name='deltas')
+                                buffer_excel.seek(0)
+                                st.download_button(
+                                    label="exportar Excel",
+                                    data=buffer_excel,
+                                    file_name=f"Brincar_Deltas_{nome_metrica.replace(' ', '_')}_{periodo_inicial_brincar.replace('/', '-')}_{periodo_subsequente_brincar.replace('/', '-')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="export_excel_delta_brincar",
+                                    use_container_width=True,
+                                )
+                            with col_csv:
+                                csv_data = df_export_delta.to_csv(index=False)
+                                st.download_button(
+                                    label="exportar CSV",
+                                    data=csv_data,
+                                    file_name=f"Brincar_Deltas_{nome_metrica.replace(' ', '_')}_{periodo_inicial_brincar.replace('/', '-')}_{periodo_subsequente_brincar.replace('/', '-')}.csv",
+                                    mime="text/csv",
+                                    key="export_csv_delta_brincar",
+                                    use_container_width=True,
+                                )
                         else:
                             st.info("sem dados válidos para exibir")
 
@@ -11381,46 +11393,48 @@ elif menu == "Crie sua métrica!":
                         st.plotly_chart(fig_ranking, width='stretch', config={'displayModeBar': False})
 
                         # Tabela e exportação
-                        with st.expander("ver dados e exportar"):
-                            # Prepara dados para exportação
-                            df_export_rank = df_ranking[['Instituição']].copy()
-                            df_export_rank['Período'] = periodo_ranking
-                            df_export_rank[nome_metrica] = df_ranking['Métrica Derivada']
+                        st.markdown("#### Exportar")
+                        # Prepara dados para exportação
+                        df_export_rank = df_ranking[['Instituição']].copy()
+                        df_export_rank['Período'] = periodo_ranking
+                        df_export_rank[nome_metrica] = df_ranking['Métrica Derivada']
 
-                            # Adiciona componentes da fórmula
-                            componentes = list(set([s['variavel'] for s in steps]))
-                            for comp in componentes:
-                                if comp in df_ranking.columns:
-                                    df_export_rank[comp] = df_ranking[comp].values
+                        # Adiciona componentes da fórmula
+                        componentes = list(set([s['variavel'] for s in steps]))
+                        for comp in componentes:
+                            if comp in df_ranking.columns:
+                                df_export_rank[comp] = df_ranking[comp].values
 
-                            # Reordena colunas
-                            cols_ordem = ['Período', 'Instituição', nome_metrica] + componentes
-                            df_export_rank = df_export_rank[[c for c in cols_ordem if c in df_export_rank.columns]]
+                        # Reordena colunas
+                        cols_ordem = ['Período', 'Instituição', nome_metrica] + componentes
+                        df_export_rank = df_export_rank[[c for c in cols_ordem if c in df_export_rank.columns]]
 
-                            st.dataframe(df_export_rank, width='stretch', hide_index=True)
+                        st.dataframe(df_export_rank, width='stretch', hide_index=True)
 
-                            col_excel, col_csv = st.columns(2)
-                            with col_excel:
-                                buffer_excel = BytesIO()
-                                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                                    df_export_rank.to_excel(writer, index=False, sheet_name='ranking')
-                                buffer_excel.seek(0)
-                                st.download_button(
-                                    label="Exportar Excel",
-                                    data=buffer_excel,
-                                    file_name=f"Brincar_Ranking_{nome_metrica.replace(' ', '_')}_{periodo_ranking.replace('/', '-')}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="export_excel_ranking_brincar"
-                                )
-                            with col_csv:
-                                csv_data = df_export_rank.to_csv(index=False)
-                                st.download_button(
-                                    label="Exportar CSV",
-                                    data=csv_data,
-                                    file_name=f"Brincar_Ranking_{nome_metrica.replace(' ', '_')}_{periodo_ranking.replace('/', '-')}.csv",
-                                    mime="text/csv",
-                                    key="export_csv_ranking_brincar"
-                                )
+                        col_excel, col_csv = st.columns(2)
+                        with col_excel:
+                            buffer_excel = BytesIO()
+                            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                                df_export_rank.to_excel(writer, index=False, sheet_name='ranking')
+                            buffer_excel.seek(0)
+                            st.download_button(
+                                label="exportar Excel",
+                                data=buffer_excel,
+                                file_name=f"Brincar_Ranking_{nome_metrica.replace(' ', '_')}_{periodo_ranking.replace('/', '-')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="export_excel_ranking_brincar",
+                                use_container_width=True,
+                            )
+                        with col_csv:
+                            csv_data = df_export_rank.to_csv(index=False)
+                            st.download_button(
+                                label="exportar CSV",
+                                data=csv_data,
+                                file_name=f"Brincar_Ranking_{nome_metrica.replace(' ', '_')}_{periodo_ranking.replace('/', '-')}.csv",
+                                mime="text/csv",
+                                key="export_csv_ranking_brincar",
+                                use_container_width=True,
+                            )
                     else:
                         st.warning("sem dados válidos para exibir no ranking")
 
