@@ -4140,7 +4140,7 @@ def _gerar_excel_peers_tabela(
         {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", **border}
     )
     section_fmt = workbook.add_format(
-        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#4a90e2", "font_color": "white", **border}
+        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#ff5a00", "font_color": "white", **border}
     )
     row_even = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
     row_odd = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", **border})
