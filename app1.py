@@ -75,10 +75,9 @@ from utils.ifdata_cache import (
     load_derived_metrics_slice,
 )
 from utils.balanco_4060 import (
-    build_balanco_padronizado,
     load_schema_rules as load_balanco_schema_rules,
-    build_schema_from_rules as build_balanco_schema_from_rules,
-    build_mapping_table as build_balanco_mapping_table,
+    build_hierarchical_lines as build_balanco_hierarchical_lines,
+    load_name_mapping_xlsx as load_balanco_name_map,
     normalize_conta_10 as normalize_balanco_conta_10,
     read_blo_prudencial_csv,
 )
@@ -9931,7 +9930,9 @@ elif menu == "Balanço 4060":
 
     df_blo = normalize_balanco_conta_10(df_blo)
     schema_rules = load_schema_rules_cached()
-    schema = build_balanco_schema_from_rules(df_blo, schema_rules)
+    name_map = load_balanco_name_map()
+    lines = build_balanco_hierarchical_lines(df_blo, schema_rules, name_map)
+    lines_df = pd.DataFrame(lines)
 
     data_bases = sorted(df_blo["DATA_BASE"].astype(str).dropna().unique(), reverse=True)
     if not data_bases:
@@ -9971,25 +9972,57 @@ elif menu == "Balanço 4060":
     )
     cod_congl = df_congl.loc[df_congl["label"] == label_sel, "COD_CONGL"].iloc[0]
 
-    # ordenar linhas por liquidez e nível
+    # ordenar linhas por liquidez e hierarquia
     section_order = {s: i for i, s in enumerate(schema_rules.get("sections_order", []), start=1)}
-    df_schema = pd.DataFrame(schema)
-    df_schema["section_order"] = df_schema["section"].map(section_order).fillna(99)
-    df_schema = df_schema.sort_values(["section_order", "order", "level", "label"])
+    lines_df["section_order"] = lines_df["section"].map(section_order).fillna(99)
+    lines_df["group_code"] = lines_df.get("group_code")
+    lines_df["conta"] = lines_df.get("conta")
+    lines_df = lines_df.sort_values(
+        ["section_order", "order", "level", "group_code", "conta", "label"],
+        kind="mergesort",
+    )
 
-    # construir balanço por período
-    balances = {}
-    for ym in data_base_sel:
-        bal = build_balanco_padronizado(df_blo, df_schema.to_dict("records"), cod_congl, ym)
-        balances[ym] = bal.set_index("id")
+    # construir balanço por período (completo e hierárquico)
+    def _compute_balances_for_period(ym: str) -> Dict[str, Optional[float]]:
+        df_sel = df_blo[(df_blo["COD_CONGL"].astype(str) == str(cod_congl)) & (df_blo["DATA_BASE"].astype(str) == str(ym))]
+        if df_sel.empty:
+            return {line_id: pd.NA for line_id in lines_df["id"].tolist()}
+        acc_sums = df_sel.groupby("CONTA_10")["SALDO"].sum(min_count=1)
 
-    # calcular percentuais
-    def _get_ativo_total(bal_df: pd.DataFrame) -> Optional[float]:
-        if "ativo_total" in bal_df.index:
-            return bal_df.loc["ativo_total", "saldo"]
-        if "Ativo" in bal_df["section"].values:
-            return bal_df[bal_df["section"] == "Ativo"]["saldo"].sum(min_count=1)
-        return pd.NA
+        children_map = {}
+        for _, row in lines_df.iterrows():
+            pid = row.get("parent_id")
+            if pid:
+                children_map.setdefault(pid, []).append(row["id"])
+
+        balances = {}
+        # process in descending level (accounts first)
+        for _, row in lines_df.sort_values("level", ascending=False).iterrows():
+            line_id = row["id"]
+            if row.get("type") == "account":
+                conta = row.get("conta")
+                balances[line_id] = acc_sums.get(conta, pd.NA)
+            else:
+                children = children_map.get(line_id, [])
+                if not children:
+                    balances[line_id] = pd.NA
+                else:
+                    vals = [balances.get(cid) for cid in children]
+                    ser = pd.Series(vals).dropna()
+                    balances[line_id] = ser.sum(min_count=1) if not ser.empty else pd.NA
+        return balances
+
+    balances = {ym: _compute_balances_for_period(ym) for ym in data_base_sel}
+
+    def _get_ativo_total(ym: str) -> Optional[float]:
+        bal_map = balances.get(ym, {})
+        if "ativo_total" in bal_map:
+            return bal_map.get("ativo_total")
+        # fallback: soma de linhas Ativo nível 1
+        ids = lines_df[(lines_df["section"] == "Ativo") & (lines_df["level"] == 1)]["id"].tolist()
+        vals = [bal_map.get(i) for i in ids]
+        ser = pd.Series(vals).dropna()
+        return ser.sum(min_count=1) if not ser.empty else pd.NA
 
     # estilos
     st.markdown(
@@ -10008,9 +10041,32 @@ elif menu == "Balanço 4060":
         unsafe_allow_html=True,
     )
 
+    # filtrar linhas sem valores (todas as competências)
+    def _has_value(line_id: str) -> bool:
+        vals = [balances[ym].get(line_id) for ym in data_base_sel]
+        ser = pd.Series(vals).dropna()
+        if ser.empty:
+            return False
+        return (ser != 0).any()
+
+    visible_lines = lines_df[lines_df["id"].map(_has_value)].copy()
+
+    # garantir que pais de linhas visíveis também apareçam
+    parent_ids = set()
+    for pid in visible_lines["parent_id"].dropna().unique().tolist():
+        parent_ids.add(pid)
+    if parent_ids:
+        visible_lines = pd.concat([visible_lines, lines_df[lines_df["id"].isin(parent_ids)]], ignore_index=True)
+        visible_lines = visible_lines.drop_duplicates(subset=["id"])
+        visible_lines = visible_lines.sort_values(
+            ["section_order", "order", "level", "group_code", "conta", "label"],
+            kind="mergesort",
+        )
+
     # montar HTML da tabela
     header_label = "R$ MM" if escala_mm else "R$"
-    header = f"<tr><th>{header_label}</th>"
+    max_label_len = int(visible_lines["label"].astype(str).str.len().max()) if not visible_lines.empty else 20
+    header = f"<tr><th style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{header_label}</th>"
     for ym in data_base_sel:
         header += f"<th colspan='2'>{_yyyymm_para_periodo_exibicao(ym)}</th>"
     header += "</tr><tr><th></th>"
@@ -10019,19 +10075,18 @@ elif menu == "Balanço 4060":
     header += "</tr>"
 
     body = ""
-    for _, row in df_schema.iterrows():
+    for _, row in visible_lines.iterrows():
         line_id = row["id"]
         label = row["label"]
         level = int(row["level"])
         is_total = bool(row.get("is_total"))
-        cls = "total-row" if is_total else ("section-row" if level == 1 else "")
+        cls = "total-row" if is_total else ("section-row" if level == 1 and row.get("type") == "derived" else "")
         indent_cls = f"indent-{level}" if level > 1 else ""
         body += f"<tr class='{cls}'>"
-        body += f"<td class='label {indent_cls}'>{label}</td>"
+        body += f\"<td class='label {indent_cls}' style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{label}</td>\"
         for ym in data_base_sel:
-            bal_df = balances[ym]
-            raw_val = bal_df.loc[line_id, "saldo"] if line_id in bal_df.index else pd.NA
-            ativo_total = _get_ativo_total(bal_df)
+            raw_val = balances[ym].get(line_id, pd.NA)
+            ativo_total = _get_ativo_total(ym)
             pct = pd.NA
             if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
                 pct = raw_val / ativo_total
@@ -10053,21 +10108,45 @@ elif menu == "Balanço 4060":
     st.caption(f"Fonte de dados: {fonte_blo}. Regras determinísticas em data/balanco_4060_schema_rules.json.")
 
     with st.expander("Miniglossário das linhas derivadas"):
-        derived = df_schema[df_schema["derived"] == True].copy()
+        derived = lines_df[(lines_df["type"] == "derived")].copy()
         if derived.empty:
             st.write("Sem linhas derivadas.")
         else:
             for _, linha in derived.iterrows():
                 if linha.get("parent_id"):
                     continue
-                filhos = df_schema[df_schema["parent_id"] == linha["id"]]["label"].tolist()
+                filhos = lines_df[lines_df["parent_id"] == linha["id"]]["label"].tolist()
                 if filhos:
                     st.markdown(f"**{linha['label']}** = soma de: {', '.join(filhos)}")
                 else:
                     st.markdown(f"**{linha['label']}** = soma das contas COSIF atribuídas pela regra.")
 
+    # construir mapeamento baseado nas linhas visíveis
+    line_lookup = lines_df.set_index("id")
+    map_rows = []
+    for _, row in visible_lines.iterrows():
+        if row.get("type") != "account":
+            continue
+        pid = row.get("parent_id")
+        parent_label = line_lookup.loc[pid, "label"] if pid in line_lookup.index else ""
+        # subir até a linha derivada raiz
+        root_label = parent_label
+        cur = pid
+        while cur in line_lookup.index and line_lookup.loc[cur, "parent_id"]:
+            cur = line_lookup.loc[cur, "parent_id"]
+            root_label = line_lookup.loc[cur, "label"]
+        map_rows.append(
+            {
+                "Linha_Mae": root_label,
+                "Linha_Grupo": parent_label,
+                "CONTA": row.get("conta") or "",
+                "Descricao_Corrigida": row.get("label"),
+                "Prefixo": (row.get("conta") or "")[:3],
+            }
+        )
+    map_df = pd.DataFrame(map_rows)
+
     with st.expander("Mapeamento COSIF (contas mãe/filhas)"):
-        map_df = build_balanco_mapping_table(df_blo, df_schema.to_dict("records"))
         st.dataframe(map_df, width="stretch", hide_index=True)
 
     with st.expander("Regras determinísticas (classificação)"):
@@ -10096,13 +10175,17 @@ elif menu == "Balanço 4060":
         with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
             # Aba Balanço
             out_rows = []
-            for _, row in df_schema.iterrows():
+            for _, row in visible_lines.iterrows():
                 line_id = row["id"]
-                item = {"Seção": row["section"], "Nível": row["level"], "Linha": row["label"]}
+                item = {
+                    "Seção": row["section"],
+                    "Nível": row["level"],
+                    "CONTA": row.get("conta") or "",
+                    "Linha": row["label"],
+                }
                 for ym in data_base_sel:
-                    bal_df = balances[ym]
-                    raw_val = bal_df.loc[line_id, "saldo"] if line_id in bal_df.index else pd.NA
-                    ativo_total = _get_ativo_total(bal_df)
+                    raw_val = balances[ym].get(line_id, pd.NA)
+                    ativo_total = _get_ativo_total(ym)
                     pct = pd.NA
                     if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
                         pct = raw_val / ativo_total
@@ -10114,7 +10197,6 @@ elif menu == "Balanço 4060":
             df_out.to_excel(writer, index=False, sheet_name="Balanco")
 
             # Aba Mapeamento
-            map_df = build_balanco_mapping_table(df_blo, df_schema.to_dict("records"))
             map_df.to_excel(writer, index=False, sheet_name="Mapeamento")
 
             df_regras.to_excel(writer, index=False, sheet_name="Regras")

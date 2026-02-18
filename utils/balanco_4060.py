@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 SCHEMA_PATH = PROJECT_ROOT / "data" / "balanco_4060_schema.json"
 MAP_8_TO_10_PATH = PROJECT_ROOT / "data" / "balanco_4060_map_8_to_10.csv"
 SCHEMA_RULES_PATH = PROJECT_ROOT / "data" / "balanco_4060_schema_rules.json"
+NAME_MAP_PATH = PROJECT_ROOT / "data" / "ClassificacaoCompleta4060_mapeamento.xlsx"
 
 
 def _find_header_idx(path: Path) -> int:
@@ -182,6 +183,19 @@ def load_schema_rules(schema_rules_path: Path = SCHEMA_RULES_PATH) -> dict:
     if schema_rules_path.exists():
         return json.loads(schema_rules_path.read_text(encoding="utf-8"))
     return default_schema_rules()
+
+
+def load_name_mapping_xlsx(path: Path = NAME_MAP_PATH) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    df = pd.read_excel(path, sheet_name="ClassificacaoCompleta4060")
+    if "CONTA" not in df.columns or "NOME_CONTA_CORRIGIDO" not in df.columns:
+        # fallback: tentar nomes originais
+        if "NOME_CONTA" not in df.columns:
+            return {}
+        df["NOME_CONTA_CORRIGIDO"] = df["NOME_CONTA"]
+    df["CONTA"] = df["CONTA"].astype(str).str.replace(r"\D", "", regex=True)
+    return dict(zip(df["CONTA"], df["NOME_CONTA_CORRIGIDO"].astype(str)))
 
 
 def _normalize_name(val: str) -> str:
@@ -416,3 +430,89 @@ def build_mapping_table(df: pd.DataFrame, schema: List[dict]) -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+def build_hierarchical_lines(
+    df: pd.DataFrame,
+    rules: dict,
+    name_map: Optional[Dict[str, str]] = None,
+) -> List[dict]:
+    """Constrói linhas hierárquicas: derivadas -> grupos -> contas."""
+    if name_map is None:
+        name_map = {}
+    if "CONTA_10" not in df.columns:
+        df = normalize_conta_10(df)
+
+    groups, group_map = build_group_accounts(df)
+    lines = rules.get("lines", [])
+    group_assignment = assign_groups_to_lines(groups, lines)
+
+    # helper for label
+    def _label_for(code: str, fallback: str) -> str:
+        return name_map.get(code, fallback)
+
+    # build u for account names
+    u = df[["CONTA_10", "NOME_CONTA"]].drop_duplicates().set_index("CONTA_10")
+
+    out = []
+    # derived lines (level 1 or as defined)
+    for line in lines:
+        out.append(
+            {
+                "id": line["id"],
+                "parent_id": line.get("parent_id"),
+                "section": line.get("section"),
+                "level": line.get("level"),
+                "order": line.get("order", 0),
+                "label": line.get("label"),
+                "type": "derived",
+                "is_total": bool(line.get("is_total")),
+            }
+        )
+
+    # group lines
+    for line in lines:
+        line_id = line["id"]
+        groups_for_line = group_assignment.get(line_id, [])
+        for gcode in groups_for_line:
+            gname = groups.loc[groups["group_code"] == gcode, "group_name"]
+            gname = gname.iloc[0] if not gname.empty else gcode
+            out.append(
+                {
+                    "id": f"{line_id}:{gcode}",
+                    "parent_id": line_id,
+                    "section": line.get("section"),
+                    "level": (line.get("level") or 1) + 1,
+                    "order": line.get("order", 0) * 100 + 1,
+                    "label": _label_for(gcode, gname),
+                    "type": "group",
+                    "group_code": gcode,
+                    "is_total": False,
+                }
+            )
+
+    # account lines
+    for line in lines:
+        line_id = line["id"]
+        groups_for_line = group_assignment.get(line_id, [])
+        for gcode in groups_for_line:
+            # all accounts mapped to group
+            contas = [c for c, g in group_map.items() if g == gcode]
+            for conta in contas:
+                nome = u.loc[conta, "NOME_CONTA"] if conta in u.index else conta
+                out.append(
+                    {
+                        "id": f"{line_id}:{gcode}:{conta}",
+                        "parent_id": f"{line_id}:{gcode}",
+                        "section": line.get("section"),
+                        "level": (line.get("level") or 1) + 2,
+                        "order": line.get("order", 0) * 100 + 2,
+                        "label": _label_for(conta, nome),
+                        "type": "account",
+                        "conta": conta,
+                        "group_code": gcode,
+                        "is_total": False,
+                    }
+                )
+
+    return out
