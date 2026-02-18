@@ -9863,7 +9863,14 @@ elif menu == "Balanço 4060":
         return df
 
     def formatar_valor_br_local(valor, decimais=0):
-        if pd.isna(valor) or valor is None:
+        if isinstance(valor, pd.Series):
+            if valor.empty:
+                return "-"
+            if len(valor) == 1:
+                valor = valor.iloc[0]
+            else:
+                valor = valor.sum(min_count=1)
+        if valor is None or pd.isna(valor):
             return "-"
         try:
             if decimais == 0:
