@@ -5270,28 +5270,14 @@ if st.session_state.get('nav_main') == 'Contribuições FGC':
 if st.session_state.get('nav_sec') == 'Contribuições FGC':
     st.session_state['nav_sec'] = None
 
-# Modo de navegação rápida: evita pré-carregamento pesado na troca de menus
-# e permite renderização imediata da tela antes de carregar datasets grandes.
-if 'modo_navegacao_rapida' not in st.session_state:
-    st.session_state['modo_navegacao_rapida'] = True
-
-
 def _garantir_dados_principais(menu_nome: str) -> bool:
     """Garante dados principais apenas quando a aba realmente precisar processar."""
     if 'dados_periodos' in st.session_state and st.session_state['dados_periodos']:
         return True
 
-    if not st.session_state.get('modo_navegacao_rapida', True):
-        with st.spinner("Carregando dados principais..."):
-            carregar_dados_periodos()
-        return bool(st.session_state.get('dados_periodos'))
-
-    st.info(f"⚡ Navegação rápida ativa: dados pesados ainda não carregados para '{menu_nome}'.")
-    if st.button(f"Carregar dados desta aba ({menu_nome})", key=f"carregar_{menu_nome}"):
-        with st.spinner("Carregando dados principais..."):
-            carregar_dados_periodos()
-        st.rerun()
-    return False
+    with st.spinner("Carregando dados principais..."):
+        carregar_dados_periodos()
+    return bool(st.session_state.get('dados_periodos'))
 
 # Callbacks para navegação entre menus (evita conflito)
 def _on_main_menu_change():
@@ -5344,14 +5330,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # Usar menu_atual (já atualizado pelos callbacks)
 menu = st.session_state['menu_atual']
-
-col_nav_fast, col_nav_spacer = st.columns([2, 5])
-with col_nav_fast:
-    st.toggle(
-        "⚡ Navegação rápida",
-        key="modo_navegacao_rapida",
-        help="Quando ligado, abas pesadas abrem imediatamente e carregam dados sob demanda."
-    )
 
 st.markdown("---")
 
@@ -5799,7 +5777,7 @@ if menu == "Sobre":
         st.markdown("""
         <div class="feature-card">
             <h4>filtros inteligentes</h4>
-            <p>seleção por lista customizada e recortes por período, com priorização de carregamento por aba para navegação mais rápida.</p>
+            <p>seleção por lista customizada e recortes por período.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -6584,7 +6562,7 @@ elif menu == "Evolução":
         st.caption("Evolução: financia vendas da montadora e estoques das concessionárias.")
 
         # Diagnóstico raiz: CET1 na Evolução vinha vazio quando `dados_capital`
-        # ainda não estava carregado nesta aba (navegação rápida / ordem de uso).
+        # ainda não estava carregado nesta aba.
         # Peers lê Capital explicitamente na própria aba; aqui garantimos o mesmo
         # pré-requisito antes de buscar CET1 por período.
         if not st.session_state.get("dados_capital"):
