@@ -83,6 +83,8 @@ import unicodedata
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from pptx import Presentation
+from pptx.util import Inches
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 import xlsxwriter
@@ -4365,6 +4367,83 @@ def _gerar_excel_evolucao_tabela_visual(
     return output
 
 
+def _gerar_png_tabela_evolucao(df_show: pd.DataFrame, periodos_cols: list[str]) -> Optional[bytes]:
+    """Renderiza a tabela de evolução (visual) como PNG."""
+    if df_show is None or df_show.empty:
+        return None
+
+    df_disp = df_show.copy()
+    cols = ["Métrica"] + periodos_cols
+    df_disp = df_disp[cols]
+
+    n_rows, n_cols = df_disp.shape
+    fig_width = min(18, max(8, n_cols * 1.6))
+    fig_height = min(10, max(3, n_rows * 0.5))
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=df_disp.values,
+        colLabels=df_disp.columns,
+        cellLoc="right",
+        colLoc="center",
+        loc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.3)
+
+    for (row, col), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_facecolor("#6E6E6E")
+            cell.set_text_props(color="white", weight="bold")
+        else:
+            if col == 0:
+                cell.set_text_props(ha="left")
+            if row % 2 == 0:
+                cell.set_facecolor("#f8f9fa")
+
+    buf = io.BytesIO()
+    fig.tight_layout()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _gerar_pptx_evolucao(
+    instituicao: str,
+    periodo_inicio: str,
+    periodo_final: str,
+    tabela_png: Optional[bytes],
+    grafico_png: Optional[bytes],
+) -> Optional[bytes]:
+    """Gera PPTX com tabela (PNG) e gráfico (PNG)."""
+    if tabela_png is None and grafico_png is None:
+        return None
+
+    prs = Presentation()
+
+    def _add_slide_with_image(title: str, img_bytes: bytes):
+        slide = prs.slides.add_slide(prs.slide_layouts[5])  # Title Only
+        title_box = slide.shapes.title
+        if title_box:
+            title_box.text = title
+        img_stream = io.BytesIO(img_bytes)
+        slide.shapes.add_picture(img_stream, Inches(0.7), Inches(1.3), width=Inches(12.0))
+
+    title_base = f"Evolução - {instituicao} | {periodo_para_exibicao(periodo_inicio)} a {periodo_para_exibicao(periodo_final)}"
+    if tabela_png is not None:
+        _add_slide_with_image(f"{title_base} (Tabela)", tabela_png)
+    if grafico_png is not None:
+        _add_slide_with_image(f"{title_base} (Gráfico)", grafico_png)
+
+    out = io.BytesIO()
+    prs.save(out)
+    out.seek(0)
+    return out.getvalue()
+
+
 def _mapear_colunas_capital(df_capital: pd.DataFrame):
     mapa_colunas_capital = {
         'Capital Principal': ['Capital Principal', 'Capital Principal para Comparação com RWA (a)'],
@@ -6559,7 +6638,7 @@ elif menu == "Conselho e Diretoria":
 elif menu == "Evolução":
     if _garantir_dados_principais("Evolução"):
         st.markdown("### Evolução")
-        st.caption("Evolução: financia vendas da montadora e estoques das concessionárias.")
+        # descrição removida a pedido
 
         # Diagnóstico raiz: CET1 na Evolução vinha vazio quando `dados_capital`
         # ainda não estava carregado nesta aba.
@@ -6830,8 +6909,15 @@ elif menu == "Evolução":
         )
         st.plotly_chart(fig_ev, width='stretch', config={"displaylogo": False})
 
-        st.caption(
-            "Core Funding (rodapé): Captações totais, exceto títulos de dívida elegíveis a capital e dívidas subordinadas elegíveis a capital."
+        st.markdown(
+            """
+            <div style="font-size: 12px; color: #666; margin-top: 8px;">
+                <strong>mini-glossário (Evolução):</strong><br><br>
+                <strong>Core Funding:</strong> igual à coluna <em>Captações</em> do IFData. Componentes somados: Depósitos, Obrigações por Operações Compromissadas, Relações Interfinanceiras, Relações Interdependências, Obrigações por Empréstimos e Repasses, Obrigações por Títulos e Valores Mobiliários, Derivativos, Provisões e Outras Obrigações, <u>excluindo</u> Títulos de Dívida Elegíveis a Capital e Dívidas Subordinadas Elegíveis a Capital.<br>
+                <strong>Carteira Classificada:</strong> Carteira Pós PDD (valor líquido).<br>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         df_metric = pd.DataFrame({
@@ -6915,7 +7001,7 @@ elif menu == "Evolução":
         tabela_html = _render_evolucao_table_html(df_show, periodos_cols)
         st.markdown(tabela_html, unsafe_allow_html=True)
 
-        col_export1, col_export2, col_export3 = st.columns(3)
+        col_export1, col_export2, col_export3, col_export4 = st.columns(4)
         buffer_excel_visual = _gerar_excel_evolucao_tabela_visual(
             df_show=df_show,
             periodos_cols=periodos_cols,
@@ -6963,7 +7049,27 @@ elif menu == "Evolução":
                     use_container_width=True,
                 )
             else:
-                st.caption("⚠️ exportação PNG indisponível neste ambiente (kaleido/engine)")
+                pass
+
+        with col_export4:
+            tabela_png = _gerar_png_tabela_evolucao(df_show, periodos_cols)
+            grafico_png = _plotly_fig_to_png_bytes(fig_ev)
+            pptx_bytes = _gerar_pptx_evolucao(
+                instituicao=instituicao,
+                periodo_inicio=periodo_inicio,
+                periodo_final=periodo_final,
+                tabela_png=tabela_png,
+                grafico_png=grafico_png,
+            )
+            if pptx_bytes:
+                st.download_button(
+                    label="exportar PPT",
+                    data=pptx_bytes,
+                    file_name=f"evolucao_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    key="evolucao_pptx",
+                    use_container_width=True,
+                )
     else:
         st.info("carregando dados automaticamente do github...")
         st.markdown("por favor, aguarde alguns segundos e recarregue a página")
