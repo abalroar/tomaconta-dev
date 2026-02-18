@@ -6685,22 +6685,25 @@ elif menu == "Evolução":
             .combine_first(carteira_classificada_2025)
             .combine_first(carteira_credito_base)
         )
-        # ROE na Evolução: cálculo único e definitivo pelo mesmo critério da Peers.
-        roe_peers_inst = _calcular_roe_alinhado_peers_para_instituicao(df_ev, instituicao)
-        if not roe_peers_inst.empty:
-            df_ano = df_ano.merge(
-                roe_peers_inst.rename(columns={"ROE Ac. Anualizado (%)": "_roe_peers"}),
-                on=["Ano", "Tri"],
-                how="left",
-            )
-            df_ano["ROE anualizado"] = pd.to_numeric(df_ano["_roe_peers"], errors="coerce")
-            df_ano = df_ano.drop(columns=["_roe_peers"], errors="ignore")
+        # ROE na Evolução: usar exatamente o mesmo valor já calculado para Peers (coluna canônica).
+        col_roe = "ROE Ac. Anualizado (%)" if "ROE Ac. Anualizado (%)" in df_ano.columns else (
+            "ROE Ac. YTD an. (%)" if "ROE Ac. YTD an. (%)" in df_ano.columns else None
+        )
+        if col_roe:
+            df_ano["ROE anualizado"] = pd.to_numeric(df_ano[col_roe], errors="coerce")
         else:
-            # Fallback operacional: usa coluna já disponibilizada no dataset, se houver.
-            col_roe = "ROE Ac. Anualizado (%)" if "ROE Ac. Anualizado (%)" in df_ano.columns else (
-                "ROE Ac. YTD an. (%)" if "ROE Ac. YTD an. (%)" in df_ano.columns else None
-            )
-            df_ano["ROE anualizado"] = pd.to_numeric(df_ano[col_roe], errors="coerce") if col_roe else np.nan
+            # Fallback defensivo: recalcula com o mesmo critério da Peers se a coluna não existir.
+            roe_peers_inst = _calcular_roe_alinhado_peers_para_instituicao(df_ev, instituicao)
+            if not roe_peers_inst.empty:
+                df_ano = df_ano.merge(
+                    roe_peers_inst.rename(columns={"ROE Ac. Anualizado (%)": "_roe_peers"}),
+                    on=["Ano", "Tri"],
+                    how="left",
+                )
+                df_ano["ROE anualizado"] = pd.to_numeric(df_ano["_roe_peers"], errors="coerce")
+                df_ano = df_ano.drop(columns=["_roe_peers"], errors="ignore")
+            else:
+                df_ano["ROE anualizado"] = np.nan
         df_ano["Crédito 2.682 / PL"] = np.where(
             pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce") != 0,
             pd.to_numeric(df_ano["Carteira Classificada"], errors="coerce") / pd.to_numeric(df_ano.get("Patrimônio Líquido"), errors="coerce"),
