@@ -10040,7 +10040,15 @@ elif menu == "Balanço 4060":
             body += f"<td>{formatar_percentual(pct) if pd.notna(pct) else '-'}</td>"
         body += "</tr>"
 
-    html = f\"\"\"\n    <div style='overflow-x:auto;'>\n    <table class='bal4060-table'>\n    <thead>{header}</thead>\n    <tbody>{body}</tbody>\n    </table>\n    </div>\n    \"\"\"\n    st.markdown(html, unsafe_allow_html=True)
+    html = f"""
+    <div style='overflow-x:auto;'>
+    <table class='bal4060-table'>
+    <thead>{header}</thead>
+    <tbody>{body}</tbody>
+    </table>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
     st.caption(f"Fonte de dados: {fonte_blo}. Regras determinísticas em data/balanco_4060_schema_rules.json.")
 
