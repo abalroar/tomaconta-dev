@@ -9927,7 +9927,12 @@ elif menu == "Balanço 4060":
 
         bal = build_balanco_padronizado(df_blo, schema, cod_congl, data_base_sel)
 
-        top_rows = bal[bal["level"] == 1].set_index("section")
+        top_rows = (
+            bal[bal["level"] == 1]
+            .groupby("section", as_index=False)["saldo"]
+            .sum(min_count=1)
+            .set_index("section")
+        )
         col_m1, col_m2, col_m3 = st.columns(3)
         with col_m1:
             st.metric(
