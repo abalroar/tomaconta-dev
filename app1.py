@@ -6240,7 +6240,7 @@ elif False and menu == "Painel":
                         buffer_excel.seek(0)
 
                         st.download_button(
-                            label="Exportar Excel",
+                            label="Download Excel",
                             data=buffer_excel,
                             file_name=f"resumo_{periodo_resumo.replace('/', '-')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6398,7 +6398,7 @@ elif menu == "Peers (Tabela)":
                             delta_flags,
                         )
                         st.download_button(
-                            label="baixar Excel",
+                            label="Download Excel",
                             data=excel_buffer,
                             file_name=f"peers_tabela_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6415,7 +6415,7 @@ elif menu == "Peers (Tabela)":
                             valores,
                         )
                         st.download_button(
-                            label="baixar Dados Puros",
+                            label="Download Dados Puros",
                             data=excel_raw,
                             file_name=f"peers_dados_puros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6629,7 +6629,7 @@ elif menu == "Conselho e Diretoria":
                                 data_extracao=data_extracao,
                             )
                             st.download_button(
-                                "Exportar para Excel",
+                                "Download Excel",
                                 data=excel_bytes,
                                 file_name=f"orgaos_estatutarios_{inst_obj['cnpj']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -7070,7 +7070,7 @@ elif menu == "Evolução":
 
         with col_export1:
             st.download_button(
-                label="excel visual (tabela)",
+                label="Download Excel",
                 data=buffer_excel_visual.getvalue(),
                 file_name=f"evolucao_tabela_visual_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -7080,7 +7080,7 @@ elif menu == "Evolução":
 
         with col_export2:
             st.download_button(
-                label="excel (dados brutos)",
+                label="Download Dados Puros",
                 data=buffer_excel.getvalue(),
                 file_name=f"evolucao_{instituicao_arquivo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -7869,7 +7869,7 @@ elif menu == "Rankings":
                             col_export_a, col_export_b = st.columns(2)
                             with col_export_a:
                                 st.download_button(
-                                    label="exportar excel",
+                                    label="Download Excel",
                                     data=buffer_excel,
                                     file_name=f"indice_basileia_{periodo_resumo.replace('/', '-')}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -8029,7 +8029,7 @@ elif menu == "Rankings":
                         col_export_a, col_export_b = st.columns(2)
                         with col_export_a:
                             st.download_button(
-                                label="exportar excel",
+                                label="Download Excel",
                                 data=buffer_excel,
                                 file_name=f"ranking_{periodo_resumo.replace('/', '-')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -8387,7 +8387,7 @@ elif menu == "Rankings":
                                 buffer_excel_hist.seek(0)
 
                                 st.download_button(
-                                    label="exportar histórico excel",
+                                    label="Download Excel",
                                     data=buffer_excel_hist,
                                     file_name=f"Historico_{variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -8413,7 +8413,7 @@ elif menu == "Rankings":
 
                         nome_variavel = variavel.replace(' ', '_').replace('/', '_')
                         st.download_button(
-                            label="exportar excel",
+                            label="Download Excel",
                             data=buffer_excel,
                             file_name=f"Deltas_{variavel}_{periodo_inicial_delta.replace('/', '-')}_{periodo_subsequente_delta.replace('/', '-')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -8619,7 +8619,7 @@ elif menu == "Contribuições FGC/FGCoop":
                             worksheet.autofilter(0, 0, len(df_show), len(df_show.columns) - 1)
                         buffer_excel.seek(0)
                         st.download_button(
-                            label="exportar excel",
+                            label="Download Excel",
                             data=buffer_excel,
                             file_name=f"fgc_ranking_{end_period}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -9979,7 +9979,7 @@ elif menu == "DRE":
         buffer_excel.seek(0)
 
         st.download_button(
-            label="Baixar Excel (DRE + Glossário COSIF)",
+            label="Download Excel",
             data=buffer_excel,
             file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -10330,7 +10330,7 @@ elif menu == "Carteira 4.966":
                     excel_data = criar_excel_carteira_4966(df_resultado, periodos_ordenados)
                     periodos_str = "_".join([periodo_para_exibicao_mes(p).replace("/", "-") for p in periodos_ordenados])
                     st.download_button(
-                        label="Baixar Excel (Tabela Atual)",
+                        label="Download Excel",
                         data=excel_data,
                         file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_{periodos_str}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -10346,7 +10346,7 @@ elif menu == "Carteira 4.966":
                     buffer_raw.seek(0)
 
                     st.download_button(
-                        label="Baixar Excel (Dados Brutos)",
+                        label="Download Dados Puros",
                         data=buffer_raw.getvalue(),
                         file_name=f"Carteira_4966_{instituicao_selecionada.replace(' ', '_')[:30]}_dados_brutos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -11006,7 +11006,7 @@ elif menu == "Crie sua métrica!":
                                 df_export.to_excel(writer, index=False, sheet_name='dados')
                             buffer_excel.seek(0)
                             st.download_button(
-                                label="exportar Excel",
+                                label="Download Excel",
                                 data=buffer_excel,
                                 file_name=f"Brincar_Scatter_{nome_metrica.replace(' ', '_')}_{periodo_scatter_brincar.replace('/', '-')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -11254,7 +11254,7 @@ elif menu == "Crie sua métrica!":
                                     df_export_delta.to_excel(writer, index=False, sheet_name='deltas')
                                 buffer_excel.seek(0)
                                 st.download_button(
-                                    label="exportar Excel",
+                                    label="Download Excel",
                                     data=buffer_excel,
                                     file_name=f"Brincar_Deltas_{nome_metrica.replace(' ', '_')}_{periodo_inicial_brincar.replace('/', '-')}_{periodo_subsequente_brincar.replace('/', '-')}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -11418,7 +11418,7 @@ elif menu == "Crie sua métrica!":
                                 df_export_rank.to_excel(writer, index=False, sheet_name='ranking')
                             buffer_excel.seek(0)
                             st.download_button(
-                                label="exportar Excel",
+                                label="Download Excel",
                                 data=buffer_excel,
                                 file_name=f"Brincar_Ranking_{nome_metrica.replace(' ', '_')}_{periodo_ranking.replace('/', '-')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
