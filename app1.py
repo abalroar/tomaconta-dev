@@ -76,7 +76,9 @@ from utils.ifdata_cache import (
 )
 from utils.balanco_4060 import (
     build_balanco_padronizado,
-    load_schema as load_balanco_schema,
+    load_schema_rules as load_balanco_schema_rules,
+    build_schema_from_rules as build_balanco_schema_from_rules,
+    build_mapping_table as build_balanco_mapping_table,
     normalize_conta_10 as normalize_balanco_conta_10,
     read_blo_prudencial_csv,
 )
@@ -9853,10 +9855,6 @@ elif menu == "Balanço 4060":
     st.caption("Balancete mensal por conglomerado prudencial (BLOPRUDENCIAL). Estrutura padronizada em 3 níveis.")
 
     @st.cache_data(ttl=3600, show_spinner=False)
-    def load_balanco_schema_cached():
-        return load_balanco_schema()
-
-    @st.cache_data(ttl=3600, show_spinner=False)
     def load_bloprudencial_file_cached(path_str: str):
         df = read_blo_prudencial_csv(Path(path_str))
         df = normalize_balanco_conta_10(df)
@@ -9894,102 +9892,261 @@ elif menu == "Balanço 4060":
         except Exception:
             return str(valor)
 
-    blo_files = sorted(Path(".").glob("*BLOPRUDENCIAL*.CSV"))
-    if not blo_files:
-        st.warning("Nenhum arquivo BLOPRUDENCIAL encontrado no diretório do projeto.")
-    else:
+    def formatar_percentual(valor, decimais=1):
+        if valor is None or (pd.api.types.is_scalar(valor) and pd.isna(valor)):
+            return "-"
+        try:
+            return f"{valor * 100:.{decimais}f}%".replace(".", ",")
+        except Exception:
+            return "-"
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_bloprudencial_cache_df():
+        manager = get_cache_manager()
+        resultado = manager.carregar("bloprudencial") if manager else None
+        if resultado and resultado.sucesso and resultado.dados is not None:
+            return resultado.dados.copy(), "cache_parquet"
+        return pd.DataFrame(), "vazio"
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_schema_rules_cached():
+        return load_balanco_schema_rules()
+
+    df_blo, fonte_blo = load_bloprudencial_cache_df()
+    if df_blo is None or df_blo.empty:
+        # fallback para CSV local (repo)
+        blo_files = sorted(Path(".").glob("*BLOPRUDENCIAL*.CSV"))
+        if not blo_files:
+            st.warning("Nenhum BLOPRUDENCIAL disponível em cache ou no diretório do projeto.")
+            st.stop()
         file_labels = [str(p) for p in blo_files]
-        default_idx = len(file_labels) - 1
         file_sel = st.selectbox(
-            "Arquivo BLOPRUDENCIAL",
+            "Arquivo BLOPRUDENCIAL (fallback)",
             options=file_labels,
-            index=default_idx,
+            index=len(file_labels) - 1,
             key="bal4060_file_sel",
         )
-
         df_blo = load_bloprudencial_file_cached(file_sel)
-        try:
-            schema = load_balanco_schema_cached()
-        except Exception as exc:
-            st.error(f"Erro ao carregar schema do balanço 4060: {exc}")
-            st.stop()
+        fonte_blo = "csv_local"
 
-        data_bases = sorted(df_blo["DATA_BASE"].astype(str).dropna().unique(), reverse=True)
-        if not data_bases:
-            st.warning("Arquivo selecionado não contém DATA_BASE válido.")
-            st.stop()
+    df_blo = normalize_balanco_conta_10(df_blo)
+    schema_rules = load_schema_rules_cached()
+    schema = build_balanco_schema_from_rules(df_blo, schema_rules)
 
-        data_base_sel = st.selectbox(
-            "Data-base",
-            options=data_bases,
-            index=0,
-            key="bal4060_data_base",
-        )
+    data_bases = sorted(df_blo["DATA_BASE"].astype(str).dropna().unique(), reverse=True)
+    if not data_bases:
+        st.warning("Dados BLOPRUDENCIAL não contêm DATA_BASE válido.")
+        st.stop()
 
-        df_congl = (
-            df_blo[["COD_CONGL", "NOME_CONGL"]]
-            .dropna()
-            .drop_duplicates()
-            .assign(COD_CONGL=lambda d: d["COD_CONGL"].astype(str))
-        )
-        df_congl["label"] = df_congl["COD_CONGL"] + " - " + df_congl["NOME_CONGL"].astype(str)
-        df_congl = df_congl.sort_values("label")
+    data_base_sel = st.multiselect(
+        "Data-base (selecionar até 3)",
+        options=data_bases,
+        default=data_bases[:3] if len(data_bases) >= 3 else data_bases,
+        key="bal4060_data_base",
+        max_selections=3,
+    )
+    escala_mm = st.toggle("Exibir em R$ milhões", value=True, key="bal4060_mm")
+    if not data_base_sel:
+        st.info("Selecione pelo menos uma data-base.")
+        st.stop()
 
-        if df_congl.empty:
-            st.warning("Nenhum conglomerado encontrado no arquivo selecionado.")
-            st.stop()
+    df_congl = (
+        df_blo[["COD_CONGL", "NOME_CONGL"]]
+        .dropna()
+        .drop_duplicates()
+        .assign(COD_CONGL=lambda d: d["COD_CONGL"].astype(str))
+    )
+    df_congl["label"] = df_congl["COD_CONGL"] + " - " + df_congl["NOME_CONGL"].astype(str)
+    df_congl = df_congl.sort_values("label")
 
-        label_sel = st.selectbox(
-            "Conglomerado prudencial",
-            options=df_congl["label"].tolist(),
-            index=0,
-            key="bal4060_congl",
-        )
-        cod_congl = df_congl.loc[df_congl["label"] == label_sel, "COD_CONGL"].iloc[0]
+    if df_congl.empty:
+        st.warning("Nenhum conglomerado encontrado.")
+        st.stop()
 
-        bal = build_balanco_padronizado(df_blo, schema, cod_congl, data_base_sel)
+    label_sel = st.selectbox(
+        "Conglomerado prudencial",
+        options=df_congl["label"].tolist(),
+        index=0,
+        key="bal4060_congl",
+    )
+    cod_congl = df_congl.loc[df_congl["label"] == label_sel, "COD_CONGL"].iloc[0]
 
-        top_rows = (
-            bal[bal["level"] == 1]
-            .groupby("section", as_index=False)["saldo"]
-            .sum(min_count=1)
-            .set_index("section")
-        )
-        def _metric_val(section_name: str):
-            if section_name not in top_rows.index:
-                return pd.NA
-            v = top_rows.loc[section_name, "saldo"]
-            if isinstance(v, pd.Series):
-                v = v.sum(min_count=1)
-            return v
+    # ordenar linhas por liquidez e nível
+    section_order = {s: i for i, s in enumerate(schema_rules.get("sections_order", []), start=1)}
+    df_schema = pd.DataFrame(schema)
+    df_schema["section_order"] = df_schema["section"].map(section_order).fillna(99)
+    df_schema = df_schema.sort_values(["section_order", "order", "level", "label"])
 
-        col_m1, col_m2, col_m3 = st.columns(3)
-        with col_m1:
-            st.metric(
-                "Ativo",
-                formatar_valor_br_local(_metric_val("Ativo")),
+    # construir balanço por período
+    balances = {}
+    for ym in data_base_sel:
+        bal = build_balanco_padronizado(df_blo, df_schema.to_dict("records"), cod_congl, ym)
+        balances[ym] = bal.set_index("id")
+
+    # calcular percentuais
+    def _get_ativo_total(bal_df: pd.DataFrame) -> Optional[float]:
+        if "ativo_total" in bal_df.index:
+            return bal_df.loc["ativo_total", "saldo"]
+        if "Ativo" in bal_df["section"].values:
+            return bal_df[bal_df["section"] == "Ativo"]["saldo"].sum(min_count=1)
+        return pd.NA
+
+    # estilos
+    st.markdown(
+        """
+        <style>
+        .bal4060-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .bal4060-table th, .bal4060-table td { border: 1px solid #d9d9d9; padding: 6px 10px; }
+        .bal4060-table th { background: #1f3b63; color: #fff; text-align: center; }
+        .bal4060-table td.label { text-align: left; font-weight: 500; }
+        .bal4060-table tr.section-row td { background: #f3f6fb; font-weight: 600; }
+        .bal4060-table tr.total-row td { background: #1f3b63; color: #fff; font-weight: 700; }
+        .bal4060-table .indent-2 { padding-left: 18px; font-weight: 400; }
+        .bal4060-table .indent-3 { padding-left: 32px; font-weight: 400; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # montar HTML da tabela
+    header_label = "R$ MM" if escala_mm else "R$"
+    header = f"<tr><th>{header_label}</th>"
+    for ym in data_base_sel:
+        header += f"<th colspan='2'>{_yyyymm_para_periodo_exibicao(ym)}</th>"
+    header += "</tr><tr><th></th>"
+    for _ in data_base_sel:
+        header += "<th>Valor</th><th>%</th>"
+    header += "</tr>"
+
+    body = ""
+    for _, row in df_schema.iterrows():
+        line_id = row["id"]
+        label = row["label"]
+        level = int(row["level"])
+        is_total = bool(row.get("is_total"))
+        cls = "total-row" if is_total else ("section-row" if level == 1 else "")
+        indent_cls = f"indent-{level}" if level > 1 else ""
+        body += f"<tr class='{cls}'>"
+        body += f"<td class='label {indent_cls}'>{label}</td>"
+        for ym in data_base_sel:
+            bal_df = balances[ym]
+            raw_val = bal_df.loc[line_id, "saldo"] if line_id in bal_df.index else pd.NA
+            ativo_total = _get_ativo_total(bal_df)
+            pct = pd.NA
+            if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
+                pct = raw_val / ativo_total
+            valor_exib = raw_val / 1_000_000 if (pd.notna(raw_val) and escala_mm) else raw_val
+            body += f"<td>{formatar_valor_br_local(valor_exib)}</td>"
+            body += f"<td>{formatar_percentual(pct) if pd.notna(pct) else '-'}</td>"
+        body += "</tr>"
+
+    html = f\"\"\"\n    <div style='overflow-x:auto;'>\n    <table class='bal4060-table'>\n    <thead>{header}</thead>\n    <tbody>{body}</tbody>\n    </table>\n    </div>\n    \"\"\"\n    st.markdown(html, unsafe_allow_html=True)
+
+    st.caption(f"Fonte de dados: {fonte_blo}. Regras determinísticas em data/balanco_4060_schema_rules.json.")
+
+    with st.expander("Miniglossário das linhas derivadas"):
+        derived = df_schema[df_schema["derived"] == True].copy()
+        if derived.empty:
+            st.write("Sem linhas derivadas.")
+        else:
+            for _, linha in derived.iterrows():
+                if linha.get("parent_id"):
+                    continue
+                filhos = df_schema[df_schema["parent_id"] == linha["id"]]["label"].tolist()
+                if filhos:
+                    st.markdown(f"**{linha['label']}** = soma de: {', '.join(filhos)}")
+                else:
+                    st.markdown(f"**{linha['label']}** = soma das contas COSIF atribuídas pela regra.")
+
+    with st.expander("Mapeamento COSIF (contas mãe/filhas)"):
+        map_df = build_balanco_mapping_table(df_blo, df_schema.to_dict("records"))
+        st.dataframe(map_df, width="stretch", hide_index=True)
+
+    with st.expander("Regras determinísticas (classificação)"):
+        regras = []
+        for linha in schema_rules.get("lines", []):
+            rule = linha.get("rule") or {}
+            regras.append(
+                {
+                    "LineId": linha.get("id"),
+                    "Label": linha.get("label"),
+                    "Section": linha.get("section"),
+                    "Level": linha.get("level"),
+                    "ParentId": linha.get("parent_id"),
+                    "Derived": bool(linha.get("derived")),
+                    "SectionDigits": ",".join(rule.get("section_digits", [])),
+                    "NameRegex": "; ".join(rule.get("name_regex", [])),
+                    "ExcludeRegex": "; ".join(rule.get("exclude_regex", [])),
+                    "Residual": bool(rule.get("residual")),
+                }
             )
-        with col_m2:
-            st.metric(
-                "Passivo",
-                formatar_valor_br_local(_metric_val("Passivo")),
-            )
-        with col_m3:
-            st.metric(
-                "Patrimônio Líquido",
-                formatar_valor_br_local(_metric_val("Patrimônio Líquido")),
-            )
+        df_regras = pd.DataFrame(regras)
+        st.dataframe(df_regras, width="stretch", hide_index=True)
 
-        indent_map = {1: "", 2: "  ", 3: "    "}
-        bal["label_exib"] = bal.apply(
-            lambda r: f"{indent_map.get(int(r['level']), '')}{r['label']}", axis=1
-        )
+    with st.expander("Exportar Excel (balanço + mapeamento)"):
+        buffer_excel = BytesIO()
+        with pd.ExcelWriter(buffer_excel, engine="xlsxwriter") as writer:
+            # Aba Balanço
+            out_rows = []
+            for _, row in df_schema.iterrows():
+                line_id = row["id"]
+                item = {"Seção": row["section"], "Nível": row["level"], "Linha": row["label"]}
+                for ym in data_base_sel:
+                    bal_df = balances[ym]
+                    raw_val = bal_df.loc[line_id, "saldo"] if line_id in bal_df.index else pd.NA
+                    ativo_total = _get_ativo_total(bal_df)
+                    pct = pd.NA
+                    if pd.notna(raw_val) and pd.notna(ativo_total) and ativo_total != 0:
+                        pct = raw_val / ativo_total
+                    valor_exib = raw_val / 1_000_000 if (pd.notna(raw_val) and escala_mm) else raw_val
+                    item[f"{_yyyymm_para_periodo_exibicao(ym)} Valor"] = valor_exib
+                    item[f"{_yyyymm_para_periodo_exibicao(ym)} %"] = pct
+                out_rows.append(item)
+            df_out = pd.DataFrame(out_rows)
+            df_out.to_excel(writer, index=False, sheet_name="Balanco")
 
-        st.markdown("#### Balanço padronizado")
-        st.dataframe(
-            bal[["section", "level", "label_exib", "conta_base", "saldo"]],
-            width="stretch",
-            hide_index=True,
+            # Aba Mapeamento
+            map_df = build_balanco_mapping_table(df_blo, df_schema.to_dict("records"))
+            map_df.to_excel(writer, index=False, sheet_name="Mapeamento")
+
+            df_regras.to_excel(writer, index=False, sheet_name="Regras")
+
+            # formatação
+            workbook = writer.book
+            ws_bal = writer.sheets["Balanco"]
+            fmt_header = workbook.add_format({"bold": True, "bg_color": "#1f3b63", "font_color": "white", "border": 1})
+            fmt_num = workbook.add_format({"num_format": "#,##0"})
+            fmt_pct = workbook.add_format({"num_format": "0.0%"})
+            fmt_text = workbook.add_format({"align": "left"})
+            for col_idx, col_name in enumerate(df_out.columns):
+                ws_bal.write(0, col_idx, col_name, fmt_header)
+                if col_name.endswith("%"):
+                    ws_bal.set_column(col_idx, col_idx, 12, fmt_pct)
+                elif col_name.endswith("Valor"):
+                    ws_bal.set_column(col_idx, col_idx, 16, fmt_num)
+                else:
+                    ws_bal.set_column(col_idx, col_idx, 26, fmt_text)
+            ws_bal.freeze_panes(1, 0)
+
+            ws_map = writer.sheets["Mapeamento"]
+            for col_idx, col_name in enumerate(map_df.columns):
+                ws_map.write(0, col_idx, col_name, fmt_header)
+                ws_map.set_column(col_idx, col_idx, 28, fmt_text)
+            ws_map.freeze_panes(1, 0)
+
+            ws_reg = writer.sheets["Regras"]
+            for col_idx, col_name in enumerate(df_regras.columns):
+                ws_reg.write(0, col_idx, col_name, fmt_header)
+                ws_reg.set_column(col_idx, col_idx, 28, fmt_text)
+            ws_reg.freeze_panes(1, 0)
+
+        buffer_excel.seek(0)
+        st.download_button(
+            label="Baixar Excel (Balanço 4060)",
+            data=buffer_excel,
+            file_name=f"balanco_4060_{cod_congl}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="balanco_4060_excel",
         )
 
 
