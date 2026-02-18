@@ -9870,7 +9870,22 @@ elif menu == "Balanço 4060":
                 valor = valor.iloc[0]
             else:
                 valor = valor.sum(min_count=1)
-        if valor is None or pd.isna(valor):
+        elif isinstance(valor, (pd.Index, list, tuple)):
+            if len(valor) == 0:
+                return "-"
+            if len(valor) == 1:
+                valor = valor[0]
+            else:
+                valor = pd.Series(valor).sum(min_count=1)
+
+        if valor is None:
+            return "-"
+        if not pd.api.types.is_scalar(valor):
+            try:
+                valor = pd.Series(valor).sum(min_count=1)
+            except Exception:
+                return "-"
+        if pd.isna(valor):
             return "-"
         try:
             if decimais == 0:
