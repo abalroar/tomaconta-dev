@@ -188,7 +188,12 @@ def load_schema_rules(schema_rules_path: Path = SCHEMA_RULES_PATH) -> dict:
 def load_name_mapping_xlsx(path: Path = NAME_MAP_PATH) -> Dict[str, str]:
     if not path.exists():
         return {}
-    df = pd.read_excel(path, sheet_name="ClassificacaoCompleta4060")
+    try:
+        xls = pd.ExcelFile(path)
+        sheet = "ClassificacaoCompleta4060" if "ClassificacaoCompleta4060" in xls.sheet_names else xls.sheet_names[0]
+        df = pd.read_excel(path, sheet_name=sheet)
+    except Exception:
+        df = pd.read_excel(path)
     if "CONTA" not in df.columns or "NOME_CONTA_CORRIGIDO" not in df.columns:
         # fallback: tentar nomes originais
         if "NOME_CONTA" not in df.columns:
