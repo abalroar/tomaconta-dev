@@ -10083,7 +10083,7 @@ elif menu == "Balanço 4060":
         cls = "total-row" if is_total else ("section-row" if level == 1 and row.get("type") == "derived" else "")
         indent_cls = f"indent-{level}" if level > 1 else ""
         body += f"<tr class='{cls}'>"
-        body += f\"<td class='label {indent_cls}' style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{label}</td>\"
+        body += f"<td class='label {indent_cls}' style='width:{max_label_len}ch;min-width:{max_label_len}ch'>{label}</td>"
         for ym in data_base_sel:
             raw_val = balances[ym].get(line_id, pd.NA)
             ativo_total = _get_ativo_total(ym)
