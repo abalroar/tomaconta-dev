@@ -74,6 +74,12 @@ from utils.ifdata_cache import (
     build_derived_metrics,
     load_derived_metrics_slice,
 )
+from utils.balanco_4060 import (
+    build_balanco_padronizado,
+    load_schema as load_balanco_schema,
+    normalize_conta_10 as normalize_balanco_conta_10,
+    read_blo_prudencial_csv,
+)
 import io
 import base64
 import subprocess
@@ -5235,6 +5241,7 @@ MENU_PRINCIPAL = [
     "Evolução",
     "Scatter Plot",
     "DRE",
+    "Balanço 4060",
     "Carteira 4.966",
     "Taxas de Juros por Produto",
     "Crie sua métrica!",
@@ -9839,6 +9846,121 @@ elif menu == "DRE":
             file_name=f"DRE_{instituicao_selecionada.replace(' ', '_')}_{ano_selecionado}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dre_download_excel"
+        )
+
+elif menu == "Balanço 4060":
+    st.markdown("### Balanço 4060 (Conglomerados Prudenciais)")
+    st.caption("Balancete mensal por conglomerado prudencial (BLOPRUDENCIAL). Estrutura padronizada em 3 níveis.")
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_balanco_schema_cached():
+        return load_balanco_schema()
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def load_bloprudencial_file_cached(path_str: str):
+        df = read_blo_prudencial_csv(Path(path_str))
+        df = normalize_balanco_conta_10(df)
+        return df
+
+    def formatar_valor_br_local(valor, decimais=0):
+        if pd.isna(valor) or valor is None:
+            return "-"
+        try:
+            if decimais == 0:
+                return f"{valor:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            return f"{valor:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return str(valor)
+
+    blo_files = sorted(Path(".").glob("*BLOPRUDENCIAL*.CSV"))
+    if not blo_files:
+        st.warning("Nenhum arquivo BLOPRUDENCIAL encontrado no diretório do projeto.")
+    else:
+        file_labels = [str(p) for p in blo_files]
+        default_idx = len(file_labels) - 1
+        file_sel = st.selectbox(
+            "Arquivo BLOPRUDENCIAL",
+            options=file_labels,
+            index=default_idx,
+            key="bal4060_file_sel",
+        )
+
+        df_blo = load_bloprudencial_file_cached(file_sel)
+        try:
+            schema = load_balanco_schema_cached()
+        except Exception as exc:
+            st.error(f"Erro ao carregar schema do balanço 4060: {exc}")
+            st.stop()
+
+        data_bases = sorted(df_blo["DATA_BASE"].astype(str).dropna().unique(), reverse=True)
+        if not data_bases:
+            st.warning("Arquivo selecionado não contém DATA_BASE válido.")
+            st.stop()
+
+        data_base_sel = st.selectbox(
+            "Data-base",
+            options=data_bases,
+            index=0,
+            key="bal4060_data_base",
+        )
+
+        df_congl = (
+            df_blo[["COD_CONGL", "NOME_CONGL"]]
+            .dropna()
+            .drop_duplicates()
+            .assign(COD_CONGL=lambda d: d["COD_CONGL"].astype(str))
+        )
+        df_congl["label"] = df_congl["COD_CONGL"] + " - " + df_congl["NOME_CONGL"].astype(str)
+        df_congl = df_congl.sort_values("label")
+
+        if df_congl.empty:
+            st.warning("Nenhum conglomerado encontrado no arquivo selecionado.")
+            st.stop()
+
+        label_sel = st.selectbox(
+            "Conglomerado prudencial",
+            options=df_congl["label"].tolist(),
+            index=0,
+            key="bal4060_congl",
+        )
+        cod_congl = df_congl.loc[df_congl["label"] == label_sel, "COD_CONGL"].iloc[0]
+
+        bal = build_balanco_padronizado(df_blo, schema, cod_congl, data_base_sel)
+
+        top_rows = bal[bal["level"] == 1].set_index("section")
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            st.metric(
+                "Ativo",
+                formatar_valor_br_local(top_rows.loc["Ativo", "saldo"])
+                if "Ativo" in top_rows.index
+                else "-",
+            )
+        with col_m2:
+            st.metric(
+                "Passivo",
+                formatar_valor_br_local(top_rows.loc["Passivo", "saldo"])
+                if "Passivo" in top_rows.index
+                else "-",
+            )
+        with col_m3:
+            st.metric(
+                "Patrimônio Líquido",
+                formatar_valor_br_local(top_rows.loc["Patrimônio Líquido", "saldo"])
+                if "Patrimônio Líquido" in top_rows.index
+                else "-",
+            )
+
+        indent_map = {1: "", 2: "  ", 3: "    "}
+        bal["label_exib"] = bal.apply(
+            lambda r: f"{indent_map.get(int(r['level']), '')}{r['label']}", axis=1
+        )
+
+        st.markdown("#### Balanço padronizado")
+        st.dataframe(
+            bal[["section", "level", "label_exib", "conta_base", "saldo"]],
+            width="stretch",
+            hide_index=True,
         )
 
 
