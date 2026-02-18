@@ -6733,7 +6733,49 @@ elif menu == "Evolução":
                 return pd.to_numeric(dataframe[coluna], errors="coerce")
             return pd.Series(np.nan, index=dataframe.index, dtype="float64")
 
-        df_ano["Core Funding"] = _numeric_series(df_ano, "Captações")
+        # Core Funding: Captações (e) + Instrumentos de Dívida Elegíveis a Capital (h) do Passivo (Rel. 3)
+        core_funding_series = None
+        try:
+            periodos_evo = df_ano.get("Período", pd.Series(dtype="object")).dropna().unique().tolist()
+            cache_passivo = _carregar_cache_relatorio_slice(
+                "passivo",
+                _cache_version_token("passivo"),
+                tuple(periodos_evo),
+                (instituicao,),
+            )
+            cache_passivo = _aplicar_aliases_df(cache_passivo, st.session_state.get("dict_aliases", {}))
+
+            col_capt = _resolver_coluna_peers(
+                cache_passivo,
+                [
+                    "Captações (e) = (a) + (b) + (c) + (d)",
+                    "Captações (e)",
+                    "Captações",
+                    "Captacoes (e)",
+                ],
+            )
+            col_instr = _resolver_coluna_peers(
+                cache_passivo,
+                [
+                    "Instrumentos de Dívida Elegíveis a Capital (h)",
+                    "Instrumentos de Divida Elegiveis a Capital (h)",
+                    "Instrumentos de Dívida Elegíveis a Capital",
+                    "Instrumentos de Divida Elegiveis a Capital",
+                ],
+            )
+            if col_capt or col_instr:
+                core_map = {}
+                for periodo in periodos_evo:
+                    cap_val = _obter_valor_peers(cache_passivo, instituicao, periodo, col_capt) if col_capt else np.nan
+                    instr_val = _obter_valor_peers(cache_passivo, instituicao, periodo, col_instr) if col_instr else np.nan
+                    core_map[periodo] = _somar_valores([cap_val, instr_val])
+                core_funding_series = df_ano.get("Período", pd.Series(index=df_ano.index)).map(core_map)
+        except Exception:
+            core_funding_series = None
+
+        if core_funding_series is None:
+            core_funding_series = _numeric_series(df_ano, "Captações")
+        df_ano["Core Funding"] = core_funding_series
         carteira_classificada_2025 = _numeric_series(df_ano, "Carteira Classificada")
         carteira_classificada_historica = _numeric_series(df_ano, "Carteira de Crédito Classificada")
         carteira_credito_base = _numeric_series(df_ano, "Carteira de Crédito")
@@ -6913,7 +6955,8 @@ elif menu == "Evolução":
             """
             <div style="font-size: 12px; color: #666; margin-top: 8px;">
                 <strong>mini-glossário (Evolução):</strong><br><br>
-                <strong>Core Funding:</strong> igual à coluna <em>Captações</em> do IFData. Componentes somados: Depósitos, Obrigações por Operações Compromissadas, Relações Interfinanceiras, Relações Interdependências, Obrigações por Empréstimos e Repasses, Obrigações por Títulos e Valores Mobiliários, Derivativos, Provisões e Outras Obrigações, <u>excluindo</u> Títulos de Dívida Elegíveis a Capital e Dívidas Subordinadas Elegíveis a Capital.<br>
+                <strong>Core Funding:</strong> = <em>Captações (e)</em> = (a) + (b) + (c) + (d) + <em>Instrumentos de Dívida Elegíveis a Capital (h)</em>, todos do Relatório Passivo. Onde:
+                (a) Depósitos; (b) Obrigações por Operações Compromissadas; (c) Relações Interfinanceiras; (d) Relações Interdependências; (h) Instrumentos de Dívida Elegíveis a Capital.<br>
                 <strong>Carteira Classificada:</strong> Carteira Pós PDD (valor líquido).<br>
             </div>
             """,
