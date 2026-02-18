@@ -4134,32 +4134,32 @@ def _gerar_excel_peers_tabela(
     n_cols = 1 + len(bancos) * len(periodos)
     border = {"border": 1, "border_color": "#dddddd"}
     header_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#111111", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#111111", "font_color": "white", "font_size": 11, **border}
     )
     subheader_fmt = workbook.add_format(
-        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", **border}
+        {"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#6E6E6E", "font_color": "white", "font_size": 10, **border}
     )
     section_fmt = workbook.add_format(
-        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#ff5a00", "font_color": "white", **border}
+        {"bold": True, "align": "left", "valign": "vcenter", "bg_color": "#ff5a00", "font_color": "white", "font_size": 10, **border}
     )
-    row_even = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
-    row_odd = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", **border})
-    row_even_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#f8f9fa", **border})
-    row_odd_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#ffffff", **border})
+    row_even = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", "font_size": 10, **border})
+    row_odd = workbook.add_format({"align": "right", "valign": "vcenter", "bg_color": "#ffffff", "font_size": 10, **border})
+    row_even_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#f8f9fa", "font_size": 10, **border})
+    row_odd_label = workbook.add_format({"align": "left", "valign": "vcenter", "bg_color": "#ffffff", "font_size": 10, **border})
     row_even_up = workbook.add_format(
-        {"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", "font_color": "#28a745", **border}
+        {"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", "font_color": "#28a745", "font_size": 10, **border}
     )
     row_even_down = workbook.add_format(
-        {"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", "font_color": "#dc3545", **border}
+        {"align": "right", "valign": "vcenter", "bg_color": "#f8f9fa", "font_color": "#dc3545", "font_size": 10, **border}
     )
     row_odd_up = workbook.add_format(
-        {"align": "right", "valign": "vcenter", "bg_color": "#ffffff", "font_color": "#28a745", **border}
+        {"align": "right", "valign": "vcenter", "bg_color": "#ffffff", "font_color": "#28a745", "font_size": 10, **border}
     )
     row_odd_down = workbook.add_format(
-        {"align": "right", "valign": "vcenter", "bg_color": "#ffffff", "font_color": "#dc3545", **border}
+        {"align": "right", "valign": "vcenter", "bg_color": "#ffffff", "font_color": "#dc3545", "font_size": 10, **border}
     )
 
-    worksheet.set_column(0, 0, 34)
+    worksheet.set_column(0, 0, 38)
     worksheet.set_column(1, max(1, n_cols - 1), 16)
 
     row_idx = 0
@@ -4212,6 +4212,9 @@ def _gerar_excel_peers_tabela(
                     col_idx += 1
             row_idx += 1
             zebra_idx += 1
+
+    # congelar cabeçalho e primeira coluna
+    worksheet.freeze_panes(2, 1)
 
     workbook.close()
     output.seek(0)
