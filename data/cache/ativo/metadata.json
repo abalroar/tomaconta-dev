@@ -1,0 +1,40 @@
+{
+  "timestamp_salvamento": "2026-02-12T00:34:31.548196",
+  "fonte": "github_releases",
+  "total_registros": 4145,
+  "colunas": [
+    "Instituição",
+    "Período",
+    "Ajuste a Valor Justo (e4)",
+    "Ajuste a Valor Justo (g4)",
+    "Aplicações Interfinanceiras de Liquidez (b)",
+    "Ativo Permanente (j)",
+    "Ativo Total (k) = (a) + (b) + (c) + (d) + (e) + (f) + (g) + (h) + (i) + (j)",
+    "Disponibilidades (a)",
+    "Hedge de Valor Justo (e3)",
+    "Hedge de Valor Justo (f3)",
+    "Hedge de Valor Justo (g3)",
+    "Instrumentos Derivativos (d)",
+    "Operações de Arrendamento Financeiro (f)",
+    "Operações de Crédito (e)",
+    "Outras Operações com Características de Concessão de Crédito (g)",
+    "Outros Ativos Realizáveis (i)",
+    "Perda Esperada (e2)",
+    "Perda Esperada (f2)",
+    "Perda Esperada (g2)",
+    "Perda Esperada (h2)",
+    "Títulos e Valores Mobiliários (c)",
+    "Valor Contábil Bruto (e1)",
+    "Valor Contábil Bruto (f1)",
+    "Valor Contábil Bruto (g1)",
+    "Valor Contábil Bruto (h1)",
+    "Valores a Receber de Transações de Pagamentos - Usuários Finais (Pós-pago) (h)"
+  ],
+  "formato": "parquet",
+  "periodos": [
+    "1/2025",
+    "2/2025",
+    "3/2025"
+  ],
+  "total_periodos": 3
+}
