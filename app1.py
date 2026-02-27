@@ -372,6 +372,46 @@ VARS_MOEDAS = [
 ]
 VARS_CONTAGEM = ['Número de Agências', 'Número de Postos de Atendimento']
 
+# ── Snapshot: layout de seções e variáveis ────────────────────────────────
+SNAPSHOT_LAYOUT = [
+    {
+        "section": "Balanço",
+        "rows": [
+            {"label": "Ativo Total", "key": "Ativo Total", "fmt": "moeda"},
+            {"label": "Carteira de Crédito", "key": "Carteira de Crédito", "fmt": "moeda"},
+            {"label": "Captações", "key": "Captações", "fmt": "moeda"},
+        ],
+    },
+    {
+        "section": "Funding",
+        "rows": [
+            {"label": "Crédito / Captações", "key": "Crédito/Captações (%)", "fmt": "pct"},
+            {"label": "Desp Captação / Captação", "key": "Desp Captação / Captação", "fmt": "pct", "source": "derived"},
+        ],
+    },
+    {
+        "section": "Qualidade de Carteira",
+        "rows": [
+            {"label": "Carteira Estágio 3 / Carteira", "key": "_stage3_ratio", "fmt": "pct", "source": "computed"},
+            {"label": "PDD / Estágio 3", "key": "PDD / Estágio 3", "fmt": "pct", "source": "extra"},
+        ],
+    },
+    {
+        "section": "Desempenho",
+        "rows": [
+            {"label": "Lucro Líquido Trimestral", "key": "Lucro Líquido Trimestral", "fmt": "moeda"},
+            {"label": "Lucro Líquido Acumulado YTD", "key": "Lucro Líquido Acumulado YTD", "fmt": "moeda"},
+        ],
+    },
+    {
+        "section": "Capital",
+        "rows": [
+            {"label": "CET1", "key": "Índice de Capital Principal (CET1)", "fmt": "pct", "source": "extra"},
+            {"label": "Índice de Basileia", "key": "Índice de Basileia Total", "fmt": "pct", "source": "extra"},
+        ],
+    },
+]
+
 PEERS_TABELA_LAYOUT = [
     {
         "section": "Balanço",
@@ -5332,6 +5372,7 @@ with col_header:
 
 # Lista de opções do menu principal (análise)
 MENU_PRINCIPAL = [
+    "Snapshot",
     "Rankings",
     "Peers (Tabela)",
     "Conselho e Diretoria",
@@ -7547,6 +7588,259 @@ elif menu == "Scatter Plot":
 
     else:
         st.caption("Use o botão de carregamento acima para abrir o Scatter imediatamente.")
+
+elif menu == "Snapshot":
+    if _garantir_dados_principais("Snapshot"):
+        if not st.session_state.get('_dados_capital_mesclados'):
+            carregar_dados_capital()
+
+        df_snap = get_analise_base_df()
+        if df_snap is not None and not df_snap.empty:
+            bancos_snap = ordenar_bancos_com_alias(
+                df_snap['Instituição'].dropna().unique().tolist(),
+                st.session_state.get('dict_aliases', {}),
+            )
+            periodos_snap = ordenar_periodos(df_snap['Período'].dropna().unique())
+
+            inst_snap_default = [i for i in bancos_snap if "itau" in str(i).lower() or "itaú" in str(i).lower()][:1]
+            if not inst_snap_default and bancos_snap:
+                inst_snap_default = [bancos_snap[0]]
+
+            col_sel1, col_sel2 = st.columns(2)
+            with col_sel1:
+                instituicao_snap = st.selectbox(
+                    "instituição",
+                    bancos_snap,
+                    index=bancos_snap.index(inst_snap_default[0]) if inst_snap_default else 0,
+                    key="snapshot_inst",
+                )
+            with col_sel2:
+                periodo_snap = st.selectbox(
+                    "período",
+                    list(reversed(periodos_snap)),
+                    index=0,
+                    key="snapshot_periodo",
+                    format_func=periodo_para_exibicao,
+                )
+
+            # ── determinar período anterior (trimestre anterior) ──
+            def _periodo_trimestre_anterior(periodo: str) -> Optional[str]:
+                parsed = _parse_periodo(periodo)
+                if not parsed:
+                    return None
+                parte, ano, ano_len = parsed
+                tri = _parte_periodo_para_trimestre_idx(parte)
+                if tri is None:
+                    return None
+                parte_txt = str(parte).strip()
+                usa_mes = len(parte_txt) == 2 or int(parte_txt) > 4
+                if tri == 1:
+                    novo_tri = 4
+                    novo_ano = ano - 1
+                else:
+                    novo_tri = tri - 1
+                    novo_ano = ano
+                if usa_mes:
+                    mes_map = {1: "03", 2: "06", 3: "09", 4: "12"}
+                    nova_parte = mes_map[novo_tri]
+                else:
+                    nova_parte = str(novo_tri)
+                if ano_len == 2:
+                    return f"{nova_parte}/{str(novo_ano)[-2:]}"
+                return f"{nova_parte}/{novo_ano}"
+
+            periodo_anterior = _periodo_trimestre_anterior(periodo_snap)
+
+            # ── carregar dados extras (capital, bloprudencial, derivadas) ──
+            periodos_snap_ext = [periodo_snap]
+            if periodo_anterior:
+                periodos_snap_ext.append(periodo_anterior)
+            periodos_snap_tuple = tuple(sorted(set(periodos_snap_ext)))
+            bancos_snap_tuple = (instituicao_snap,)
+
+            cache_capital_snap = _carregar_cache_relatorio_slice(
+                "capital", _cache_version_token("capital"), periodos_snap_tuple, bancos_snap_tuple,
+            )
+            cache_bloprudencial_snap = _carregar_cache_relatorio_slice(
+                "bloprudencial", _cache_version_token("bloprudencial"), periodos_snap_tuple, bancos_snap_tuple,
+            )
+            dict_aliases_snap = st.session_state.get('dict_aliases', {})
+            cache_capital_snap = _aplicar_aliases_df(cache_capital_snap, dict_aliases_snap)
+            cache_bloprudencial_snap = _aplicar_aliases_df(cache_bloprudencial_snap, dict_aliases_snap)
+
+            extra_snap = _preparar_metricas_extra_peers(
+                [instituicao_snap],
+                list(periodos_snap_tuple),
+                _aplicar_aliases_df(_carregar_cache_relatorio_slice("ativo", _cache_version_token("ativo"), periodos_snap_tuple, bancos_snap_tuple), dict_aliases_snap),
+                _aplicar_aliases_df(_carregar_cache_relatorio_slice("passivo", _cache_version_token("passivo"), periodos_snap_tuple, bancos_snap_tuple), dict_aliases_snap),
+                _aplicar_aliases_df(_carregar_cache_relatorio_slice("carteira_pf", _cache_version_token("carteira_pf"), periodos_snap_tuple, bancos_snap_tuple), dict_aliases_snap),
+                _aplicar_aliases_df(_carregar_cache_relatorio_slice("carteira_pj", _cache_version_token("carteira_pj"), periodos_snap_tuple, bancos_snap_tuple), dict_aliases_snap),
+                _aplicar_aliases_df(_carregar_cache_relatorio_slice("carteira_instrumentos", _cache_version_token("carteira_instrumentos"), periodos_snap_tuple, bancos_snap_tuple), dict_aliases_snap),
+                _aplicar_aliases_df(_carregar_cache_relatorio_slice("dre", _cache_version_token("dre"), periodos_snap_tuple, bancos_snap_tuple), dict_aliases_snap),
+                cache_capital_snap,
+                cache_bloprudencial_snap,
+            )
+
+            # Métricas derivadas (Desp Captação / Captação)
+            df_derived_snap = carregar_metricas_derivadas_slice(
+                periodos=list(periodos_snap_tuple),
+                instituicoes=[instituicao_snap],
+                metricas=DERIVED_METRICS,
+            )
+            derived_lookup_snap = {}
+            if not df_derived_snap.empty:
+                for _, r in df_derived_snap.iterrows():
+                    derived_lookup_snap[(r.get("Métrica"), r.get("Período", r.get("Periodo")))] = r.get("Valor")
+
+            # ── extrair valor para cada métrica ──
+            lookup_snap = _build_peers_lookup(df_snap)
+
+            def _snap_val(key, periodo, source=None):
+                if source == "extra":
+                    return (extra_snap.get(key) or {}).get((instituicao_snap, periodo))
+                if source == "derived":
+                    return derived_lookup_snap.get((key, periodo))
+                if source == "computed":
+                    if key == "_stage3_ratio":
+                        stage3 = (extra_snap.get("Carteira Estágio 3") or {}).get((instituicao_snap, periodo))
+                        cart = (extra_snap.get("Carteira de Crédito Classificada") or {}).get((instituicao_snap, periodo))
+                        if stage3 is not None and cart is not None and not pd.isna(stage3) and not pd.isna(cart) and cart != 0:
+                            return stage3 / cart
+                        return None
+                    return None
+                row = lookup_snap.get((instituicao_snap, periodo))
+                if row is None:
+                    return None
+                return row.get(key)
+
+            def _snap_fmt(valor, fmt):
+                if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+                    return "—"
+                if fmt == "moeda":
+                    v = float(valor) / 1e6
+                    return f"R$ {v:,.0f} MM".replace(",", ".")
+                if fmt == "pct":
+                    return f"{float(valor) * 100:.2f}%"
+                return f"{valor}"
+
+            def _snap_arrow(val_atual, val_ant, fmt, key):
+                """Retorna (css_class, arrow_char). A lógica de 'bom/ruim' depende da métrica."""
+                if val_atual is None or val_ant is None:
+                    return ("", "")
+                try:
+                    va, vb = float(val_atual), float(val_ant)
+                    if pd.isna(va) or pd.isna(vb):
+                        return ("", "")
+                except Exception:
+                    return ("", "")
+                delta = va - vb
+                if abs(delta) < 1e-12:
+                    return ("", "")
+                # Métricas onde "subir é ruim"
+                _INVERSE = {
+                    "Crédito/Captações (%)", "_stage3_ratio",
+                    "Desp Captação / Captação",
+                }
+                subiu = delta > 0
+                if key in _INVERSE:
+                    css = "snap-arrow-bad" if subiu else "snap-arrow-good"
+                else:
+                    css = "snap-arrow-good" if subiu else "snap-arrow-bad"
+                arrow = "\u25B2" if subiu else "\u25BC"
+                return (css, arrow)
+
+            # ── montar HTML dos cards ──
+            snap_css = """
+            <style>
+            .snap-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin-top: 6px;
+            }
+            @media (max-width: 600px) {
+                .snap-grid { grid-template-columns: 1fr; }
+            }
+            .snap-card {
+                background: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 14px 16px 10px 16px;
+                position: relative;
+            }
+            .snap-card-label {
+                font-size: 12px;
+                color: #888;
+                font-weight: 400;
+                margin-bottom: 2px;
+                letter-spacing: 0.02em;
+            }
+            .snap-card-value {
+                font-size: 22px;
+                font-weight: 500;
+                color: #111;
+                line-height: 1.2;
+            }
+            .snap-card-ref {
+                font-size: 11px;
+                color: #999;
+                margin-top: 4px;
+            }
+            .snap-arrow-good { color: #1a7a3a; font-size: 13px; margin-left: 5px; }
+            .snap-arrow-bad { color: #a12a2a; font-size: 13px; margin-left: 5px; }
+            .snap-section-title {
+                font-size: 13px;
+                font-weight: 600;
+                color: #fff;
+                background: #ff5a00;
+                padding: 6px 12px;
+                border-radius: 6px;
+                margin: 18px 0 6px 0;
+                letter-spacing: 0.03em;
+            }
+            .snap-section-title:first-child { margin-top: 4px; }
+            </style>
+            """
+
+            periodo_exib = periodo_para_exibicao(periodo_snap)
+            periodo_ant_exib = periodo_para_exibicao(periodo_anterior) if periodo_anterior else ""
+
+            cards_html = snap_css
+            cards_html += f'<div style="font-size:14px;color:#555;margin-bottom:10px;">{instituicao_snap} &mdash; {periodo_exib}</div>'
+
+            for section in SNAPSHOT_LAYOUT:
+                cards_html += f'<div class="snap-section-title">{section["section"]}</div>'
+                cards_html += '<div class="snap-grid">'
+
+                for row in section["rows"]:
+                    key = row["key"]
+                    fmt = row["fmt"]
+                    source = row.get("source")
+
+                    val_atual = _snap_val(key, periodo_snap, source)
+                    val_ant = _snap_val(key, periodo_anterior, source) if periodo_anterior else None
+
+                    val_fmt = _snap_fmt(val_atual, fmt)
+                    val_ant_fmt = _snap_fmt(val_ant, fmt)
+
+                    arrow_css, arrow_char = _snap_arrow(val_atual, val_ant, fmt, key)
+
+                    arrow_html = f'<span class="{arrow_css}">{arrow_char}</span>' if arrow_char else ""
+                    ref_html = f'<div class="snap-card-ref">({periodo_ant_exib}: {val_ant_fmt}){arrow_html}</div>' if periodo_anterior and val_ant_fmt != "—" else ""
+
+                    cards_html += f'''
+                    <div class="snap-card">
+                        <div class="snap-card-label">{row["label"]}</div>
+                        <div class="snap-card-value">{val_fmt}</div>
+                        {ref_html}
+                    </div>
+                    '''
+
+                cards_html += '</div>'
+
+            st.markdown(cards_html, unsafe_allow_html=True)
+        else:
+            st.warning("Dados não disponíveis. Carregue a base primeiro.")
 
 elif menu == "Rankings":
     if _garantir_dados_principais("Rankings"):
